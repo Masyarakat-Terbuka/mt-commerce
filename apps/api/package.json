@@ -1,0 +1,36 @@
+{
+  "name": "@mt-commerce/api",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@hono/swagger-ui": "^0.5.0",
+    "@hono/zod-openapi": "^0.18.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.0",
+    "hono": "^4.6.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "postgres": "^3.4.5",
+    "ulid": "^2.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/bun": "^1.2.0",
+    "drizzle-kit": "^0.28.0",
+    "eslint": "^9.39.4",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vitest": "^2.1.0"
+  }
+}
