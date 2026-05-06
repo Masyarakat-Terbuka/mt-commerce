@@ -382,6 +382,7 @@ Accepted:
 - ADR-0002: License
 - ADR-0005: Modular monolith over microservices
 - ADR-0007: Money as integers
+- ADR-0009: shadcn/ui preset for the admin
 
 Planned:
 
