@@ -151,7 +151,7 @@ const product = await db.query.products.findFirst({
 });
 ```
 
-The reasoning behind Drizzle will be captured in ADR-0003.
+The reasoning behind Drizzle is recorded in [ADR-0003](./docs/adr/0003-drizzle-over-prisma.md).
 
 ### Money
 
@@ -378,17 +378,14 @@ Architecture Decision Records live in [`docs/adr`](./docs/adr). They capture the
 
 Accepted:
 
-- ADR-0001: Headless architecture
-- ADR-0002: License
-- ADR-0005: Modular monolith over microservices
-- ADR-0007: Money as integers
-- ADR-0009: shadcn/ui preset for the admin
-
-Planned:
-
-- ADR-0003: Drizzle over Prisma
-- ADR-0004: REST over GraphQL
-- ADR-0006: Astro for the storefront
-- ADR-0008: Plugins as npm packages
+- [ADR-0001](./docs/adr/0001-headless-architecture.md): Headless architecture
+- [ADR-0002](./docs/adr/0002-license.md): License
+- [ADR-0003](./docs/adr/0003-drizzle-over-prisma.md): Drizzle over Prisma
+- [ADR-0004](./docs/adr/0004-rest-over-graphql.md): REST over GraphQL
+- [ADR-0005](./docs/adr/0005-modular-monolith.md): Modular monolith over microservices
+- [ADR-0006](./docs/adr/0006-astro-storefront.md): Astro for the storefront
+- [ADR-0007](./docs/adr/0007-money-as-integers.md): Money as integers
+- [ADR-0008](./docs/adr/0008-plugins-as-npm-packages.md): Plugins as npm packages
+- [ADR-0009](./docs/adr/0009-shadcn-preset.md): shadcn/ui preset for the admin
 
 Future contributors can read the ADRs to understand how the system arrived at its current shape.
