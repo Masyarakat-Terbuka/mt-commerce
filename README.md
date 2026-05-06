@@ -22,7 +22,7 @@ There is no paid tier of the software. The code is the product.
 
 ## What it does
 
-- **Products, variants, and inventory** with the structures real shops actually use
+- **Products, variants, and inventory** with realistic catalog structures
 - **A storefront** that is fast on mobile and on slow connections
 - **A checkout** with QRIS, virtual accounts, e-wallets, bank transfer, and cash on delivery
 - **Shipping integration** with the couriers Indonesians use every day

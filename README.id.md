@@ -24,7 +24,7 @@ Tidak ada versi berbayar dari software ini. Kodenya adalah produknya.
 
 ## Apa yang dilakukannya
 
-- **Produk, varian, dan inventaris** dengan struktur yang sesuai kebutuhan toko sungguhan
+- **Produk, varian, dan inventaris** dengan struktur katalog yang realistis
 - **Storefront** yang cepat di perangkat mobile dan koneksi yang lambat
 - **Checkout** dengan QRIS, virtual account, e-wallet, transfer bank, dan COD
 - **Integrasi pengiriman** dengan kurir yang digunakan orang Indonesia setiap hari

@@ -14,15 +14,9 @@ An open-source commerce platform, built for Indonesia, free for anyone to run, f
 
 ## Why this exists
 
-Running an online store in Indonesia is harder than it should be.
+Running an online store in Indonesia today usually means a compromise. Established platforms are priced in foreign currency and treat Indonesian payments, shipping, and language as add-ons. Affordable options are often older, slow on mobile, or difficult to extend. Marketplaces handle the volume but keep the customer relationship.
 
-The tools that work well are expensive, priced in foreign currency, and treat Indonesian payments, shipping, and language as afterthoughts. The tools that are affordable are often outdated, slow on mobile, or difficult to extend. The marketplaces are powerful but take the customer relationship with them.
-
-For a small merchant in Bandung, a developer in Surabaya, or a brand in Jakarta, the choice today is usually a compromise.
-
-We believe Indonesian merchants deserve commerce infrastructure that is modern, reliable, and theirs to keep. Not rented. Not locked. Not translated as an afterthought.
-
-So we are building it, in the open, and giving it away.
+mt-commerce is an attempt at a different option: commerce software built around how Indonesian merchants actually sell — local payments, shipping, addresses, language, and tax in the core — under a permissive open-source license. It is built in the open and free to use.
 
 ---
 
@@ -69,8 +63,8 @@ The core is open-source under a permissive license, and it remains so. Anyone ca
 **Indonesian by default.**
 Bahasa Indonesia, Rupiah, local payments, local couriers, local address structures, and local tax rules work without configuration. Operators outside Indonesia can adapt the platform; merchants inside Indonesia should not need to.
 
-**Boring where it matters, modern where it counts.**
-Commerce involves money, inventory, and orders. We choose proven, well-understood foundations for these. We invest in modern tooling, type safety, and developer experience for everything around them.
+**Conservative where money is involved.**
+Commerce involves money, inventory, and orders. We choose proven, well-understood foundations for these. Modern tooling, type safety, and developer experience apply to everything around them.
 
 **Modular without being complicated.**
 The platform is shaped into clear modules with clear boundaries. A developer should be able to read a single module and understand it without holding the whole system in their head.
@@ -169,8 +163,6 @@ We will know this project is succeeding when:
 - People who have never met the maintainers contribute meaningful improvements
 - The documentation in Bahasa Indonesia is as complete as the documentation in English
 - A merchant can leave the platform with their data intact, easily, at any time
-
-We are not measuring success by lock-in, by reach into users' data, or by anything that conflicts with the principles above.
 
 ---
 
