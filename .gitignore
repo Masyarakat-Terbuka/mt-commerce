@@ -44,4 +44,3 @@ Thumbs.db
 .docker/
 postgres-data/
 redis-data/
-.gstack/
