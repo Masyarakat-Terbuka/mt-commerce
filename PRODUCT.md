@@ -176,7 +176,7 @@ We are not measuring success by lock-in, by reach into users' data, or by anythi
 
 ## A note on language
 
-This document is written in English so it is approachable to international contributors. A Bahasa Indonesia version lives alongside it and is treated as equally important. If the two ever drift, that is a bug.
+This document is written in English so it is approachable to international contributors. A Bahasa Indonesia version is planned and will be treated as equally important. Once both exist, drift between them is a bug.
 
 ---
 

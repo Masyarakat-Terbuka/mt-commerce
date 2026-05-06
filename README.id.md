@@ -78,6 +78,8 @@ Alasan di balik setiap pilihan dijelaskan di [`docs/adr`](./docs/adr).
 
 ## Mulai cepat
 
+> Langkah-langkah di bawah ini menggambarkan setup v0.1. Sampai v0.1 dirilis, repositori ini berisi dokumentasi saja — lihat [checklist v0.1](./docs/v0.1-checklist.md) untuk progresnya.
+
 Anda perlu [Docker](https://www.docker.com/) dan [Bun](https://bun.sh/).
 
 ```bash
@@ -92,7 +94,7 @@ docker compose up -d
 # Storefront di http://localhost:3000
 ```
 
-Setup default akan menjalankan API, database, cache, admin, dan storefront secara bersamaan. Panduan deployment produksi untuk hosting Indonesia dan internasional umum tersedia di [`docs/deployment`](./docs/deployment).
+Setup default akan menjalankan API, database, cache, admin, dan storefront secara bersamaan. Panduan deployment produksi untuk hosting Indonesia dan internasional akan tersedia di `docs/deployment` setelah ditulis.
 
 ---
 
@@ -100,7 +102,7 @@ Setup default akan menjalankan API, database, cache, admin, dan storefront secar
 
 - [Produk](./PRODUCT.md) — apa yang sedang dibangun dan mengapa
 - [Arsitektur](./ARCHITECTURE.md) — bagaimana sistem ini dirancang
-- [Roadmap](./ROADMAP.md) — apa yang akan datang dan dalam urutan apa
+- [Checklist v0.1](./docs/v0.1-checklist.md) — apa yang ada di rilis pertama
 - [Berkontribusi](./CONTRIBUTING.md) — bagaimana cara terlibat
 - [Keamanan](./SECURITY.md) — cara melaporkan kerentanan secara bertanggung jawab
 

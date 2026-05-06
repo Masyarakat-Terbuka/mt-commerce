@@ -57,8 +57,6 @@ docker compose up -d
 bun dev
 ```
 
-The full local development guide, including troubleshooting, is in [`docs/development/getting-started.md`](./docs/development/getting-started.md).
-
 ---
 
 ## Finding something to work on

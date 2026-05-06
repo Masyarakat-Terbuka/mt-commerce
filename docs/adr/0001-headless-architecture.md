@@ -117,5 +117,5 @@ The following commitments follow directly from this decision:
 ## Related
 
 - [`ARCHITECTURE.md`](../../ARCHITECTURE.md) — the shape of the system as built on this decision
-- ADR-0005 — modular monolith over microservices *(planned)*
+- [ADR-0005](./0005-modular-monolith.md) — modular monolith over microservices
 - ADR-0006 — Astro for the storefront *(planned)*

@@ -75,6 +75,8 @@ The choices behind each are explained in [`docs/adr`](./docs/adr).
 
 ## Quick start
 
+> The steps below describe the v0.1 setup. Until v0.1 lands, this repository is documentation only — see the [v0.1 checklist](./docs/v0.1-checklist.md) for progress.
+
 You will need [Docker](https://www.docker.com/) and [Bun](https://bun.sh/).
 
 ```bash
@@ -89,7 +91,7 @@ docker compose up -d
 # Storefront at http://localhost:3000
 ```
 
-The default setup runs the API, database, cache, admin, and storefront together. Production deployment guides for common Indonesian and international hosts live in [`docs/deployment`](./docs/deployment).
+The default setup runs the API, database, cache, admin, and storefront together. Production deployment guides for common Indonesian and international hosts will live under `docs/deployment` once written.
 
 ---
 
@@ -97,7 +99,7 @@ The default setup runs the API, database, cache, admin, and storefront together.
 
 - [Product](./PRODUCT.md) — what we are building and why
 - [Architecture](./ARCHITECTURE.md) — how the system is shaped
-- [Roadmap](./ROADMAP.md) — what is coming and in what order
+- [v0.1 checklist](./docs/v0.1-checklist.md) — what is in the first release
 - [Contributing](./CONTRIBUTING.md) — how to get involved
 - [Security](./SECURITY.md) — how to report vulnerabilities responsibly
 

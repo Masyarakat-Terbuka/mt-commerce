@@ -151,7 +151,7 @@ const product = await db.query.products.findFirst({
 });
 ```
 
-The reasoning behind Drizzle is recorded in ADR-0003.
+The reasoning behind Drizzle will be captured in ADR-0003.
 
 ### Money
 
@@ -376,15 +376,18 @@ Some decisions are still ahead of us. They will be resolved as the project encou
 
 Architecture Decision Records live in [`docs/adr`](./docs/adr). They capture the context, the options considered, the decision, and the consequences for each significant choice.
 
-Planned ADRs:
+Accepted:
 
 - ADR-0001: Headless architecture
 - ADR-0002: License
+- ADR-0005: Modular monolith over microservices
+- ADR-0007: Money as integers
+
+Planned:
+
 - ADR-0003: Drizzle over Prisma
 - ADR-0004: REST over GraphQL
-- ADR-0005: Modular monolith over microservices
 - ADR-0006: Astro for the storefront
-- ADR-0007: Money as integers
 - ADR-0008: Plugins as npm packages
 
 Future contributors can read the ADRs to understand how the system arrived at its current shape.
