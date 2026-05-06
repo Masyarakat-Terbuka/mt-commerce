@@ -11,6 +11,10 @@
  *
  * Returns a configured Hono instance; the entry point decides how to serve it.
  * Tests use `app.request(...)` against this same instance with no server.
+ *
+ * Side effect: installs a global `BigInt.prototype.toJSON` on first call so
+ * Hono's `c.json()` can serialize money (`bigint`) values per ADR-0007. The
+ * helper is idempotent.
  */
 import { Hono } from "hono";
 import { requestId } from "./middleware/request-id.js";
@@ -20,9 +24,12 @@ import { rateLimit } from "./middleware/rate-limit.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { buildRoutes } from "./routes/index.js";
 import { setupOpenApi } from "./lib/openapi.js";
+import { installBigIntJsonSerializer } from "./lib/json.js";
 import type { AppBindings } from "./lib/types.js";
 
 export function createApp(): Hono<AppBindings> {
+  installBigIntJsonSerializer();
+
   const app = new Hono<AppBindings>();
 
   app.use("*", requestId());

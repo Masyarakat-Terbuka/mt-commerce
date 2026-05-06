@@ -6,16 +6,21 @@
  * call. Useful in deployment validation and as a copy-paste reference for
  * future routes.
  *
- * The body is optional; if a `note` is provided, it is validated but not
- * stored. The minimal table is intentional — adding a column for `note` would
- * be a real schema change and is out of scope here.
+ * Body handling distinguishes three cases so clients get an honest response:
+ *   - Empty body or `Content-Length: 0` → tolerate (no payload).
+ *   - Valid JSON with no fields → tolerate.
+ *   - Malformed JSON → 400 with `code: "invalid_json"` so the client knows the
+ *     parse, not the schema, was the problem.
+ *
+ * The minimal table is intentional — adding a column for `note` would be a
+ * real schema change and is out of scope here.
  */
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { healthPings } from "../../db/schema/index.js";
 import { id } from "../../lib/ulid.js";
-import { ValidationError } from "../../lib/errors.js";
+import { AppError, ValidationError, issuesToDetails } from "../../lib/errors.js";
 import type { AppBindings } from "../../lib/types.js";
 
 const pingBodySchema = z
@@ -24,17 +29,48 @@ const pingBodySchema = z
   })
   .optional();
 
+/**
+ * Read and parse the request body. Returns:
+ *   - `undefined` when the body is empty / Content-Length is 0 / there is no
+ *     content-type indicating JSON (treat as no payload).
+ *   - the parsed JSON value when parsing succeeds.
+ *
+ * Throws `ValidationError("invalid_json")` when a non-empty body fails to
+ * parse as JSON, so the caller can distinguish "no payload" from "bad JSON".
+ */
+async function readOptionalJsonBody(
+  req: Request,
+): Promise<unknown | undefined> {
+  const contentLength = req.headers.get("content-length");
+  if (contentLength === "0") return undefined;
+
+  const text = await req.text();
+  if (text.length === 0) return undefined;
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    // Malformed JSON gets its own code so the client can distinguish a parse
+    // failure from a schema validation failure (which carries `issues`).
+    throw new AppError({
+      code: "invalid_json",
+      message: "Request body is not valid JSON.",
+      status: 400,
+    });
+  }
+}
+
 export function buildPingRoutes(): Hono<AppBindings> {
   const router = new Hono<AppBindings>();
 
   router.post("/ping", async (c) => {
-    // Body is optional; tolerate missing or empty payloads.
-    const raw = await c.req.json().catch(() => undefined);
+    const raw = await readOptionalJsonBody(c.req.raw);
     const parsed = pingBodySchema.safeParse(raw);
     if (!parsed.success) {
-      throw new ValidationError("Invalid ping body.", {
-        issues: parsed.error.issues,
-      });
+      throw new ValidationError(
+        "Invalid ping body.",
+        issuesToDetails(parsed.error.issues),
+      );
     }
 
     const pingId = id("ping");

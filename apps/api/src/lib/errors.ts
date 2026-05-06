@@ -18,7 +18,38 @@
  * unexpected errors are not leaked to the client.
  */
 
+import type { ZodIssue } from "zod";
+
 export type ErrorDetails = Record<string, unknown>;
+
+/**
+ * Normalized projection of a single validation issue. Both `ZodError` paths
+ * and routes that throw `ValidationError` with their own `details` shape go
+ * through this projection so clients see a single, stable schema.
+ */
+export interface NormalizedIssue {
+  path: string[];
+  code: string;
+  message: string;
+}
+
+/**
+ * Project a list of `ZodIssue` values to the wire-stable `NormalizedIssue`
+ * shape. The default `ZodIssue` includes union/literal/enum metadata and
+ * uses `(string | number)[]` for path; we project to plain `string[]` so
+ * the response shape is portable across consumers (including non-TS clients).
+ */
+export function issuesToDetails(issues: readonly ZodIssue[]): {
+  issues: NormalizedIssue[];
+} {
+  return {
+    issues: issues.map((issue) => ({
+      path: issue.path.map((segment) => String(segment)),
+      code: issue.code,
+      message: issue.message,
+    })),
+  };
+}
 
 export class AppError extends Error {
   public readonly code: string;

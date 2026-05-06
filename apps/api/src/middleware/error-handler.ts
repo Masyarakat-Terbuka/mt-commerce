@@ -10,16 +10,23 @@
  * Behaviour:
  *   - `AppError` and subclasses pass through to the client with their own
  *     code, message, and status.
+ *   - `ZodError` is normalized via `issuesToDetails()` so the wire shape is
+ *     identical to what `ValidationError` callers produce.
  *   - `HTTPException` from Hono is mapped to a generic AppError-shaped body
  *     so clients always see the same envelope.
  *   - Anything else is logged at `error` level and returned as a 500 with
  *     `code: "internal_error"`. Internal details are not leaked.
+ *
+ * Logging always includes `requestId` (from the context), even when the
+ * context-bound logger is missing and we fall back to the root logger. The
+ * fallback path matters because errors can be thrown before
+ * `requestLogger` runs.
  */
 import type { Context, ErrorHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { ZodError } from "zod";
-import { AppError, type ErrorDetails } from "../lib/errors.js";
+import { AppError, issuesToDetails, type ErrorDetails } from "../lib/errors.js";
 import { logger as rootLogger } from "../lib/logger.js";
 import type { AppBindings } from "../lib/types.js";
 
@@ -40,11 +47,14 @@ function buildBody(
 }
 
 export const errorHandler: ErrorHandler<AppBindings> = (err, c) => {
-  const log = (c as Context<AppBindings>).get("logger") ?? rootLogger;
+  const ctx = c as Context<AppBindings>;
+  const requestId = ctx.get("requestId");
+  const log = ctx.get("logger") ?? rootLogger;
 
   if (err instanceof AppError) {
     log.warn(
       {
+        requestId,
         code: err.code,
         status: err.status,
         details: err.details,
@@ -58,14 +68,11 @@ export const errorHandler: ErrorHandler<AppBindings> = (err, c) => {
   }
 
   if (err instanceof ZodError) {
-    const details = {
-      issues: err.issues.map((issue) => ({
-        path: issue.path,
-        code: issue.code,
-        message: issue.message,
-      })),
-    };
-    log.warn({ code: "validation_error", details }, "validation failed");
+    const details = issuesToDetails(err.issues);
+    log.warn(
+      { requestId, code: "validation_error", details },
+      "validation failed",
+    );
     return c.json(
       buildBody("validation_error", "Request validation failed.", details),
       400,
@@ -73,7 +80,7 @@ export const errorHandler: ErrorHandler<AppBindings> = (err, c) => {
   }
 
   if (err instanceof HTTPException) {
-    log.warn({ status: err.status }, err.message);
+    log.warn({ requestId, status: err.status }, err.message);
     return c.json(
       buildBody("http_error", err.message || "Request failed."),
       err.status as ContentfulStatusCode,
@@ -82,7 +89,7 @@ export const errorHandler: ErrorHandler<AppBindings> = (err, c) => {
 
   // Anything that gets here is a bug. Log the full error server-side, but do
   // not leak the message or stack to the client.
-  log.error({ err }, "unhandled error");
+  log.error({ requestId, err }, "unhandled error");
   return c.json(
     buildBody("internal_error", "An unexpected error occurred."),
     500,
