@@ -67,7 +67,7 @@ Apache 2.0 was the strongest alternative. It is permissive like MIT, but adds:
 It was not chosen because:
 
 - The patent risk for a TypeScript commerce platform is low. The major patent risks in commerce software involve payments, cryptography, and authentication — areas where mt-commerce is integrating with established providers (Midtrans, Better Auth) rather than inventing novel patentable techniques.
-- MIT is more familiar in the Node.js and TypeScript ecosystems, reducing friction for new contributors.
+- MIT is more familiar in the JavaScript and TypeScript ecosystems, reducing friction for new contributors.
 - The simplicity of MIT makes it easier for non-technical readers (merchants, agency owners, executives evaluating the project) to understand what they are getting.
 - Similar projects (Medusa, Saleor, Vendure, Strapi) all chose MIT, and the lack of a patent grant has not caused problems for them.
 

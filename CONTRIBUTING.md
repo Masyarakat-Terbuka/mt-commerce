@@ -39,10 +39,9 @@ If you write a feature, a translation contribution that adds the same content in
 
 ## Setting up
 
-mt-commerce is a TypeScript monorepo managed with [pnpm](https://pnpm.io/). You will need:
+mt-commerce is a TypeScript monorepo managed with [Bun](https://bun.sh/). You will need:
 
-- [Node.js](https://nodejs.org/) (version specified in `.nvmrc`)
-- [pnpm](https://pnpm.io/installation)
+- [Bun](https://bun.sh/) (version specified in `.bun-version`)
 - [Docker](https://www.docker.com/) and Docker Compose
 
 To get the project running locally:
@@ -51,11 +50,11 @@ To get the project running locally:
 git clone https://github.com/masyarakat-terbuka/mt-commerce.git
 cd mt-commerce
 
-pnpm install
+bun install
 cp .env.example .env
 
 docker compose up -d
-pnpm dev
+bun dev
 ```
 
 The full local development guide, including troubleshooting, is in [`docs/development/getting-started.md`](./docs/development/getting-started.md).
@@ -162,9 +161,9 @@ User-facing documentation should be updated in both Bahasa Indonesia and English
 
 When your change is ready:
 
-1. Make sure the tests pass locally: `pnpm test`
-2. Make sure linting passes: `pnpm lint`
-3. Make sure types check: `pnpm typecheck`
+1. Make sure the tests pass locally: `bun run test`
+2. Make sure linting passes: `bun run lint`
+3. Make sure types check: `bun run typecheck`
 4. Push your branch and open a pull request against `main`
 5. Fill in the pull request template
 6. Link the issue your change addresses with `Closes #123` in the description

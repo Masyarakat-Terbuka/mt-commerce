@@ -81,7 +81,7 @@ The following are out of scope:
 
 - Vulnerabilities in third-party services (Midtrans, Biteship, the WhatsApp Business API, etc.) — please report those to the respective vendors
 - Vulnerabilities that require a compromised operator account or stolen API key
-- Issues that depend on outdated browsers, operating systems, or Node.js versions outside the supported range
+- Issues that depend on outdated browsers, operating systems, or Bun versions outside the supported range
 - Theoretical issues without a demonstrable impact
 - Reports generated solely by automated scanners without manual analysis
 - Social engineering of contributors or operators

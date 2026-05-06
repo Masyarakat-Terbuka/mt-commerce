@@ -23,7 +23,7 @@ labels: ["type: bug", "status: needs-triage"]
 
 - mt-commerce version or commit:
 - Operating system:
-- Node.js version:
+- Bun version:
 - Database (PostgreSQL version):
 - Browser (if relevant):
 

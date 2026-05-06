@@ -35,7 +35,7 @@ Internally, the API is a modular monolith. One deployable, organized into clearl
 
 ## Repository structure
 
-mt-commerce is a single repository with workspaces, managed with pnpm.
+mt-commerce is a single repository with workspaces, managed with Bun.
 
 ```
 mt-commerce/
@@ -63,7 +63,7 @@ Keeping the API, the SDK, and the apps in one repository lets type changes flow 
 
 ## The API
 
-The API is a Hono application written in TypeScript and run on Node.js. It serves all HTTP traffic for both the admin and the storefront, separated by route prefixes.
+The API is a Hono application written in TypeScript and run on Bun. It serves all HTTP traffic for both the admin and the storefront, separated by route prefixes.
 
 ### Conventions
 

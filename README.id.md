@@ -65,7 +65,7 @@ Lihat [`ARCHITECTURE.md`](./ARCHITECTURE.md) untuk gambaran lengkapnya.
 
 ## Tech stack
 
-- **API:** [Hono](https://hono.dev/) di Node.js, TypeScript dari ujung ke ujung
+- **API:** [Hono](https://hono.dev/) di [Bun](https://bun.sh/), TypeScript dari ujung ke ujung
 - **Admin:** [Vite](https://vitejs.dev/) + [React](https://react.dev/)
 - **Storefront:** [Astro](https://astro.build/) dengan React islands
 - **Database:** [PostgreSQL](https://www.postgresql.org/)
@@ -78,7 +78,7 @@ Alasan di balik setiap pilihan dijelaskan di [`docs/adr`](./docs/adr).
 
 ## Mulai cepat
 
-Anda perlu [Docker](https://www.docker.com/) dan [Node.js](https://nodejs.org/) (LTS).
+Anda perlu [Docker](https://www.docker.com/) dan [Bun](https://bun.sh/).
 
 ```bash
 git clone https://github.com/masyarakat-terbuka/mt-commerce.git
