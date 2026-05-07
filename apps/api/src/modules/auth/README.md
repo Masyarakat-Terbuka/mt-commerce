@@ -40,16 +40,36 @@ framework concern.
 `owner`. Subsequent calls accept any role. This rule lives in the service
 (not the route) so seed scripts cannot bypass it.
 
-### Path forward for seeding the first owner
+### First-owner provisioning
 
-There is no automatic provisioning yet. Two paths planned:
+The auth identity must exist before it can be promoted, because
+`staff_profiles.auth_user_id` is a FK into `auth_users`. The flow is two
+steps:
 
-- A `bun run apps/api/scripts/seed-owner.ts --email --password --name` CLI
-  that calls Better Auth's sign-up directly and then `assignRole`, all in
-  one transaction. (Not implemented in this round.)
-- Adding a one-shot `?bootstrap=true` flag to the Better Auth sign-up route
-  guarded by a setup token from the env. Less recommended; tracked as a
-  follow-up.
+1. Sign the user up through Better Auth (storefront UI, admin sign-up
+   route, or `curl POST /api/auth/sign-up/email`). This populates
+   `auth_users` and `auth_accounts` (Argon2id hash on the latter).
+2. Run the CLI:
+
+   ```bash
+   bun --filter '@mt-commerce/api' provision-owner <email>
+   ```
+
+The CLI is at `apps/api/src/scripts/provision-owner.ts`. It looks the user
+up by email (case-insensitive), then calls `AuthService.assignRole` —
+which is what enforces the first-staff-must-be-owner invariant inside a
+transaction. Behavior:
+
+- No auth user → prints a clear error, exits 1.
+- Already owner → no-op, exits 0 (idempotent).
+- Existing non-owner role → prompts `[y/N]` before promoting; pass
+  `--yes`/`-y` to skip the prompt for non-interactive use.
+- No staff profile → creates one with role `owner`, using the auth user's
+  name as the display name.
+
+A previously-considered alternative — a `?bootstrap=true` flag on the
+Better Auth sign-up route guarded by a setup token — was rejected as
+weaker (the bootstrap surface stays exposed even after first use).
 
 ## Public API
 
@@ -198,7 +218,6 @@ Generate a secret with `openssl rand -base64 32`.
 ## TODO follow-ups
 
 - Real email-sending adapter (notification module) — currently logs to console
-- `seed-owner` CLI script
 - Per-route rate limits on auth endpoints (the global limiter handles
   baseline; auth-specific buckets are warranted for sign-in/forget-password)
 - Audit log integration for role changes and API-key revocation

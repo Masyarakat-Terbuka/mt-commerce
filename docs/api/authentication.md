@@ -104,20 +104,31 @@ mt-commerce enforces in code: the FIRST staff user must have role `owner`.
 The check lives in `AuthService.assignRole` so a seed script cannot quietly
 create a non-owner first staff and lock the platform out.
 
-There is no automatic provisioning yet. Recommended path until a CLI lands:
+The auth user must exist before they can be promoted (the `staff_profiles`
+row points at `auth_users.id`), so provisioning is a two-step flow.
 
-1. Start the API.
-2. POST `/api/auth/sign-up/email` with the future owner's email, password,
-   and name. This creates the `auth_users` row.
-3. Connect to the database and run:
-   ```sql
-   INSERT INTO staff_profiles (auth_user_id, role, display_name)
-   VALUES ('<the new auth_users.id>', 'owner', 'Owner Name');
-   ```
-4. Sign in with the same credentials. Subsequent staff can be created
-   through `POST /admin/v1/auth/staff` while authenticated as the owner.
+First, sign the user up:
 
-A `bun run apps/api/scripts/seed-owner.ts` CLI is on the roadmap.
+```bash
+curl -X POST http://localhost:8000/api/auth/sign-up/email \
+  -H "content-type: application/json" \
+  -d '{"email":"owner@example.com","password":"...","name":"Owner"}'
+```
+
+Then promote them to owner using the CLI:
+
+```bash
+bun --filter '@mt-commerce/api' provision-owner owner@example.com
+```
+
+The CLI is idempotent — running it twice on the same user is a no-op. If
+the target user already has a non-owner staff role, the CLI prompts for
+confirmation before promoting; pass `--yes` (or `-y`) to skip the prompt
+in non-interactive contexts.
+
+After promotion, sign in with the same credentials. Subsequent staff can
+be created through `POST /admin/v1/auth/staff` while authenticated as the
+owner.
 
 ---
 
