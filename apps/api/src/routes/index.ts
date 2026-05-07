@@ -19,6 +19,7 @@ import { buildHealthRoutes } from "./health.js";
 import { buildV1Routes } from "./v1/index.js";
 import { adminRoutes as catalogAdminRoutes, storefrontRoutes as catalogStorefrontRoutes } from "../modules/catalog/index.js";
 import { adminRoutes as authAdminRoutes, storefrontRoutes as authStorefrontRoutes } from "../modules/auth/index.js";
+import { adminRoutes as customerAdminRoutes, storefrontRoutes as customerStorefrontRoutes } from "../modules/customer/index.js";
 import type { AppBindings } from "../lib/types.js";
 
 export function buildRoutes(): Hono<AppBindings> {
@@ -33,6 +34,8 @@ export function buildRoutes(): Hono<AppBindings> {
   router.route("/storefront/v1/auth", authStorefrontRoutes);
   router.route("/admin/v1", catalogAdminRoutes);
   router.route("/storefront/v1", catalogStorefrontRoutes);
+  router.route("/admin/v1", customerAdminRoutes);
+  router.route("/storefront/v1", customerStorefrontRoutes);
 
   return router;
 }
