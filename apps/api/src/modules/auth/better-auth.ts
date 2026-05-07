@@ -57,6 +57,7 @@ import {
   authUsers,
   authVerifications,
 } from "../../db/schema/index.js";
+import { getNotificationService } from "../notification/index.js";
 
 const log = logger.child({ module: "auth" });
 
@@ -160,34 +161,38 @@ export function buildAuth() {
     emailVerification: {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
-      // Dev-only console fallback. The production wiring lives in the
-      // notification module (a `NotificationChannel` adapter), which lands
-      // in a follow-up.
+      // Production: send through the notification module's email channel.
+      // Dev/test: notification's default channel is `console`, which logs
+      // the URL at info level — same effective behavior as the previous
+      // `[DEV ONLY]` warn line, now routed through the audit log so the
+      // dev-side path matches the prod-side path.
       //
-      // SECURITY: in production we MUST NOT log the verification URL. A
-      // verification link is single-use account-takeover material; anyone
-      // with read access to the application log would be able to claim a
-      // freshly-registered account. Until a real notification adapter is
-      // wired, refuse to send and surface a clear runtime error so the
-      // operator notices on the very first sign-up attempt rather than
-      // through a leaked log line.
+      // SECURITY: a verification link is single-use account-takeover
+      // material. The notification module's audit row stores the
+      // template payload (which includes the URL), so operators must
+      // restrict admin-route access on `/admin/v1/notifications` to
+      // staff who should be able to see that material. The role gate
+      // (`owner | admin | staff`) is the enforcement point.
+      //
+      // Failure handling: `sendOrThrow(...)` re-throws on a channel
+      // failure so Better Auth fails the originating sign-up call (HTTP
+      // 500) rather than silently succeeding. The audit row records the
+      // failure with `error_message` set so an operator can see why.
       sendVerificationEmail: async ({ user, url }) => {
-        if (env.nodeEnv === "production") {
-          throw new Error(
-            "Notification adapter not yet wired; configure SMTP or wire " +
-              "the notification module before signing up users in production.",
-          );
-        }
-        // Dev/test: keep the URL discoverable for local development, but
-        // tag it loudly and downgrade to warn so it stands out in the log
-        // stream and never accidentally trips a "looks fine" review.
-        log.warn(
-          {
-            userId: user.id,
-            email: user.email,
-            url,
+        await getNotificationService().sendOrThrow({
+          channel: "email",
+          recipient: user.email,
+          message: {
+            kind: "email_verification",
+            payload: {
+              url,
+              name: user.name ?? null,
+            },
           },
-          "[DEV ONLY] email verification link — do not deploy without a real notification adapter",
+        });
+        log.info(
+          { userId: user.id, email: user.email },
+          "verification email sent",
         );
       },
     },

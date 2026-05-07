@@ -31,6 +31,7 @@ import { buildRoutes } from "./routes/index.js";
 import { setupOpenApi } from "./lib/openapi.js";
 import { installBigIntJsonSerializer } from "./lib/json.js";
 import { getAuth } from "./modules/auth/index.js";
+import { getNotificationService } from "./modules/notification/index.js";
 import type { AppBindings } from "./lib/types.js";
 
 // The main app is an OpenAPIHono so that any nested OpenAPIHono router
@@ -78,6 +79,12 @@ export function createApp(): OpenAPIHono<AppBindings> {
 
   setupOpenApi(app);
   app.route("/", buildRoutes());
+
+  // Wire in-process event listeners. The notification module subscribes to
+  // events emitted by checkout/payment/fulfillment and produces emails.
+  // `subscribeToEvents()` is idempotent — calling it more than once (e.g.
+  // multiple test apps in one process) is a no-op past the first call.
+  getNotificationService().subscribeToEvents();
 
   app.onError(errorHandler);
 

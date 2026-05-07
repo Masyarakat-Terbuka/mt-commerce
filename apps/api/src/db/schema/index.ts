@@ -27,3 +27,7 @@ export * from "./idempotency_keys.js";
 export * from "./tax_rates.js";
 export * from "./shipping_methods.js";
 export * from "./fulfillments.js";
+export * from "./notifications.js";
+export * from "./orders.js";
+export * from "./order_items.js";
+export * from "./order_status_history.js";

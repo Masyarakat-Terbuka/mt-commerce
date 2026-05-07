@@ -121,6 +121,45 @@ const baseSchema = z.object({
         .max(1, { message: "TAX_PPN_RATE must be <= 1 (e.g. 0.11 = 11%)." }),
     )
     .default(0.11),
+  // ---- Notifications ------------------------------------------------------
+  /**
+   * SMTP host for the notification module's email channel. When unset (and
+   * NODE_ENV != production), the module falls back to the console channel
+   * which logs the email for local development. In production the SMTP
+   * channel REFUSES TO CONSTRUCT without these values, so the API fails
+   * fast at boot rather than silently dropping verification emails.
+   */
+  SMTP_HOST: z.string().min(1).optional(),
+  SMTP_PORT: z
+    .union([z.number(), z.string()])
+    .transform((value) =>
+      typeof value === "number" ? value : Number.parseInt(value, 10),
+    )
+    .pipe(
+      z
+        .number()
+        .int({ message: "SMTP_PORT must be an integer." })
+        .min(1, { message: "SMTP_PORT must be >= 1." })
+        .max(65535, { message: "SMTP_PORT must be <= 65535." }),
+    )
+    .default(587),
+  SMTP_USER: z.string().min(1).optional(),
+  SMTP_PASS: z.string().min(1).optional(),
+  /**
+   * `From:` header on outgoing email. Default placeholder is suitable for
+   * dev only; production deployments MUST set this to a deliverable address
+   * the SMTP relay accepts.
+   */
+  SMTP_FROM: z.string().min(1).default("noreply@example.com"),
+  /**
+   * Default channel selection for the notification service. `console` is
+   * the dev default — every send is logged at info level. `smtp` is the
+   * production default and exercises the real SMTP adapter.
+   *
+   * Operators can force-flip in non-prod (e.g. to validate SMTP locally)
+   * by setting this to `smtp` along with the SMTP_* variables above.
+   */
+  NOTIFICATION_DEFAULT_CHANNEL: z.enum(["console", "smtp"]).optional(),
 });
 
 const envSchema = baseSchema.extend({
@@ -189,6 +228,23 @@ export const env = {
    * module will replace this with proper per-item rate selection.
    */
   taxPpnRate: data.TAX_PPN_RATE,
+  /**
+   * SMTP config for the notification email channel. Optional in dev/test
+   * (the channel falls back to console when the host is missing); the
+   * SMTP adapter throws on construction in production when unset.
+   */
+  smtpHost: data.SMTP_HOST,
+  smtpPort: data.SMTP_PORT,
+  smtpUser: data.SMTP_USER,
+  smtpPass: data.SMTP_PASS,
+  smtpFrom: data.SMTP_FROM,
+  /**
+   * Default notification channel. When unset, derives from NODE_ENV:
+   * `console` in dev/test, `smtp` in production. The notification service
+   * consults this when `send({ channel })` does not pin the channel.
+   */
+  notificationDefaultChannel:
+    data.NOTIFICATION_DEFAULT_CHANNEL ?? (isProd ? "smtp" : "console"),
 } as const;
 
 export type Env = typeof env;
