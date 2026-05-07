@@ -21,6 +21,7 @@ import { adminRoutes as catalogAdminRoutes, storefrontRoutes as catalogStorefron
 import { adminRoutes as authAdminRoutes, storefrontRoutes as authStorefrontRoutes } from "../modules/auth/index.js";
 import { adminRoutes as customerAdminRoutes, storefrontRoutes as customerStorefrontRoutes } from "../modules/customer/index.js";
 import { adminRoutes as cartAdminRoutes, storefrontRoutes as cartStorefrontRoutes } from "../modules/cart/index.js";
+import { adminRoutes as checkoutAdminRoutes, storefrontRoutes as checkoutStorefrontRoutes } from "../modules/checkout/index.js";
 import type { AppBindings } from "../lib/types.js";
 
 export function buildRoutes(): Hono<AppBindings> {
@@ -39,6 +40,8 @@ export function buildRoutes(): Hono<AppBindings> {
   router.route("/storefront/v1", customerStorefrontRoutes);
   router.route("/admin/v1", cartAdminRoutes);
   router.route("/storefront/v1", cartStorefrontRoutes);
+  router.route("/admin/v1", checkoutAdminRoutes);
+  router.route("/storefront/v1", checkoutStorefrontRoutes);
 
   return router;
 }
