@@ -35,7 +35,12 @@
   /* Foreground / type */
   --color-fg: #1a1a1a;
   --color-muted: #6b6562;
-  --color-faint: #a8a29a;
+  /* `--color-faint` was #a8a29a — read 2.36:1 on cream, failing WCAG AA.
+     #787472 measured ≈4.36:1 (still under 4.5:1 for 12 px text, which footer
+     micro-copy uses), so we go to #6e6a68 (≈5.03:1). Still distinct from
+     `--color-muted` (#6b6562, ≈5.38:1) by ~0.35:1, enough to read as a
+     quieter tertiary tone without falling under AA. */
+  --color-faint: #6e6a68;
 
   /* Lines */
   --color-line: #ebe5db;

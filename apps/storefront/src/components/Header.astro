@@ -85,9 +85,14 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         doesn't dominate the cream header. `loading="eager"` because it's
         above the fold on every page.
       */}
+      {/*
+        Brand link: the visible wordmark IS the accessible name, so no
+        `aria-label` (Lighthouse fires `label-content-name-mismatch` when
+        an aria-label diverges from a visible text label). The logo is
+        decorative (`alt=""`) — the wordmark carries the name on its own.
+      */}
       <a
         href={homeHref}
-        aria-label={t("nav.home")}
         class="flex items-center gap-2 text-fg transition-colors duration-150 hover:text-accent"
       >
         <img

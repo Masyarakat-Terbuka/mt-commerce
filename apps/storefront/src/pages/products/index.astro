@@ -108,6 +108,12 @@ if (seoListing.items.length > 0) {
       <Filters active={activeFilters} />
     </div>
 
+    {/*
+      Visually-hidden section heading. Cards inside the grid use `h3`; this
+      `h2` keeps the heading order valid (h1 → h2 → h3) without adding
+      another visible label above the grid.
+    */}
+    <h2 class="sr-only">{t("products.list.title")}</h2>
     {/* Grid — 3 columns desktop, 2 columns mobile, massive gap. */}
     <ProductGrid
       client:load

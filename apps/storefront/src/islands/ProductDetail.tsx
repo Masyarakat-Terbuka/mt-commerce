@@ -214,9 +214,16 @@ export default function ProductDetail(props: ProductDetailProps) {
 
   return (
     <article>
-      {/* Hero image — FULL BLEED, no border, no breadcrumb above it. */}
+      {/*
+        Hero image — FULL BLEED, no border, no breadcrumb above it.
+        The wrapper reserves a 4:3 / 16:9 aspect ratio so the eventual
+        image cannot push later content down — the previous unsized
+        `<img>` was the source of the page's only layout shift (CLS 0.036
+        in Lighthouse). The image fills the wrapper and crops via
+        `object-cover`, matching the no-image placeholder shape.
+      */}
       <section className="bg-cream">
-        <div className="w-full overflow-hidden">
+        <div className="aspect-[4/3] w-full overflow-hidden md:aspect-[16/9] md:max-h-[80vh]">
           {product.imageUrl ? (
             <img
               src={product.imageUrl}
@@ -224,10 +231,12 @@ export default function ProductDetail(props: ProductDetailProps) {
               loading="eager"
               decoding="async"
               fetchPriority="high"
-              className="h-auto max-h-[80vh] w-full object-cover"
+              width={1600}
+              height={900}
+              className="h-full w-full object-cover"
             />
           ) : (
-            <div className="flex aspect-[4/3] w-full items-center justify-center md:aspect-[16/9] md:max-h-[80vh]">
+            <div className="flex h-full w-full items-center justify-center">
               <span className="t-body text-fg">{product.title}</span>
             </div>
           )}

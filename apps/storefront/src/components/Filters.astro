@@ -91,9 +91,13 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
       autocomplete="off"
       class="flex-1 bg-transparent t-body text-fg placeholder:text-faint outline-none"
     />
+    {/*
+      Search submit. `min-h-9 px-3` gives a ≥36 px tap target so Lighthouse's
+      mobile target-size audit passes; the arrow stays visually quiet.
+    */}
     <button
       type="submit"
-      class="t-body text-faint transition-colors duration-150 hover:text-fg"
+      class="inline-flex min-h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent"
       aria-label={t("products.filters.apply")}
     >
       &rarr;
@@ -218,10 +222,15 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
       No-JS fallback — the inline script below hides this once auto-submit
       listeners attach. With JS, every change in the form auto-submits.
     */}
+    {/*
+      No-JS fallback button. `min-h-9 px-2` gives the tap target the 36×?
+      footprint Lighthouse expects on mobile (it was failing the 24×24 floor
+      previously), without growing the visual weight of the link-style label.
+    */}
     <button
       type="submit"
       data-filters-apply
-      class="t-caption text-fg underline-offset-4 transition-colors duration-150 hover:text-accent hover:underline"
+      class="inline-flex min-h-9 items-center px-2 t-caption text-fg underline-offset-4 transition-colors duration-150 hover:text-accent hover:underline"
     >
       {t("products.filters.apply")}
     </button>
