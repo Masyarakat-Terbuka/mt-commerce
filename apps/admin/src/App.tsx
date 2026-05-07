@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { LocaleProvider } from "@/lib/i18n-provider";
 import { createAppRouter } from "@/router";
 
@@ -36,8 +37,10 @@ export function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <LocaleProvider>
-          <RouterProvider router={router} />
-          <Toaster position="bottom-right" richColors closeButton />
+          <TooltipProvider>
+            <RouterProvider router={router} />
+            <Toaster position="bottom-right" richColors closeButton />
+          </TooltipProvider>
         </LocaleProvider>
       </QueryClientProvider>
     </ThemeProvider>

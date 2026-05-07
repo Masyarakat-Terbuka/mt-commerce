@@ -44,3 +44,6 @@ Thumbs.db
 .docker/
 postgres-data/
 redis-data/
+
+# Claude Code agent worktrees (transient, per-machine)
+.claude/
