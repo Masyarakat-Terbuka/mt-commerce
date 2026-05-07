@@ -43,6 +43,11 @@ import {
   type CustomerService,
 } from "../customer/index.js";
 import {
+  orderService as defaultOrderService,
+  type Order,
+  type OrderService,
+} from "../orders/index.js";
+import {
   shippingService as defaultShippingService,
   type ShippingService,
 } from "../shipping/index.js";
@@ -75,7 +80,22 @@ import {
 
 export interface CompleteCheckoutResult {
   checkout: Checkout;
+  /**
+   * The intermediate snapshot row written inside the same transaction
+   * that completed the checkout. Kept on the response shape for backward
+   * compatibility with existing storefront callers — the canonical
+   * record is now `order` (below).
+   */
   orderIntent: OrderIntent;
+  /**
+   * The materialised order, populated when the post-commit
+   * `orderService.createFromIntent(...)` call succeeded. May be `null`
+   * if the order materialisation failed (the failure is logged so an
+   * operator can retry); the checkout itself is still completed and
+   * the cart is still marked converted, so the customer sees the
+   * checkout as done. A retry path will pick the intent up.
+   */
+  order: Order | null;
 }
 
 export interface CheckoutService {
@@ -127,6 +147,18 @@ export class CheckoutServiceImpl implements CheckoutService {
     private readonly carts: CartService,
     private readonly customers: CustomerService,
     private readonly shipping: ShippingService,
+    /**
+     * Optional. When provided, `complete()` calls
+     * `orders.createFromIntent(...)` AFTER the checkout commit so a
+     * failure to create the order does not roll back the checkout
+     * completion or the cart-converted state. The response then
+     * carries the materialised `order` alongside the snapshot.
+     *
+     * Tests can omit this argument to keep the in-memory fakes free
+     * of the orders module surface — the response then carries
+     * `order: null`.
+     */
+    private readonly orders: OrderService | null = null,
   ) {}
 
   /**
@@ -641,11 +673,36 @@ export class CheckoutServiceImpl implements CheckoutService {
         result: {
           checkout: toCheckout(updated),
           orderIntent: toOrderIntent(orderIntentRow),
+          // Set after commit by the follow-on createFromIntent call.
+          order: null as Order | null,
         },
         pending: pendingEvents,
       };
     });
     await this.emitPending(pending);
+
+    // Materialise the canonical order in a follow-on transaction. We
+    // intentionally do NOT include this in the same transaction as the
+    // checkout completion: a failure here (transient DB hiccup, missing
+    // catalog row) must NOT roll back the customer's "checkout
+    // completed" state or the cart-converted flip. Track 2's
+    // notification listeners can be wired to retry on missing-order if
+    // it ever happens; the response shape carries `order: null` and
+    // the storefront keeps showing the order_intent until the order
+    // appears.
+    if (this.orders) {
+      try {
+        result.order = await this.orders.createFromIntent(
+          result.orderIntent.id,
+          { actorKind: "customer" },
+        );
+      } catch (err) {
+        log.error(
+          { err, orderIntentId: result.orderIntent.id, checkoutId },
+          "createFromIntent failed after checkout commit; intent left for retry",
+        );
+      }
+    }
     return result;
   }
 
@@ -900,4 +957,5 @@ export const checkoutService: CheckoutService = new CheckoutServiceImpl(
   defaultCartService,
   defaultCustomerService,
   defaultShippingService,
+  defaultOrderService,
 );

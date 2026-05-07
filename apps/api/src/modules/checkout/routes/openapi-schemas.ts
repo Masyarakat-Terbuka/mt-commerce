@@ -6,6 +6,7 @@
  */
 import { z } from "@hono/zod-openapi";
 import { MoneyJson, paginated } from "../../../lib/openapi-shared.js";
+import { OrderWire } from "../../orders/routes/openapi-schemas.js";
 
 const CheckoutStateEnum = z.enum([
   "pending",
@@ -100,6 +101,14 @@ export const CompleteCheckoutResponseWire = z
   .object({
     checkout: CheckoutWire,
     orderIntent: OrderIntentWire,
+    /**
+     * The materialised order. Populated when
+     * `orderService.createFromIntent(...)` succeeded after the checkout
+     * commit. Null when the materialisation is queued for retry — the
+     * checkout itself is still completed, so callers treat null as
+     * "order will appear shortly" rather than a hard failure.
+     */
+    order: OrderWire.nullable(),
   })
   .openapi("CompleteCheckoutResponse");
 

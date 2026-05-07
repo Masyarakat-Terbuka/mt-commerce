@@ -43,6 +43,7 @@ import {
   startCheckoutSchema,
 } from "../types.js";
 import { toWireCheckout, toWireOrderIntent } from "./wire.js";
+import { toWireOrder } from "../../orders/routes/wire.js";
 import {
   CheckoutWire,
   CompleteCheckoutResponseWire,
@@ -231,6 +232,7 @@ export function buildCheckoutStorefrontRoutes(
         {
           checkout: toWireCheckout(result.checkout),
           orderIntent: toWireOrderIntent(result.orderIntent),
+          order: result.order ? toWireOrder(result.order) : null,
         },
         200,
       );

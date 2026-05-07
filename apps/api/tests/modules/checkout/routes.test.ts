@@ -210,7 +210,11 @@ function createFakeService(opts: FakeOpts = {}): {
         idempotencyKey: input.idempotencyKey,
       };
       checkouts.set(id, updated);
-      return { checkout: updated, orderIntent: makeOrderIntent({ checkoutId: id }) };
+      return {
+        checkout: updated,
+        orderIntent: makeOrderIntent({ checkoutId: id }),
+        order: null,
+      };
     },
     async cancel(id, input) {
       const existing = checkouts.get(id) ?? makeCheckout({ id });
