@@ -8,8 +8,6 @@ const t = createTranslator(locale);
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
 const productsHref = localePath(locale, "/products");
-// /checkout doesn't exist yet — link is active so the slot is in place once
-// the checkout UI lands. Visitors will see the storefront's 404 until then.
 const checkoutHref = localePath(locale, "/checkout");
 
 const title = `${t("cart.title")} — mt-commerce`;

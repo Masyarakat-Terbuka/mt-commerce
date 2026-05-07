@@ -141,9 +141,6 @@ function CartPageInner(props: CartPageProps) {
                 </dd>
               </div>
             </dl>
-            {/* TODO: /checkout route ships in a follow-up. The link is active
-                so the visual slot is in place — visitors will see the
-                storefront's 404 until checkout UI lands. */}
             <a
               href={checkoutHref}
               className="btn-primary mt-6 w-full"

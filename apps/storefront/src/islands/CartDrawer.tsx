@@ -254,9 +254,6 @@ function CartDrawerInner(props: CartDrawerProps) {
                 </dd>
               </div>
             </dl>
-            {/* TODO: /checkout route does not exist yet — link is active so
-                the slot is in place once the checkout UI lands. Visitors will
-                see the storefront's 404 until then. */}
             <a
               href={checkoutHref}
               className="btn-primary mt-5 w-full"

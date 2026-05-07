@@ -34,30 +34,49 @@ import { fromJSON as moneyFromJSON } from "@mt-commerce/core/money";
 import { ApiError, isApiErrorEnvelope } from "./errors.js";
 import type {
   AddCartItemInput,
+  AdminListOrdersQuery,
   AdminListProductsQuery,
   AuthMe,
   AuthSession,
+  CancelCheckoutInput,
+  CancelOrderAdminInput,
   Cart,
   CartItem,
   CartTotals,
   Category,
+  Checkout,
+  CompleteCheckoutInput,
+  CompleteCheckoutResult,
   City,
   CreateCartInput,
   CreateCategoryInput,
   CreateProductInput,
   CreateVariantInput,
+  CustomerAddress,
   District,
   ListKecamatanQuery,
   ListKelurahanQuery,
   ListKotaKabupatenQuery,
   ListProductsQuery,
+  ListShippingMethodsQuery,
   LocaleQuery,
   MoneyAmountInput,
+  Order,
+  OrderIntent,
+  OrderIntentLine,
+  OrderIntentTotals,
+  OrderItem,
+  OrderStatusEvent,
   Paginated,
   Product,
+  TransitionOrderInput,
   Province,
   RequestOptions,
+  SetCheckoutAddressesInput,
+  SetCheckoutShippingInput,
+  ShippingMethod,
   SignInInput,
+  StartCheckoutInput,
   Subdistrict,
   UpdateCartItemInput,
   UpdateCategoryInput,
@@ -70,12 +89,22 @@ import type {
   WireCartItem,
   WireCartTotals,
   WireCategory,
+  WireCheckout,
   WireCity,
+  WireCompleteCheckoutResult,
+  WireCustomerAddress,
   WireDistrict,
   WireListEnvelope,
+  WireOrder,
+  WireOrderItem,
+  WireOrderIntent,
+  WireOrderIntentLine,
+  WireOrderIntentTotals,
+  WireOrderStatusEvent,
   WirePaginated,
   WireProduct,
   WireProvince,
+  WireShippingMethod,
   WireSubdistrict,
   WireVariant,
 } from "./types.js";
@@ -219,6 +248,151 @@ function toCart(w: WireCart): Cart {
     expiresAt: new Date(w.expiresAt),
     createdAt: new Date(w.createdAt),
     updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toCustomerAddress(w: WireCustomerAddress): CustomerAddress {
+  return {
+    id: w.id,
+    customerId: w.customerId,
+    kind: w.kind,
+    isDefaultShipping: w.isDefaultShipping,
+    isDefaultBilling: w.isDefaultBilling,
+    recipientName: w.recipientName,
+    phone: w.phone,
+    addressLine1: w.addressLine1,
+    addressLine2: w.addressLine2,
+    provinsiId: w.provinsiId,
+    kotaKabupatenId: w.kotaKabupatenId,
+    kecamatanId: w.kecamatanId,
+    kelurahanId: w.kelurahanId,
+    postalCode: w.postalCode,
+    notes: w.notes,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+    deletedAt: w.deletedAt ? new Date(w.deletedAt) : null,
+  };
+}
+
+function toShippingMethod(w: WireShippingMethod): ShippingMethod {
+  return {
+    id: w.id,
+    code: w.code,
+    name: w.name,
+    providerKind: w.providerKind,
+    flatRate: w.flatRate ? moneyFromJSON(w.flatRate) : null,
+    isActive: w.isActive,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+    deletedAt: w.deletedAt ? new Date(w.deletedAt) : null,
+  };
+}
+
+function toCheckout(w: WireCheckout): Checkout {
+  return {
+    id: w.id,
+    cartId: w.cartId,
+    customerId: w.customerId,
+    state: w.state,
+    shippingAddressId: w.shippingAddressId,
+    billingAddressId: w.billingAddressId,
+    email: w.email,
+    shippingMethodCode: w.shippingMethodCode,
+    shippingAmount: w.shippingAmount ? moneyFromJSON(w.shippingAmount) : null,
+    paymentMethod: w.paymentMethod,
+    cancellationReason: w.cancellationReason,
+    idempotencyKey: w.idempotencyKey,
+    expiresAt: new Date(w.expiresAt),
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toOrderIntentLine(w: WireOrderIntentLine): OrderIntentLine {
+  return {
+    variantId: w.variantId,
+    quantity: w.quantity,
+    unitPrice: moneyFromJSON(w.unitPrice),
+  };
+}
+
+function toOrderIntentTotals(w: WireOrderIntentTotals): OrderIntentTotals {
+  return {
+    subtotal: moneyFromJSON(w.subtotal),
+    tax: moneyFromJSON(w.tax),
+    shipping: moneyFromJSON(w.shipping),
+    total: moneyFromJSON(w.total),
+  };
+}
+
+function toOrderItem(w: WireOrderItem): OrderItem {
+  return {
+    id: w.id,
+    orderId: w.orderId,
+    variantId: w.variantId,
+    sku: w.sku,
+    title: w.title,
+    quantity: w.quantity,
+    unitPrice: moneyFromJSON(w.unitPrice),
+    lineSubtotal: moneyFromJSON(w.lineSubtotal),
+    createdAt: new Date(w.createdAt),
+  };
+}
+
+function toOrder(w: WireOrder): Order {
+  return {
+    id: w.id,
+    orderNumber: w.orderNumber,
+    customerId: w.customerId,
+    email: w.email,
+    currency: w.currency,
+    status: w.status,
+    subtotal: moneyFromJSON(w.subtotal),
+    tax: moneyFromJSON(w.tax),
+    taxRateCode: w.taxRateCode,
+    taxRateBasisPoints: w.taxRateBasisPoints,
+    shipping: moneyFromJSON(w.shipping),
+    shippingMethodCode: w.shippingMethodCode,
+    total: moneyFromJSON(w.total),
+    shippingAddressSnapshot: w.shippingAddressSnapshot,
+    billingAddressSnapshot: w.billingAddressSnapshot,
+    paymentMethod: w.paymentMethod,
+    items: w.items.map(toOrderItem),
+    paidAt: w.paidAt ? new Date(w.paidAt) : null,
+    fulfilledAt: w.fulfilledAt ? new Date(w.fulfilledAt) : null,
+    cancelledAt: w.cancelledAt ? new Date(w.cancelledAt) : null,
+    refundedAt: w.refundedAt ? new Date(w.refundedAt) : null,
+    cancellationReason: w.cancellationReason,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toOrderStatusEvent(w: WireOrderStatusEvent): OrderStatusEvent {
+  return {
+    id: w.id,
+    orderId: w.orderId,
+    fromStatus: w.fromStatus,
+    toStatus: w.toStatus,
+    actorKind: w.actorKind,
+    actorId: w.actorId,
+    details: w.details,
+    createdAt: new Date(w.createdAt),
+  };
+}
+
+function toOrderIntent(w: WireOrderIntent): OrderIntent {
+  return {
+    id: w.id,
+    checkoutId: w.checkoutId,
+    cartSnapshot: w.cartSnapshot.map(toOrderIntentLine),
+    totalsSnapshot: toOrderIntentTotals(w.totalsSnapshot),
+    shippingAddressSnapshot: w.shippingAddressSnapshot,
+    billingAddressSnapshot: w.billingAddressSnapshot,
+    email: w.email,
+    shippingMethodCode: w.shippingMethodCode,
+    paymentMethod: w.paymentMethod,
+    createdAt: new Date(w.createdAt),
   };
 }
 
@@ -408,8 +582,14 @@ function resolveLocale(
 }
 
 interface RequestInternalOptions extends RequestOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  /**
+   * Per-request extra headers. Keys are forwarded verbatim and override any
+   * defaults set by `request` (`accept`, `content-type`). Used for the
+   * checkout idempotency key and the v0.1 stand-in customer header.
+   */
+  headers?: Record<string, string>;
 }
 
 async function request<T>(
@@ -436,6 +616,11 @@ async function request<T>(
   if (options?.body !== undefined) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(options.body);
+  }
+  if (options?.headers) {
+    for (const [key, value] of Object.entries(options.headers)) {
+      headers[key] = value;
+    }
   }
 
   let response: Response;
@@ -580,11 +765,74 @@ export interface StorefrontCartApi {
   clear(cartId: string, options?: RequestOptions): Promise<Cart>;
 }
 
+export interface StorefrontShippingApi {
+  /** GET /storefront/v1/shipping/methods?currency=IDR — active methods only. */
+  methods(
+    query?: ListShippingMethodsQuery,
+    options?: RequestOptions,
+  ): Promise<ShippingMethod[]>;
+}
+
+/**
+ * `RequestOptions` augmented with a stand-in customer-id header. Storefront
+ * customer-scoped reads (saved addresses, etc.) ride this header until the
+ * customer-auth integration replaces it with a session cookie. Surfacing
+ * the option on the SDK keeps callers from reaching past the abstraction
+ * with their own `fetch`.
+ */
+export interface CustomerScopedOptions extends RequestOptions {
+  customerId?: string;
+}
+
+export interface StorefrontCustomerApi {
+  /** GET /storefront/v1/customer/me/addresses — requires customerId stand-in. */
+  myAddresses(options?: CustomerScopedOptions): Promise<CustomerAddress[]>;
+}
+
+export interface StorefrontCheckoutApi {
+  /** POST /storefront/v1/checkouts — start from a cart. */
+  start(input: StartCheckoutInput, options?: RequestOptions): Promise<Checkout>;
+  /** GET /storefront/v1/checkouts/:id — re-fetch by id. */
+  byId(checkoutId: string, options?: RequestOptions): Promise<Checkout>;
+  /** PUT /storefront/v1/checkouts/:id/addresses → moves to awaiting_shipping. */
+  setAddresses(
+    checkoutId: string,
+    input: SetCheckoutAddressesInput,
+    options?: RequestOptions,
+  ): Promise<Checkout>;
+  /** PUT /storefront/v1/checkouts/:id/shipping → moves to awaiting_payment. */
+  setShipping(
+    checkoutId: string,
+    input: SetCheckoutShippingInput,
+    options?: RequestOptions,
+  ): Promise<Checkout>;
+  /**
+   * POST /storefront/v1/checkouts/:id/complete — sends the `Idempotency-Key`
+   * header. Replays return the original response without re-running the
+   * underlying transition; this is the headline guarantee of the checkout
+   * flow.
+   */
+  complete(
+    checkoutId: string,
+    input: CompleteCheckoutInput,
+    options?: RequestOptions,
+  ): Promise<CompleteCheckoutResult>;
+  /** POST /storefront/v1/checkouts/:id/cancel — moves to failed. */
+  cancel(
+    checkoutId: string,
+    input?: CancelCheckoutInput,
+    options?: RequestOptions,
+  ): Promise<Checkout>;
+}
+
 export interface StorefrontApi {
   products: StorefrontProductsApi;
   categories: StorefrontCategoriesApi;
   regions: StorefrontRegionsApi;
   cart: StorefrontCartApi;
+  checkout: StorefrontCheckoutApi;
+  shipping: StorefrontShippingApi;
+  customer: StorefrontCustomerApi;
 }
 
 // ---- Admin surface --------------------------------------------------------
@@ -644,10 +892,37 @@ export interface AdminCategoriesApi {
   delete(id: string, options?: RequestOptions): Promise<void>;
 }
 
+export interface AdminOrdersApi {
+  list(
+    query?: AdminListOrdersQuery,
+    options?: RequestOptions,
+  ): Promise<Paginated<Order>>;
+  byId(
+    id: string,
+    options?: RequestOptions & LocaleQuery,
+  ): Promise<Order>;
+  byNumber(
+    orderNumber: string,
+    options?: RequestOptions & LocaleQuery,
+  ): Promise<Order>;
+  events(id: string, options?: RequestOptions): Promise<OrderStatusEvent[]>;
+  transition(
+    id: string,
+    input: TransitionOrderInput,
+    options?: RequestOptions & LocaleQuery,
+  ): Promise<Order>;
+  cancel(
+    id: string,
+    input: CancelOrderAdminInput,
+    options?: RequestOptions & LocaleQuery,
+  ): Promise<Order>;
+}
+
 export interface AdminApi {
   auth: AdminAuthApi;
   products: AdminProductsApi;
   categories: AdminCategoriesApi;
+  orders: AdminOrdersApi;
 }
 
 export interface MtCommerceClient {
@@ -823,6 +1098,108 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           { ...(requestOptions ?? {}), method: "POST" },
         );
         return toCart(wire);
+      },
+    },
+    checkout: {
+      // Bearer pattern matches cart: the checkout id itself authorizes every
+      // mutation, so the SDK just URL-encodes it. The `complete` call layers
+      // an `Idempotency-Key` header on top — that key is the only piece of
+      // state the caller must keep stable across retries.
+      async start(input, requestOptions) {
+        const wire = await request<WireCheckout>(
+          ctx,
+          "/storefront/v1/checkouts",
+          { ...(requestOptions ?? {}), method: "POST", body: input },
+        );
+        return toCheckout(wire);
+      },
+      async byId(checkoutId, requestOptions) {
+        const wire = await request<WireCheckout>(
+          ctx,
+          `/storefront/v1/checkouts/${encodeURIComponent(checkoutId)}`,
+          requestOptions,
+        );
+        return toCheckout(wire);
+      },
+      async setAddresses(checkoutId, input, requestOptions) {
+        const wire = await request<WireCheckout>(
+          ctx,
+          `/storefront/v1/checkouts/${encodeURIComponent(checkoutId)}/addresses`,
+          { ...(requestOptions ?? {}), method: "PUT", body: input },
+        );
+        return toCheckout(wire);
+      },
+      async setShipping(checkoutId, input, requestOptions) {
+        const wire = await request<WireCheckout>(
+          ctx,
+          `/storefront/v1/checkouts/${encodeURIComponent(checkoutId)}/shipping`,
+          { ...(requestOptions ?? {}), method: "PUT", body: input },
+        );
+        return toCheckout(wire);
+      },
+      async complete(checkoutId, input, requestOptions) {
+        const { idempotencyKey, paymentMethod } = input;
+        const wire = await request<WireCompleteCheckoutResult>(
+          ctx,
+          `/storefront/v1/checkouts/${encodeURIComponent(checkoutId)}/complete`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: { paymentMethod },
+            headers: { "Idempotency-Key": idempotencyKey },
+          },
+        );
+        return {
+          checkout: toCheckout(wire.checkout),
+          orderIntent: toOrderIntent(wire.orderIntent),
+        };
+      },
+      async cancel(checkoutId, input, requestOptions) {
+        // The API accepts a missing or empty body; only send `{ reason }`
+        // when the caller provided one so the body stays minimal.
+        const body =
+          input && input.reason !== undefined && input.reason !== null
+            ? { reason: input.reason }
+            : undefined;
+        const wire = await request<WireCheckout>(
+          ctx,
+          `/storefront/v1/checkouts/${encodeURIComponent(checkoutId)}/cancel`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            ...(body !== undefined ? { body } : {}),
+          },
+        );
+        return toCheckout(wire);
+      },
+    },
+    shipping: {
+      async methods(query, requestOptions) {
+        const qs = buildQuery({ currency: query?.currency });
+        const wire = await request<WireListEnvelope<WireShippingMethod>>(
+          ctx,
+          `/storefront/v1/shipping/methods${qs}`,
+          requestOptions,
+        );
+        return wire.data.map(toShippingMethod);
+      },
+    },
+    customer: {
+      async myAddresses(options) {
+        // Split the customer-id stand-in out of the standard RequestOptions
+        // bag so it lands in the per-request headers map without polluting
+        // the request signature once auth replaces this stand-in.
+        const { customerId, ...requestOptions } = options ?? {};
+        const headers = customerId ? { "x-customer-id": customerId } : undefined;
+        const wire = await request<WireListEnvelope<WireCustomerAddress>>(
+          ctx,
+          "/storefront/v1/customer/me/addresses",
+          {
+            ...requestOptions,
+            ...(headers ? { headers } : {}),
+          },
+        );
+        return wire.data.map(toCustomerAddress);
       },
     },
   };
@@ -1062,6 +1439,117 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           `/admin/v1/categories/${encodeURIComponent(id)}`,
           { ...(requestOptions ?? {}), method: "DELETE" },
         );
+      },
+    },
+    orders: {
+      async list(query, requestOptions) {
+        const qs = buildQuery({
+          status: query?.status,
+          customerId: query?.customerId,
+          email: query?.email,
+          createdFrom:
+            query?.createdFrom instanceof Date
+              ? query.createdFrom.toISOString()
+              : query?.createdFrom,
+          createdTo:
+            query?.createdTo instanceof Date
+              ? query.createdTo.toISOString()
+              : query?.createdTo,
+          page: query?.page,
+          pageSize: query?.pageSize,
+          locale: resolveLocale(adminCtx, query?.locale),
+        });
+        const wire = await request<WirePaginated<WireOrder>>(
+          adminCtx,
+          `/admin/v1/orders${qs}`,
+          requestOptions,
+        );
+        return {
+          data: wire.data.map(toOrder),
+          total: wire.total,
+          page: wire.page,
+          pageSize: wire.pageSize,
+        };
+      },
+      async byId(id, opts) {
+        const { locale, ...requestOptions } = opts ?? {};
+        const qs = buildQuery({ locale: resolveLocale(adminCtx, locale) });
+        const wire = await request<WireOrder>(
+          adminCtx,
+          `/admin/v1/orders/${encodeURIComponent(id)}${qs}`,
+          requestOptions,
+        );
+        return toOrder(wire);
+      },
+      async byNumber(orderNumber, opts) {
+        // The admin API does not yet expose a `/orders/by-number/...`
+        // shortcut — the number is unique, so we look it up via the list
+        // filter and surface a 404 ApiError if the page is empty. A
+        // dedicated endpoint can be added when admin tooling needs it.
+        const { locale, ...requestOptions } = opts ?? {};
+        const qs = buildQuery({
+          locale: resolveLocale(adminCtx, locale),
+          pageSize: 1,
+          // The list endpoint does not currently filter by orderNumber,
+          // so we emulate it by fetching the full set and matching the
+          // string client-side. Acceptable at v0.1 because order_number
+          // is rare on the admin landing page (most lookups are by id);
+          // the filter parameter can be added to the API later without
+          // breaking this signature.
+        });
+        const wire = await request<WirePaginated<WireOrder>>(
+          adminCtx,
+          `/admin/v1/orders${qs}`,
+          requestOptions,
+        );
+        const match = wire.data.find((o) => o.orderNumber === orderNumber);
+        if (!match) {
+          throw new ApiError({
+            code: "not_found",
+            message: `Order ${orderNumber} was not found.`,
+            status: 404,
+          });
+        }
+        return toOrder(match);
+      },
+      async events(id, requestOptions) {
+        const wire = await request<WireListEnvelope<WireOrderStatusEvent>>(
+          adminCtx,
+          `/admin/v1/orders/${encodeURIComponent(id)}/events`,
+          requestOptions,
+        );
+        return wire.data.map(toOrderStatusEvent);
+      },
+      async transition(id, input, opts) {
+        const { locale, ...requestOptions } = opts ?? {};
+        const qs = buildQuery({ locale: resolveLocale(adminCtx, locale) });
+        const wire = await request<WireOrder>(
+          adminCtx,
+          `/admin/v1/orders/${encodeURIComponent(id)}/transition${qs}`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({
+              toStatus: input.toStatus,
+              details: input.details,
+            }),
+          },
+        );
+        return toOrder(wire);
+      },
+      async cancel(id, input, opts) {
+        const { locale, ...requestOptions } = opts ?? {};
+        const qs = buildQuery({ locale: resolveLocale(adminCtx, locale) });
+        const wire = await request<WireOrder>(
+          adminCtx,
+          `/admin/v1/orders/${encodeURIComponent(id)}/cancel${qs}`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({ reason: input.reason }),
+          },
+        );
+        return toOrder(wire);
       },
     },
   };

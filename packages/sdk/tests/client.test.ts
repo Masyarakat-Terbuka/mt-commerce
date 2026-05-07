@@ -639,3 +639,463 @@ describe("createClient — admin.products mutations", () => {
     expect(calls[0]!.init?.method).toBe("DELETE");
   });
 });
+
+// ----------------------------------------------------------------------------
+// Storefront checkout — happy-path state machine + idempotency-key replay.
+//
+// The headline property is that `complete` rides on an `Idempotency-Key`
+// header and that re-issuing the call with the same key returns the same
+// response without re-running the transition. We assert this by replaying
+// the same key against a fake fetch that returns the same payload twice
+// (the API's idempotency middleware would short-circuit the second hit;
+// at the SDK boundary we just need to confirm the header travels with both
+// requests, which is the precondition for the server-side dedupe to fire).
+// ----------------------------------------------------------------------------
+
+describe("createClient — storefront.checkout", () => {
+  const baseCheckout = {
+    id: "chk_01J",
+    cartId: "cart_01J",
+    customerId: "cus_01J",
+    state: "pending" as const,
+    shippingAddressId: null,
+    billingAddressId: null,
+    email: null,
+    shippingMethodCode: null,
+    shippingAmount: null,
+    paymentMethod: null,
+    cancellationReason: null,
+    idempotencyKey: null,
+    expiresAt: "2026-06-01T08:00:00.000Z",
+    createdAt: "2026-05-01T08:00:00.000Z",
+    updatedAt: "2026-05-01T08:00:00.000Z",
+  };
+
+  const awaitingShippingPayload = {
+    ...baseCheckout,
+    state: "awaiting_shipping" as const,
+    shippingAddressId: "adr_ship",
+    billingAddressId: "adr_ship",
+  };
+
+  const awaitingPaymentPayload = {
+    ...awaitingShippingPayload,
+    state: "awaiting_payment" as const,
+    shippingMethodCode: "MANUAL_FLAT",
+    shippingAmount: { amount: "15000", currency: "IDR" },
+  };
+
+  const completedPayload = {
+    ...awaitingPaymentPayload,
+    state: "completed" as const,
+    paymentMethod: "manual_bank_transfer",
+    idempotencyKey: "idem_01HZ",
+  };
+
+  const orderIntentPayload = {
+    id: "oi_01J",
+    checkoutId: "chk_01J",
+    cartSnapshot: [
+      {
+        variantId: "var_abc",
+        quantity: 2,
+        unitPrice: { amount: "95000", currency: "IDR" },
+      },
+    ],
+    totalsSnapshot: {
+      subtotal: { amount: "190000", currency: "IDR" },
+      tax: { amount: "0", currency: "IDR" },
+      shipping: { amount: "15000", currency: "IDR" },
+      total: { amount: "205000", currency: "IDR" },
+    },
+    shippingAddressSnapshot: {
+      id: "adr_ship",
+      customerId: "cus_01J",
+      kind: "shipping" as const,
+      recipientName: "Sari",
+      phone: "+6281234567890",
+      addressLine1: "Jl. Melati 1",
+      addressLine2: null,
+      provinsiId: "31",
+      kotaKabupatenId: "3171",
+      kecamatanId: "317101",
+      kelurahanId: null,
+      postalCode: "10110",
+      notes: null,
+    },
+    billingAddressSnapshot: null,
+    email: "sari@example.com",
+    shippingMethodCode: "MANUAL_FLAT",
+    paymentMethod: "manual_bank_transfer",
+    createdAt: "2026-05-01T08:10:00.000Z",
+  };
+
+  it("walks start → setAddresses → setShipping → complete and converts wire shapes", async () => {
+    const responses: Array<{ status: number; body: unknown }> = [
+      { status: 201, body: baseCheckout },
+      { status: 200, body: awaitingShippingPayload },
+      { status: 200, body: awaitingPaymentPayload },
+      { status: 200, body: { checkout: completedPayload, orderIntent: orderIntentPayload } },
+    ];
+    const calls: RecordedCall[] = [];
+    const fetch: FetchLike = (input, init) => {
+      const next = responses.shift();
+      if (!next) throw new Error("unexpected extra fetch call");
+      calls.push({ url: input, init });
+      return Promise.resolve(
+        new Response(JSON.stringify(next.body), {
+          status: next.status,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const created = await client.storefront.checkout.start({
+      cartId: "cart_01J",
+      email: "sari@example.com",
+    });
+    expect(created.state).toBe("pending");
+    expect(calls[0]!.url).toBe("http://localhost:8000/storefront/v1/checkouts");
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect(calls[0]!.init?.body).toBe(
+      JSON.stringify({ cartId: "cart_01J", email: "sari@example.com" }),
+    );
+
+    const withAddresses = await client.storefront.checkout.setAddresses("chk_01J", {
+      shippingAddressId: "adr_ship",
+    });
+    expect(withAddresses.state).toBe("awaiting_shipping");
+    const addressUrl = new URL(calls[1]!.url);
+    expect(addressUrl.pathname).toBe(
+      "/storefront/v1/checkouts/chk_01J/addresses",
+    );
+    expect(calls[1]!.init?.method).toBe("PUT");
+
+    const withShipping = await client.storefront.checkout.setShipping("chk_01J", {
+      shippingMethodCode: "MANUAL_FLAT",
+    });
+    expect(withShipping.state).toBe("awaiting_payment");
+    expect(withShipping.shippingAmount?.amount).toBe(15_000n);
+    expect(withShipping.shippingAmount?.currency).toBe("IDR");
+    const shippingUrl = new URL(calls[2]!.url);
+    expect(shippingUrl.pathname).toBe(
+      "/storefront/v1/checkouts/chk_01J/shipping",
+    );
+    expect(calls[2]!.init?.method).toBe("PUT");
+
+    const result = await client.storefront.checkout.complete("chk_01J", {
+      paymentMethod: "manual_bank_transfer",
+      idempotencyKey: "idem_01HZ",
+    });
+    expect(result.checkout.state).toBe("completed");
+    expect(result.orderIntent.id).toBe("oi_01J");
+    expect(result.orderIntent.totalsSnapshot.total.amount).toBe(205_000n);
+    expect(result.orderIntent.cartSnapshot[0]!.unitPrice.amount).toBe(95_000n);
+
+    const completeUrl = new URL(calls[3]!.url);
+    expect(completeUrl.pathname).toBe(
+      "/storefront/v1/checkouts/chk_01J/complete",
+    );
+    expect(calls[3]!.init?.method).toBe("POST");
+    expect(calls[3]!.init?.body).toBe(
+      JSON.stringify({ paymentMethod: "manual_bank_transfer" }),
+    );
+    const headers = new Headers(calls[3]!.init?.headers as HeadersInit);
+    expect(headers.get("idempotency-key")).toBe("idem_01HZ");
+  });
+
+  it("re-sends the same Idempotency-Key on a replay so the server can dedupe", async () => {
+    const completePayload = {
+      checkout: completedPayload,
+      orderIntent: orderIntentPayload,
+    };
+    const calls: RecordedCall[] = [];
+    const fetch: FetchLike = (input, init) => {
+      calls.push({ url: input, init });
+      return Promise.resolve(
+        new Response(JSON.stringify(completePayload), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const first = await client.storefront.checkout.complete("chk_01J", {
+      paymentMethod: "manual_bank_transfer",
+      idempotencyKey: "idem_replay",
+    });
+    const second = await client.storefront.checkout.complete("chk_01J", {
+      paymentMethod: "manual_bank_transfer",
+      idempotencyKey: "idem_replay",
+    });
+
+    expect(first.orderIntent.id).toBe(second.orderIntent.id);
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const headers = new Headers(call.init?.headers as HeadersInit);
+      expect(headers.get("idempotency-key")).toBe("idem_replay");
+    }
+  });
+
+  it("surfaces the idempotency_key_reuse envelope as ApiError on 409", async () => {
+    const { fetch } = mockFetch({
+      status: 409,
+      body: {
+        error: {
+          code: "idempotency_key_reuse",
+          message: "Idempotency key reused with a different request body.",
+          details: { scope: "checkout.complete" },
+        },
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(
+      client.storefront.checkout.complete("chk_01J", {
+        paymentMethod: "manual_bank_transfer",
+        idempotencyKey: "idem_clash",
+      }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      code: "idempotency_key_reuse",
+      status: 409,
+    });
+  });
+
+  it("lists active shipping methods with the currency filter", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: "sm_01J",
+            code: "MANUAL_FLAT",
+            name: "Pengiriman manual",
+            providerKind: "manual",
+            flatRate: { amount: "15000", currency: "IDR" },
+            isActive: true,
+            createdAt: "2026-05-01T08:00:00.000Z",
+            updatedAt: "2026-05-01T08:00:00.000Z",
+            deletedAt: null,
+          },
+        ],
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const methods = await client.storefront.shipping.methods({ currency: "IDR" });
+
+    expect(methods).toHaveLength(1);
+    expect(methods[0]!.code).toBe("MANUAL_FLAT");
+    expect(methods[0]!.flatRate?.amount).toBe(15_000n);
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/storefront/v1/shipping/methods");
+    expect(url.searchParams.get("currency")).toBe("IDR");
+  });
+
+  it("forwards x-customer-id when listing the signed-in customer's addresses", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: "adr_01J",
+            customerId: "cus_01J",
+            kind: "shipping",
+            isDefaultShipping: true,
+            isDefaultBilling: false,
+            recipientName: "Sari",
+            phone: "+6281234567890",
+            addressLine1: "Jl. Melati 1",
+            addressLine2: null,
+            provinsiId: "31",
+            kotaKabupatenId: "3171",
+            kecamatanId: "317101",
+            kelurahanId: null,
+            postalCode: "10110",
+            notes: null,
+            createdAt: "2026-05-01T08:00:00.000Z",
+            updatedAt: "2026-05-01T08:00:00.000Z",
+            deletedAt: null,
+          },
+        ],
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const addresses = await client.storefront.customer.myAddresses({
+      customerId: "cus_01J",
+    });
+
+    expect(addresses).toHaveLength(1);
+    expect(addresses[0]!.recipientName).toBe("Sari");
+    const headers = new Headers(calls[0]!.init?.headers as HeadersInit);
+    expect(headers.get("x-customer-id")).toBe("cus_01J");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Admin orders surface
+// ---------------------------------------------------------------------------
+
+const sampleOrderPayload = {
+  id: "ord_01J",
+  orderNumber: "ORD-2026-000123",
+  customerId: "cus_01J",
+  email: "buyer@example.com",
+  currency: "IDR",
+  status: "pending_payment",
+  subtotal: { amount: "500000", currency: "IDR" },
+  tax: { amount: "55000", currency: "IDR" },
+  taxRateCode: null,
+  taxRateBasisPoints: null,
+  shipping: { amount: "10000", currency: "IDR" },
+  shippingMethodCode: "MANUAL_FLAT",
+  total: { amount: "565000", currency: "IDR" },
+  shippingAddressSnapshot: {
+    id: "adr_01J",
+    customerId: "cus_01J",
+    kind: "shipping",
+    recipientName: "Sari",
+    phone: "+6281234567890",
+    addressLine1: "Jl. Melati 1",
+    addressLine2: null,
+    provinsiId: "31",
+    kotaKabupatenId: "3171",
+    kecamatanId: "317101",
+    kelurahanId: null,
+    postalCode: "10110",
+    notes: null,
+  },
+  billingAddressSnapshot: null,
+  paymentMethod: "manual_bank_transfer",
+  items: [
+    {
+      id: "oi_01",
+      orderId: "ord_01J",
+      variantId: "var_01J",
+      sku: "GAYO-200-WHOLE",
+      title: "Biji utuh",
+      quantity: 2,
+      unitPrice: { amount: "250000", currency: "IDR" },
+      lineSubtotal: { amount: "500000", currency: "IDR" },
+      createdAt: "2026-05-01T08:00:00.000Z",
+    },
+  ],
+  paidAt: null,
+  fulfilledAt: null,
+  cancelledAt: null,
+  refundedAt: null,
+  cancellationReason: null,
+  createdAt: "2026-05-01T08:00:00.000Z",
+  updatedAt: "2026-05-01T08:00:00.000Z",
+};
+
+describe("createClient — admin.orders", () => {
+  it("lists orders, converting Money to bigint and forwarding filter + locale to the URL", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [sampleOrderPayload],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      },
+    });
+    const client = createClient({
+      baseUrl: "http://localhost:8000",
+      fetch,
+      locale: "id",
+    });
+
+    const result = await client.admin.orders.list({
+      status: "pending_payment",
+      email: "buyer@example.com",
+      locale: "en",
+    });
+
+    expect(result.total).toBe(1);
+    const order = result.data[0]!;
+    expect(order.total.amount).toBe(565_000n);
+    expect(order.subtotal.amount).toBe(500_000n);
+    expect(order.items[0]!.unitPrice.amount).toBe(250_000n);
+    expect(order.createdAt).toBeInstanceOf(Date);
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/admin/v1/orders");
+    expect(url.searchParams.get("status")).toBe("pending_payment");
+    expect(url.searchParams.get("email")).toBe("buyer@example.com");
+    // Per-call locale wins over the instance default.
+    expect(url.searchParams.get("locale")).toBe("en");
+  });
+
+  it("fetches a single order by id and converts the wire money + dates", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: { ...sampleOrderPayload, paidAt: "2026-05-02T09:00:00.000Z" },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const order = await client.admin.orders.byId("ord_01J");
+    expect(order.id).toBe("ord_01J");
+    expect(order.paidAt).toBeInstanceOf(Date);
+    expect(order.paidAt!.toISOString()).toBe("2026-05-02T09:00:00.000Z");
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/admin/v1/orders/ord_01J");
+  });
+
+  it("posts the transition input as JSON and returns the new state", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: { ...sampleOrderPayload, status: "paid", paidAt: "2026-05-02T09:00:00.000Z" },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const order = await client.admin.orders.transition("ord_01J", {
+      toStatus: "paid",
+      details: { providerReference: "MID-123" },
+    });
+    expect(order.status).toBe("paid");
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/admin/v1/orders/ord_01J/transition");
+    expect(calls[0]!.init?.method).toBe("POST");
+    const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+      toStatus: string;
+      details: Record<string, unknown>;
+    };
+    expect(body.toStatus).toBe("paid");
+    expect(body.details).toEqual({ providerReference: "MID-123" });
+  });
+
+  it("posts the cancel reason as JSON", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        ...sampleOrderPayload,
+        status: "cancelled",
+        cancelledAt: "2026-05-02T09:00:00.000Z",
+        cancellationReason: "duplicate",
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const order = await client.admin.orders.cancel("ord_01J", {
+      reason: "duplicate",
+    });
+    expect(order.status).toBe("cancelled");
+    expect(order.cancellationReason).toBe("duplicate");
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/admin/v1/orders/ord_01J/cancel");
+    expect(calls[0]!.init?.method).toBe("POST");
+    const body = JSON.parse((calls[0]!.init?.body as string) ?? "{}") as {
+      reason: string;
+    };
+    expect(body.reason).toBe("duplicate");
+  });
+});

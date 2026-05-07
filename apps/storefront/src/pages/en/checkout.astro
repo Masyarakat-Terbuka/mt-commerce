@@ -1,0 +1,88 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import CheckoutFlow from "@/islands/CheckoutFlow.tsx";
+import { createTranslator, localePath } from "@/lib/i18n";
+
+const locale = "en" as const;
+const t = createTranslator(locale);
+const intlLocale = "en-US";
+
+const cartHref = localePath(locale, "/cart");
+const productsHref = localePath(locale, "/products");
+// Static-build limitation: see id-locale page comment.
+const confirmedHrefPattern = `${localePath(locale, "/checkout/confirmed")}?id=:id`;
+
+const title = `${t("checkout.title")} — mt-commerce`;
+
+const labels = {
+  pageTitle: t("checkout.title"),
+  loading: t("checkout.loading"),
+  emptyCart: t("checkout.error.empty_cart"),
+  emptyCartCta: t("cart.empty_cta"),
+  steps: {
+    address: t("checkout.steps.address"),
+    shipping: t("checkout.steps.shipping"),
+    payment: t("checkout.steps.payment"),
+    review: t("checkout.steps.review"),
+  },
+  address: {
+    title: t("checkout.address.title"),
+    selectExisting: t("checkout.address.select_existing"),
+    addNew: t("checkout.address.add_new"),
+    addNewHint: t("checkout.address.add_new_hint"),
+    billingSame: t("checkout.address.billing_same"),
+    billingDifferent: t("checkout.address.billing_different"),
+    billingSelect: t("checkout.address.billing_select"),
+    continueLabel: t("checkout.address.continue"),
+    empty: t("checkout.address.empty"),
+    guestUnsupported: t("checkout.address.guest_unsupported"),
+    guestSignup: t("checkout.address.guest_signup"),
+  },
+  shipping: {
+    title: t("checkout.shipping.title"),
+    selectMethod: t("checkout.shipping.select_method"),
+    empty: t("checkout.shipping.empty"),
+    continueLabel: t("checkout.shipping.continue"),
+  },
+  payment: {
+    title: t("checkout.payment.title"),
+    manualBankTransfer: t("checkout.payment.manual_bank_transfer"),
+    manualBankTransferNote: t("checkout.payment.manual_bank_transfer_note"),
+    continueLabel: t("checkout.payment.continue"),
+  },
+  review: {
+    title: t("checkout.review.title"),
+    confirm: t("checkout.review.confirm_button"),
+    confirming: t("checkout.review.confirming"),
+    addressLabel: t("checkout.review.address_label"),
+    billingLabel: t("checkout.review.billing_label"),
+    shippingLabel: t("checkout.review.shipping_label"),
+    paymentLabel: t("checkout.review.payment_label"),
+    itemsLabel: t("checkout.review.items_label"),
+    edit: t("checkout.review.edit"),
+  },
+  totals: {
+    subtotal: t("cart.subtotal"),
+    tax: t("cart.tax"),
+    shipping: t("cart.shipping"),
+    total: t("cart.total"),
+  },
+  errors: {
+    generic: t("checkout.error.generic"),
+    unknownStep: t("checkout.error.unknown_step"),
+    idempotencyConflict: t("checkout.error.idempotency_conflict"),
+  },
+};
+---
+
+<BaseLayout title={title} description={t("checkout.title")}>
+  <CheckoutFlow
+    client:load
+    locale={intlLocale}
+    apiLocale={locale}
+    cartHref={cartHref}
+    productsHref={productsHref}
+    confirmedHrefPattern={confirmedHrefPattern}
+    labels={labels}
+  />
+</BaseLayout>

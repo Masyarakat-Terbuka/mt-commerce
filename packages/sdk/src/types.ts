@@ -278,6 +278,440 @@ export interface UpdateCartItemInput {
 }
 
 // ----------------------------------------------------------------------------
+// Customer-address wire and domain shapes — mirror
+// `apps/api/src/modules/customer/routes/wire.ts`. Storefront checkout reads
+// the signed-in customer's saved addresses to populate the address-step
+// selector; only the read-side surface is exposed in the SDK at v0.1.
+// ----------------------------------------------------------------------------
+
+export type AddressKind = "shipping" | "billing";
+
+export interface WireCustomerAddress {
+  id: string;
+  customerId: string;
+  kind: AddressKind;
+  isDefaultShipping: boolean;
+  isDefaultBilling: boolean;
+  recipientName: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  provinsiId: string;
+  kotaKabupatenId: string;
+  kecamatanId: string;
+  kelurahanId: string | null;
+  postalCode: string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface CustomerAddress {
+  id: string;
+  customerId: string;
+  kind: AddressKind;
+  isDefaultShipping: boolean;
+  isDefaultBilling: boolean;
+  recipientName: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  provinsiId: string;
+  kotaKabupatenId: string;
+  kecamatanId: string;
+  kelurahanId: string | null;
+  postalCode: string;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+// ----------------------------------------------------------------------------
+// Shipping wire and domain shapes — mirror
+// `apps/api/src/modules/shipping/routes/wire.ts`. The storefront only needs
+// the listing endpoint (and a quote helper for advanced flows); the broader
+// admin-side surface stays out of the SDK at v0.1.
+// ----------------------------------------------------------------------------
+
+export type ShippingProviderKind = "manual" | "plugin";
+
+export interface WireShippingMethod {
+  id: string;
+  code: string;
+  name: string;
+  providerKind: ShippingProviderKind;
+  flatRate: MoneyJSON | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface ShippingMethod {
+  id: string;
+  /** Stable operator-facing code, e.g. "MANUAL_FLAT", "JNE_REG". */
+  code: string;
+  name: string;
+  providerKind: ShippingProviderKind;
+  /** Required when `providerKind === 'manual'`; null for plugin methods. */
+  flatRate: Money | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+// ----------------------------------------------------------------------------
+// Checkout wire shapes — mirror
+// `apps/api/src/modules/checkout/routes/wire.ts`. The state machine is
+// re-declared as a string union to keep the SDK independent of the API
+// package; if the server adds a state, this union is the single point of
+// breakage.
+// ----------------------------------------------------------------------------
+
+export type CheckoutState =
+  | "pending"
+  | "awaiting_shipping"
+  | "awaiting_payment"
+  | "completed"
+  | "failed";
+
+export interface WireCheckout {
+  id: string;
+  cartId: string;
+  customerId: string | null;
+  state: CheckoutState;
+  shippingAddressId: string | null;
+  billingAddressId: string | null;
+  email: string | null;
+  shippingMethodCode: string | null;
+  shippingAmount: MoneyJSON | null;
+  paymentMethod: string | null;
+  cancellationReason: string | null;
+  idempotencyKey: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Checkout {
+  id: string;
+  cartId: string;
+  customerId: string | null;
+  state: CheckoutState;
+  shippingAddressId: string | null;
+  billingAddressId: string | null;
+  email: string | null;
+  shippingMethodCode: string | null;
+  shippingAmount: Money | null;
+  paymentMethod: string | null;
+  cancellationReason: string | null;
+  /**
+   * Echoes back the `Idempotency-Key` accepted on the most recent `complete`
+   * call. Storefront callers do not consume this; it is surfaced for parity
+   * with the API and for debugging.
+   */
+  idempotencyKey: string | null;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CheckoutEvent {
+  id: string;
+  checkoutId: string;
+  fromState: CheckoutState | null;
+  toState: CheckoutState;
+  details: Record<string, unknown>;
+  createdAt: Date;
+}
+
+export interface WireOrderIntentLine {
+  variantId: string;
+  quantity: number;
+  unitPrice: MoneyJSON;
+}
+
+export interface WireOrderIntentTotals {
+  subtotal: MoneyJSON;
+  tax: MoneyJSON;
+  shipping: MoneyJSON;
+  total: MoneyJSON;
+}
+
+export interface OrderIntentAddressSnapshot {
+  id: string;
+  customerId: string;
+  kind: AddressKind;
+  recipientName: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  provinsiId: string;
+  kotaKabupatenId: string;
+  kecamatanId: string;
+  kelurahanId: string | null;
+  postalCode: string;
+  notes: string | null;
+}
+
+export interface WireOrderIntent {
+  id: string;
+  checkoutId: string;
+  cartSnapshot: WireOrderIntentLine[];
+  totalsSnapshot: WireOrderIntentTotals;
+  shippingAddressSnapshot: OrderIntentAddressSnapshot;
+  billingAddressSnapshot: OrderIntentAddressSnapshot | null;
+  email: string;
+  shippingMethodCode: string;
+  paymentMethod: string;
+  createdAt: string;
+}
+
+export interface OrderIntentLine {
+  variantId: string;
+  quantity: number;
+  unitPrice: Money;
+}
+
+export interface OrderIntentTotals {
+  subtotal: Money;
+  tax: Money;
+  shipping: Money;
+  total: Money;
+}
+
+export interface OrderIntent {
+  id: string;
+  checkoutId: string;
+  cartSnapshot: OrderIntentLine[];
+  totalsSnapshot: OrderIntentTotals;
+  shippingAddressSnapshot: OrderIntentAddressSnapshot;
+  billingAddressSnapshot: OrderIntentAddressSnapshot | null;
+  email: string;
+  shippingMethodCode: string;
+  paymentMethod: string;
+  createdAt: Date;
+}
+
+export interface CompleteCheckoutResult {
+  checkout: Checkout;
+  orderIntent: OrderIntent;
+}
+
+export interface WireCompleteCheckoutResult {
+  checkout: WireCheckout;
+  orderIntent: WireOrderIntent;
+}
+
+// ----------------------------------------------------------------------------
+// Orders — admin surface only at v0.1. Mirrors
+// `apps/api/src/modules/orders/routes/wire.ts`. The storefront-side
+// `client.storefront.orders.*` lands as part of Track 1 — keeping the
+// admin surface here lets ops/admin tooling consume the canonical type
+// independently.
+// ----------------------------------------------------------------------------
+
+export type OrderStatus =
+  | "pending_payment"
+  | "paid"
+  | "fulfilled"
+  | "cancelled"
+  | "refunded";
+
+export type OrderActorKind = "system" | "staff" | "customer";
+
+export interface OrderAddressSnapshot {
+  id: string;
+  customerId: string;
+  kind: AddressKind;
+  recipientName: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  provinsiId: string;
+  kotaKabupatenId: string;
+  kecamatanId: string;
+  kelurahanId: string | null;
+  postalCode: string;
+  notes: string | null;
+}
+
+export interface WireOrderItem {
+  id: string;
+  orderId: string;
+  variantId: string;
+  sku: string;
+  title: string;
+  quantity: number;
+  unitPrice: MoneyJSON;
+  lineSubtotal: MoneyJSON;
+  createdAt: string;
+}
+
+export interface WireOrder {
+  id: string;
+  orderNumber: string;
+  customerId: string | null;
+  email: string;
+  currency: string;
+  status: OrderStatus;
+  subtotal: MoneyJSON;
+  tax: MoneyJSON;
+  taxRateCode: string | null;
+  taxRateBasisPoints: number | null;
+  shipping: MoneyJSON;
+  shippingMethodCode: string;
+  total: MoneyJSON;
+  shippingAddressSnapshot: OrderAddressSnapshot;
+  billingAddressSnapshot: OrderAddressSnapshot | null;
+  paymentMethod: string;
+  items: WireOrderItem[];
+  paidAt: string | null;
+  fulfilledAt: string | null;
+  cancelledAt: string | null;
+  refundedAt: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WireOrderStatusEvent {
+  id: string;
+  orderId: string;
+  fromStatus: OrderStatus | null;
+  toStatus: OrderStatus;
+  actorKind: OrderActorKind;
+  actorId: string | null;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface OrderItem {
+  id: string;
+  orderId: string;
+  variantId: string;
+  sku: string;
+  title: string;
+  quantity: number;
+  unitPrice: Money;
+  lineSubtotal: Money;
+  createdAt: Date;
+}
+
+export interface Order {
+  id: string;
+  orderNumber: string;
+  customerId: string | null;
+  email: string;
+  currency: string;
+  status: OrderStatus;
+  subtotal: Money;
+  tax: Money;
+  taxRateCode: string | null;
+  taxRateBasisPoints: number | null;
+  shipping: Money;
+  shippingMethodCode: string;
+  total: Money;
+  shippingAddressSnapshot: OrderAddressSnapshot;
+  billingAddressSnapshot: OrderAddressSnapshot | null;
+  paymentMethod: string;
+  items: OrderItem[];
+  paidAt: Date | null;
+  fulfilledAt: Date | null;
+  cancelledAt: Date | null;
+  refundedAt: Date | null;
+  cancellationReason: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface OrderStatusEvent {
+  id: string;
+  orderId: string;
+  fromStatus: OrderStatus | null;
+  toStatus: OrderStatus;
+  actorKind: OrderActorKind;
+  actorId: string | null;
+  details: Record<string, unknown>;
+  createdAt: Date;
+}
+
+// ----------------------------------------------------------------------------
+// Admin orders inputs
+// ----------------------------------------------------------------------------
+
+export interface AdminListOrdersQuery {
+  status?: OrderStatus;
+  customerId?: string;
+  email?: string;
+  /** ISO 8601 timestamp; coerced server-side. */
+  createdFrom?: string | Date;
+  createdTo?: string | Date;
+  page?: number;
+  pageSize?: number;
+  /** Translation locale for line-item title resolution. */
+  locale?: string;
+}
+
+export interface TransitionOrderInput {
+  toStatus: OrderStatus;
+  /** Free-form context attached to the audit row (provider tx id, tracking, etc). */
+  details?: Record<string, unknown>;
+}
+
+export interface CancelOrderAdminInput {
+  reason?: string | null;
+}
+
+// ----------------------------------------------------------------------------
+// Checkout inputs
+// ----------------------------------------------------------------------------
+
+export interface StartCheckoutInput {
+  cartId: string;
+  /** Required for guests (no customer attached to the cart). */
+  email?: string;
+}
+
+export interface SetCheckoutAddressesInput {
+  shippingAddressId: string;
+  /** Omit (or set null) to default the billing address to the shipping one. */
+  billingAddressId?: string | null;
+}
+
+export interface SetCheckoutShippingInput {
+  shippingMethodCode: string;
+}
+
+export interface CompleteCheckoutInput {
+  /** v0.1 only accepts `"manual_bank_transfer"`; the API gates the rest. */
+  paymentMethod: string;
+  /**
+   * Travels as the `Idempotency-Key` HTTP header. Re-using the same key on
+   * a retry returns the original response without re-executing the
+   * transition — the callsite generates one on first arrival at the
+   * confirm step and keeps it stable across retries.
+   */
+  idempotencyKey: string;
+}
+
+export interface CancelCheckoutInput {
+  reason?: string | null;
+}
+
+export interface ListShippingMethodsQuery {
+  /**
+   * Advisory at v0.1 — manual methods carry a single configured currency, so
+   * the storefront passes the cart's currency to filter the list semantically
+   * even though the server accepts any value here.
+   */
+  currency?: string;
+}
+
+// ----------------------------------------------------------------------------
 // Query inputs
 // ----------------------------------------------------------------------------
 
