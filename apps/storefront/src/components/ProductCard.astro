@@ -3,19 +3,22 @@
  * ProductCard — server-rendered card.
  *
  * Photography is the visual heavyweight. Below the image, two flat lines:
- *   1. Title (body weight 500), 1 line, ellipsized.
- *   2. Price (price-figure, tabular nums) + optional compare-at strike.
+ *   1. Title (`t-body`, weight 400, single line, line-clamp-1).
+ *   2. Price (`price-figure`, muted, tabular nums) + optional compare-at strike.
  *
  * The whole card is the link target — no "Add to cart" button on the card.
- * Hover only darkens the border and the title; no scale, no shadow.
+ * Hover only lowers the image opacity to 0.9 and shifts the title to accent.
+ * No border, no shadow, no scale, no shadow-on-hover. Saturdays NYC's
+ * cards drop borders entirely — the photo's edge IS the card's edge.
  *
- * The image is a 1:1 aspect ratio so cards align cleanly across rows; the
+ * The image is a 1:1 aspect ratio so cards align cleanly across rows;
  * `<img>` lazy-loads outside the first viewport. When a product has no
- * `imageUrl`, we render a calm cream placeholder rather than a generic
- * gray box, so even an unphotographed product fits the aesthetic.
+ * `imageUrl`, we render a calm cream tile with just the title centered —
+ * no caption, no "photo coming soon" line. The cream tile + title speaks
+ * for itself, and the missing photo reads as intentional rather than broken.
  */
 import Price from "./Price.astro";
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import { resolveLocale, localePath, type Locale } from "@/lib/i18n";
 import type { StoreProduct } from "@/lib/api";
 
 export interface Props {
@@ -29,7 +32,6 @@ export interface Props {
 
 const { product, loading = "lazy" } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
-const t = createTranslator(locale);
 const title = product.title[locale];
 const alt = product.imageAlt[locale];
 
@@ -43,9 +45,7 @@ const compareAt = firstVariant?.compareAt;
   href={localePath(locale, `/products/${product.slug}`)}
   class="group block"
 >
-  <div
-    class="aspect-square w-full overflow-hidden border border-line bg-paper transition-colors duration-150 group-hover:border-line-strong"
-  >
+  <div class="aspect-square w-full overflow-hidden bg-cream">
     {
       product.hasImage ? (
         <img
@@ -53,22 +53,21 @@ const compareAt = firstVariant?.compareAt;
           alt={alt}
           loading={loading}
           decoding="async"
-          class="h-full w-full object-cover"
+          class="h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
         />
       ) : (
-        <div class="flex h-full w-full flex-col items-center justify-center gap-1 bg-cream px-4 text-center">
-          <span class="t-body line-clamp-2 font-medium text-fg">{title}</span>
-          <span class="t-caption text-faint">{t("products.card.photo_coming_soon")}</span>
+        <div class="flex h-full w-full items-center justify-center px-6 text-center">
+          <span class="t-body line-clamp-2 text-fg">{title}</span>
         </div>
       )
     }
   </div>
-  <div class="mt-3 space-y-1">
-    <h3 class="t-body line-clamp-1 text-fg transition-colors duration-150 group-hover:text-accent">
+  <div class="mt-4 space-y-1">
+    <h3 class="t-body line-clamp-1 text-fg transition-colors duration-200 group-hover:text-accent">
       {title}
     </h3>
     <div class="flex items-baseline gap-2 t-body">
-      <Price money={product.basePrice} />
+      <Price money={product.basePrice} muted />
       {compareAt && <Price money={compareAt} strike />}
     </div>
   </div>

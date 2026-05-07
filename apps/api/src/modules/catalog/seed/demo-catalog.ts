@@ -172,11 +172,13 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Batik Tulis Pekalongan",
     description:
       "Hand-drawn batik tulis from Pekalongan, north-coast pattern. Each piece is one-of-a-kind. 100% cotton, soft drape.",
-    // Folded textile / patterned fabric stack — photographer Annie Spratt.
+    // Patterned textile close-up. The previous Unsplash photo
+    // (`1528459801416-a9241982d05a`) was failing in production — the
+    // replacement is a stable, well-indexed pattern photograph.
     imageUrl:
-      "https://images.unsplash.com/photo-1528459801416-a9241982d05a?w=1200&q=80&auto=format&fit=crop",
-    imageAlt: "Tumpukan kain bermotif terlipat",
-    imageAttribution: "Annie Spratt on Unsplash",
+      "https://images.unsplash.com/photo-1605518215584-f89c2fb20db5?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Detail kain bermotif tradisional",
+    imageAttribution: "Unsplash",
     categorySlugs: ["batik", "fashion"],
     variants: [
       { sku: "BATIK-PEKA-M", title: "Size M", priceAmount: 850_000n },

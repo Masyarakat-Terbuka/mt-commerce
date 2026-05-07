@@ -1,27 +1,31 @@
 /**
  * ProductGrid — client island.
  *
- * Why this is a React island instead of an Astro server-render: the
- * storefront builds with `output: "static"` and the API is not
- * necessarily running at build time. To keep `bun run build`
- * deterministic and offline-friendly, the static page renders a grid
- * skeleton and this island fetches real data from the API once it
- * mounts in the browser.
+ * Why a React island instead of Astro server-render: the storefront builds
+ * with `output: "static"` and the API may not be running at build time. The
+ * static page renders a grid skeleton; this island fetches real data from
+ * the API once it mounts in the browser.
  *
- * Visual notes:
+ * Visual notes (post-redesign):
  *
- *   - The card markup mirrors `components/ProductCard.astro` because
- *     Astro components cannot render inside React islands. Both stay
- *     in sync via the shared utility classes (`t-body`, `price-figure`,
- *     `border-line`, etc.) defined in `styles/global.css`.
+ *   - Cards are borderless. The image's edge IS the card's edge. Title and
+ *     price sit below the image in calm `t-body` weight 400 — the price is
+ *     muted on cards because the photo and title carry the visual hierarchy.
  *
- *   - Loading state is a 4-column skeleton grid (2 columns on mobile)
- *     that matches the live grid template — no layout shift when data
- *     arrives. Each cell is the same 1:1 aspect placeholder + two
- *     stubby title/price bars.
+ *   - The grid runs 3 columns at desktop with a massive gap (lg:gap-x-12,
+ *     lg:gap-y-16) — Saturdays NYC's editorial spacing. Mobile drops to 2
+ *     columns with a smaller but still generous gap.
  *
- *   - Error and empty states are calm single paragraphs in line with
- *     the catalog's overall copywriting tone.
+ *   - Loading state mirrors the live grid template: matching skeleton
+ *     cells with very subtle pulse so the page reads as "settling in"
+ *     rather than "broken".
+ *
+ *   - Error and empty states are calm single paragraphs in line with the
+ *     catalog's overall copywriting tone — no icons, no "Try again" buttons.
+ *
+ *   - The card markup mirrors `components/ProductCard.astro` because Astro
+ *     components cannot render inside React islands. They stay in sync via
+ *     the shared utility classes (`t-body`, `price-figure`, etc.).
  */
 import { useEffect, useMemo, useState } from "react";
 import { format as formatMoney } from "@mt-commerce/core/money";
@@ -56,7 +60,7 @@ export type ProductGridProps = {
   limit?: number;
   /**
    * Skeleton cell count to render while loading. Matches the eventual
-   * card count so there's no layout shift. Defaults to `pageSize` or 8.
+   * card count so there's no layout shift. Defaults to `pageSize` or 9.
    */
   skeletonCount?: number;
   /**
@@ -72,7 +76,9 @@ export type ProductGridProps = {
   showingCountTemplate?: string;
   /**
    * Localized caption shown beneath the product title when an image
-   * URL is missing or fails to load (e.g. "Foto segera hadir").
+   * URL is missing. Currently unused — the redesign drops the caption
+   * from card image fallbacks (see ProductCard.astro). Kept as a prop
+   * to avoid churn in pages that already pass it.
    */
   photoComingSoonLabel?: string;
 };
@@ -91,8 +97,10 @@ function lowestPrice(p: SdkProduct): { amount: bigint; currency: string } | null
   return lowest;
 }
 
+// 3 columns desktop, 2 columns mobile. Massive gap (12/16 desktop) — the
+// negative space between cards is the design element here.
 const GRID_CLASSES =
-  "grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-3 md:gap-x-6 md:gap-y-12 lg:grid-cols-4 lg:gap-x-8";
+  "grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-3 md:gap-x-10 md:gap-y-16 lg:gap-x-12 lg:gap-y-20";
 
 export default function ProductGrid({
   apiUrl,
@@ -106,26 +114,18 @@ export default function ProductGrid({
   skeletonCount,
   showCount = false,
   showingCountTemplate,
-  photoComingSoonLabel = "",
 }: ProductGridProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  // Track image URLs that fail to load so we can fall back to the
-  // typographic placeholder. A broken Unsplash URL or hotlink-block
-  // would otherwise show a torn-image icon.
+  // Track image URLs that fail to load so we can fall back to a clean
+  // cream tile. A broken Unsplash URL or hotlink-block would otherwise
+  // show a torn-image icon.
   const [brokenImages, setBrokenImages] = useState<Set<string>>(() => new Set());
 
-  // Auto-balance: with ≤6 products the desktop grid drops from 4 to 3
-  // columns so the last row doesn't leave orphaned cards on the right.
-  // Mobile (2) and tablet (3) layouts are unaffected.
-  const productCount = state.status === "ready" ? state.products.length : 0;
-  const compact = state.status === "ready" && productCount <= 6;
-  const gridClasses = useMemo(
-    () =>
-      compact
-        ? "grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-3 md:gap-x-6 md:gap-y-12"
-        : GRID_CLASSES,
-    [compact],
-  );
+  // Memoize once — the grid layout is consistent across product counts now
+  // that the redesign locks columns at 3 desktop / 2 mobile. The previous
+  // "compact mode" branch was needed because the layout was 4-up and
+  // tended to leave orphan rows; 3-up tolerates any count gracefully.
+  const gridClasses = useMemo(() => GRID_CLASSES, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -170,7 +170,7 @@ export default function ProductGrid({
   ]);
 
   if (state.status === "loading") {
-    const cells = Math.max(2, skeletonCount ?? limit ?? query?.pageSize ?? 8);
+    const cells = Math.max(2, skeletonCount ?? limit ?? query?.pageSize ?? 9);
     return (
       <div
         role="status"
@@ -180,10 +180,10 @@ export default function ProductGrid({
       >
         {Array.from({ length: cells }).map((_, idx) => (
           <div key={idx}>
-            <div className="aspect-square w-full skeleton border border-line"></div>
-            <div className="mt-3 space-y-2">
+            <div className="aspect-square w-full skeleton"></div>
+            <div className="mt-4 space-y-2">
               <div className="h-3 w-3/4 skeleton"></div>
-              <div className="h-3 w-1/3 skeleton"></div>
+              <div className="h-3 w-1/4 skeleton"></div>
             </div>
           </div>
         ))}
@@ -193,17 +193,17 @@ export default function ProductGrid({
 
   if (state.status === "error") {
     return (
-      <div role="alert" className="py-12 text-center">
-        <p className="t-body text-fg">{errorLabel}</p>
-      </div>
+      <p role="alert" className="py-16 t-body text-muted">
+        {errorLabel}
+      </p>
     );
   }
 
   if (state.products.length === 0) {
     return (
-      <div className="py-12 text-center">
-        <p className="t-body text-muted">{emptyLabel}</p>
-      </div>
+      <p className="py-16 t-body text-muted">
+        {emptyLabel}
+      </p>
     );
   }
 
@@ -218,66 +218,67 @@ export default function ProductGrid({
   return (
     <>
       {countLabel && (
-        <p className="t-caption mb-3 text-faint">{countLabel}</p>
+        <p className="t-caption mb-6 text-faint">{countLabel}</p>
       )}
       <div className={gridClasses}>
         {state.products.map((p, idx) => {
-        const price = lowestPrice(p);
-        const compareAt = p.variants[0]?.compareAtPrice ?? null;
-        // The first row is above the fold on every viewport — eager-load
-        // the first four images so the LCP is not deferred. Lazy after.
-        const loading = idx < 4 ? "eager" : "lazy";
-        const altText = p.imageAlt ?? p.title;
-        return (
-          <a key={p.id} href={`${detailHrefBase}/${p.slug}`} className="group block">
-            <div className="aspect-square w-full overflow-hidden border border-line bg-paper transition-colors duration-150 group-hover:border-line-strong">
-              {p.imageUrl && !brokenImages.has(p.id) ? (
-                <img
-                  src={p.imageUrl}
-                  alt={altText}
-                  loading={loading}
-                  decoding="async"
-                  onError={() => {
-                    setBrokenImages((prev) => {
-                      if (prev.has(p.id)) return prev;
-                      const next = new Set(prev);
-                      next.add(p.id);
-                      return next;
-                    });
-                  }}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-cream p-4">
-                  <span className="t-body text-center font-medium text-fg">
-                    {p.title}
-                  </span>
-                  <span className="t-caption text-center text-faint">
-                    {photoComingSoonLabel}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="mt-3 space-y-1">
-              <h3 className="t-body line-clamp-1 text-fg transition-colors duration-150 group-hover:text-accent">
-                {p.title}
-              </h3>
-              <div className="flex items-baseline gap-2 t-body">
-                {price && (
-                  <span className="price-figure text-fg">
-                    {formatMoney(price, { locale })}
-                  </span>
-                )}
-                {compareAt && (
-                  <span className="price-figure text-faint line-through">
-                    {formatMoney(compareAt, { locale })}
-                  </span>
+          const price = lowestPrice(p);
+          const compareAt = p.variants[0]?.compareAtPrice ?? null;
+          // Eager-load the first three (one full row at desktop) so the
+          // LCP isn't deferred. Lazy after.
+          const loading = idx < 3 ? "eager" : "lazy";
+          const altText = p.imageAlt ?? p.title;
+          return (
+            <a
+              key={p.id}
+              href={`${detailHrefBase}/${p.slug}`}
+              className="group block"
+            >
+              <div className="aspect-square w-full overflow-hidden bg-cream">
+                {p.imageUrl && !brokenImages.has(p.id) ? (
+                  <img
+                    src={p.imageUrl}
+                    alt={altText}
+                    loading={loading}
+                    decoding="async"
+                    onError={() => {
+                      setBrokenImages((prev) => {
+                        if (prev.has(p.id)) return prev;
+                        const next = new Set(prev);
+                        next.add(p.id);
+                        return next;
+                      });
+                    }}
+                    className="h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center px-6 text-center">
+                    <span className="t-body line-clamp-2 text-fg">
+                      {p.title}
+                    </span>
+                  </div>
                 )}
               </div>
-            </div>
-          </a>
-        );
-      })}
+              <div className="mt-4 space-y-1">
+                <h3 className="t-body line-clamp-1 text-fg transition-colors duration-200 group-hover:text-accent">
+                  {p.title}
+                </h3>
+                <div className="flex items-baseline gap-2 t-body">
+                  {price && (
+                    <span className="price-figure text-muted">
+                      {formatMoney(price, { locale })}
+                    </span>
+                  )}
+                  {compareAt && (
+                    <span className="price-figure text-faint line-through">
+                      {formatMoney(compareAt, { locale })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </a>
+          );
+        })}
       </div>
     </>
   );

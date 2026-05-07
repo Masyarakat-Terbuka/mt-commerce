@@ -38,70 +38,35 @@ const activeFilters = {
 ---
 
 <BaseLayout title={title} description={t("products.list.title")}>
-  <div class="mx-auto max-w-[1280px] px-4 py-10 md:px-8 md:py-16">
-    <header class="mb-10 md:mb-16">
-      <h1 class="t-h1 text-fg">{t("products.list.title")}</h1>
+  <div class="mx-auto max-w-[1280px] px-5 pb-24 pt-16 md:px-8 md:pb-32 md:pt-20">
+    <header class="mb-12 md:mb-16">
+      <h1 class="t-display text-fg">{t("products.list.title")}</h1>
     </header>
 
-    <div class="mb-6 flex items-center justify-between md:hidden">
-      <button
-        type="button"
-        class="t-caption uppercase tracking-wide text-fg"
-        onclick="document.getElementById('mobile-filters')?.showModal()"
-      >
-        {t("products.list.filter_button")} &rarr;
-      </button>
+    <div class="mb-10 md:mb-14">
+      <Filters active={activeFilters} />
     </div>
 
-    <div class="grid grid-cols-1 gap-12 md:grid-cols-[240px_1fr] md:gap-16">
-      <aside class="hidden md:block">
-        <Filters active={activeFilters} />
-      </aside>
-
-      <div>
-        <ProductGrid
-          client:load
-          apiUrl={apiUrl}
-          locale="en-US"
-          detailHrefBase={detailHrefBase}
-          emptyLabel={t("products.list.empty")}
-          errorLabel={t("products.list.error")}
-          skeletonLabel={t("products.list.skeleton_aria")}
-          photoComingSoonLabel={t("products.card.photo_coming_soon")}
-          query={{
-            ...(category ? { categorySlug: category } : {}),
-            ...(search ? { search } : {}),
-            ...(minPrice ? { minPriceAmount: minPrice } : {}),
-            ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
-            page,
-            sort,
-          }}
-          skeletonCount={12}
-          showCount
-          showingCountTemplate={t("products.list.showing_count")}
-        />
-      </div>
-    </div>
+    <ProductGrid
+      client:load
+      apiUrl={apiUrl}
+      locale="en-US"
+      detailHrefBase={detailHrefBase}
+      emptyLabel={t("products.list.empty")}
+      errorLabel={t("products.list.error")}
+      skeletonLabel={t("products.list.skeleton_aria")}
+      photoComingSoonLabel={t("products.card.photo_coming_soon")}
+      query={{
+        ...(category ? { categorySlug: category } : {}),
+        ...(search ? { search } : {}),
+        ...(minPrice ? { minPriceAmount: minPrice } : {}),
+        ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
+        page,
+        sort,
+      }}
+      skeletonCount={9}
+      showCount
+      showingCountTemplate={t("products.list.showing_count")}
+    />
   </div>
-
-  <dialog
-    id="mobile-filters"
-    class="m-0 max-h-screen w-screen max-w-full bg-cream p-0 backdrop:bg-fg/50 md:hidden"
-  >
-    <div class="flex items-center justify-between border-b border-line bg-cream px-4 py-4">
-      <span class="t-caption uppercase tracking-wide text-muted">
-        {t("products.list.filter_button")}
-      </span>
-      <button
-        type="button"
-        class="t-caption uppercase tracking-wide text-fg"
-        onclick="document.getElementById('mobile-filters')?.close()"
-      >
-        {t("products.list.filter_close")}
-      </button>
-    </div>
-    <div class="overflow-y-auto px-4 py-6">
-      <Filters active={activeFilters} inline />
-    </div>
-  </dialog>
 </BaseLayout>

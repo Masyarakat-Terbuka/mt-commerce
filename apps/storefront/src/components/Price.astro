@@ -6,6 +6,12 @@
  * with the type, not in the storefront. The `.price-figure` class enforces
  * tabular numerals so column-aligned prices in product grids do not wobble
  * between rows.
+ *
+ * Three colour modes:
+ *   - default → full-strength fg (used on the detail page hero block)
+ *   - muted   → `text-muted` (used on cards — Saturdays NYC mutes prices
+ *               below the title so the photo and title do the heavy lifting)
+ *   - strike  → faint with line-through (compare-at)
  */
 import { format as formatMoney, type Money } from "@mt-commerce/core/money";
 
@@ -15,16 +21,30 @@ export interface Props {
   locale?: string;
   /** When true, renders with line-through styling (used for compare-at). */
   strike?: boolean;
+  /** When true, renders in `text-muted` (used on cards). */
+  muted?: boolean;
   class?: string;
 }
 
-const { money, locale = "id-ID", strike = false, class: className } = Astro.props;
+const {
+  money,
+  locale = "id-ID",
+  strike = false,
+  muted = false,
+  class: className,
+} = Astro.props;
 const formatted = formatMoney(money, { locale });
-const classes = [
-  "price-figure",
-  strike ? "text-faint line-through" : "text-fg",
-  className ?? "",
-]
+
+let toneClass: string;
+if (strike) {
+  toneClass = "text-faint line-through";
+} else if (muted) {
+  toneClass = "text-muted";
+} else {
+  toneClass = "text-fg";
+}
+
+const classes = ["price-figure", toneClass, className ?? ""]
   .filter(Boolean)
   .join(" ");
 ---

@@ -1,34 +1,26 @@
 ---
 /**
- * Filters — left rail on desktop, native `<dialog>` on mobile.
+ * Filters — horizontal bar above the grid.
  *
- * The form posts back to the listing page with a plain GET so the
- * filtered URL is shareable and the back button works. There is no
- * client-side state — every interaction is a navigation.
+ * The previous left-rail with section legends and form layout was generic
+ * ecommerce; the editorial direction calls for something flatter. The new
+ * shape:
  *
- * Markup is identical between desktop and mobile; only the wrapper
- * differs. CSS handles the breakpoint switch:
+ *   ┌ Search ──────────────────────────────────────────────────────┐
+ *   │  cari produk…                                            →   │
+ *   └──────────────────────────────────────────────────────────────┘
  *
- *   - Desktop (md+): rendered inline in the page's left rail.
- *   - Mobile: a `<dialog>` opened by a "Filter" button. The dialog
- *     uses the `open` attribute via `dialog.showModal()` triggered
- *     by inline JS that the listing page injects; we keep the
- *     button/dialog pair entirely native to avoid a React island
- *     just for a panel toggle.
+ *   Semua · Kopi · Batik · Kerajinan · Kuliner · Fashion
  *
- * The radio inputs for sort/category use `name="sort"`/`name="category"`
- * with each option's value, so on submit the URL carries the chosen
- * value verbatim. An "All" option for category clears the filter
- * (empty value).
+ *   Menampilkan 24 produk · Urutkan: [Terbaru ▾] · Filter ▾
+ *      ↳ Filter expanded:  Min ___  —  Max ___  Terapkan
  *
- * Auto-submit behavior (progressive enhancement):
+ * Each interaction is a navigation (GET submit). With JS, the radios and
+ * select auto-submit on change; without JS the explicit "Terapkan" button
+ * stays as the fallback path. Search and price inputs debounce 600ms.
  *
- *   With JS enabled, changing a radio submits the form immediately;
- *   typing in price min/max debounces 600ms then submits. The
- *   "Terapkan" button stays in the DOM as the no-JS fallback and
- *   is hidden by the inline script once listeners are attached.
- *   Pressing Enter in any input triggers the form's native submit
- *   path, not a parallel one.
+ * Counts beside category names rendered when the small-catalog SDK call
+ * succeeds; absent otherwise (degrade silently to plain category names).
  */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 import { listCategories, listProducts } from "@/lib/api";
@@ -42,9 +34,8 @@ export interface Props {
     sort?: string;
   };
   /**
-   * When true, render only the inline form fields (used inside the mobile
-   * `<dialog>`). When false (default), render the desktop sidebar wrapper
-   * with the form inside.
+   * When true, renders a compact form (no count badges, no totals) for
+   * use inside the mobile sheet. Default false renders the desktop bar.
    */
   inline?: boolean;
 }
@@ -55,15 +46,6 @@ const t = createTranslator(locale);
 const categories = await listCategories();
 const formAction = localePath(locale, "/products");
 
-/**
- * Pre-compute per-category counts in one SDK call. The catalog at v0.1 is
- * small (<100 products), and the listing page already issues a parallel
- * call to render the grid, so the cost here is negligible compared to N+1
- * per-category queries.
- *
- * If the call fails the rail still renders — `counts` stays empty and the
- * parenthetical numbers are simply omitted.
- */
 let totalCount = 0;
 const countsBySlug = new Map<string, number>();
 try {
@@ -75,7 +57,7 @@ try {
     countsBySlug.set(slug, (countsBySlug.get(slug) ?? 0) + 1);
   }
 } catch {
-  // Stay silent — empty counts map is the graceful degrade path.
+  // Silent degrade — empty counts, no badges.
 }
 
 const sortOptions = [
@@ -87,70 +69,88 @@ const sortOptions = [
 const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes(active.sort)
   ? active.sort
   : "newest";
+
+const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
 ---
 
 <form
   method="get"
   action={formAction}
   data-filters-form
-  class:list={[
-    "flex flex-col gap-8 t-body",
-    inline ? "" : "md:sticky md:top-20 md:self-start",
-  ]}
+  class="t-body"
 >
-  {/* Search */}
-  <div>
-    <label class="t-caption block tracking-wide text-muted" for="filter-search">
-      {t("products.filters.search")}
-    </label>
+  {/* Search bar — single thin input, full width. */}
+  <div class="flex items-center border-b border-line pb-3">
+    <label for="filter-search" class="sr-only">{t("products.filters.search")}</label>
     <input
       id="filter-search"
       type="search"
       name="q"
       value={active.search ?? ""}
       placeholder={t("products.filters.search_placeholder")}
-      aria-label={t("products.filters.search")}
-      class="mt-2 w-full border-b border-line bg-transparent py-1.5 text-fg outline-none transition-colors duration-150 focus:border-accent"
+      autocomplete="off"
+      class="flex-1 bg-transparent t-body text-fg placeholder:text-faint outline-none"
     />
+    <button
+      type="submit"
+      class="t-body text-faint transition-colors duration-150 hover:text-fg"
+      aria-label={t("products.filters.apply")}
+    >
+      &rarr;
+    </button>
   </div>
 
-  {/* Category — radio list */}
-  <fieldset>
-    <legend class="t-caption tracking-wide text-muted">
-      {t("products.filters.category")}
-    </legend>
-    <ul class="mt-3 space-y-2">
-      <li>
-        <label class="flex cursor-pointer items-center gap-2.5 text-fg">
+  {/* Category — horizontal middot-separated text links (rendered as radios for no-JS). */}
+  <fieldset class="mt-8">
+    <legend class="sr-only">{t("products.filters.category")}</legend>
+    <ul class="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <li class="flex items-center gap-x-3">
+        <label
+          class:list={[
+            "cursor-pointer t-body transition-colors duration-150 hover:text-accent",
+            !active.category ? "text-accent" : "text-fg",
+          ]}
+        >
           <input
             type="radio"
             name="category"
             value=""
             checked={!active.category}
-            class="h-3.5 w-3.5 accent-accent"
+            class="sr-only"
           />
           <span>
             {t("products.filters.category_all")}
-            {totalCount > 0 && <span class="text-faint"> ({totalCount})</span>}
+            {!inline && totalCount > 0 && (
+              <span class="ml-1 t-caption text-faint">({totalCount})</span>
+            )}
           </span>
         </label>
       </li>
       {
         categories.map((c) => {
           const count = countsBySlug.get(c.slug);
+          const isActive = active.category === c.slug;
           return (
-            <li>
-              <label class="flex cursor-pointer items-center gap-2.5 text-fg">
+            <li class="flex items-center gap-x-3">
+              <span class="text-faint" aria-hidden="true">·</span>
+              <label
+                class:list={[
+                  "cursor-pointer t-body transition-colors duration-150 hover:text-accent",
+                  isActive ? "text-accent" : "text-fg",
+                ]}
+              >
                 <input
                   type="radio"
                   name="category"
                   value={c.slug}
-                  checked={active.category === c.slug}
-                  class="h-3.5 w-3.5 accent-accent"
+                  checked={isActive}
+                  class="sr-only"
                 />
                 <span>
                   {c.name[locale]}
-                  {typeof count === "number" && <span class="text-faint"> ({count})</span>}
+                  {!inline && typeof count === "number" && (
+                    <span class="ml-1 t-caption text-faint">({count})</span>
+                  )}
                 </span>
               </label>
             </li>
@@ -160,81 +160,81 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
     </ul>
   </fieldset>
 
-  {/* Price range */}
-  <fieldset>
-    <legend class="t-caption tracking-wide text-muted">
-      {t("products.filters.price")}
-    </legend>
-    <div class="mt-3 flex items-center gap-3">
-      <label class="flex flex-1 flex-col">
-        <span class="sr-only">{t("products.filters.price_min")}</span>
-        <input
-          type="number"
-          name="min"
-          inputmode="numeric"
-          min="0"
-          placeholder={t("products.filters.price_min")}
-          value={active.minPrice ?? ""}
-          class="price-figure border-b border-line bg-transparent py-1.5 text-fg outline-none transition-colors duration-150 focus:border-accent"
-        />
-      </label>
-      <span class="text-faint" aria-hidden="true">—</span>
-      <label class="flex flex-1 flex-col">
-        <span class="sr-only">{t("products.filters.price_max")}</span>
-        <input
-          type="number"
-          name="max"
-          inputmode="numeric"
-          min="0"
-          placeholder={t("products.filters.price_max")}
-          value={active.maxPrice ?? ""}
-          class="price-figure border-b border-line bg-transparent py-1.5 text-fg outline-none transition-colors duration-150 focus:border-accent"
-        />
-      </label>
-    </div>
-  </fieldset>
+  {/* Sort + price-range disclosure row. Inline, sits left-aligned. */}
+  <div class="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+    <label class="flex items-center gap-2 t-caption text-muted">
+      <span>{t("products.filters.sort")}:</span>
+      <select
+        name="sort"
+        class="cursor-pointer border-0 bg-transparent t-body text-fg outline-none transition-colors duration-150 hover:text-accent focus:text-fg"
+      >
+        {
+          sortOptions.map((opt) => (
+            <option value={opt.value} selected={activeSort === opt.value}>
+              {opt.label}
+            </option>
+          ))
+        }
+      </select>
+    </label>
 
-  {/* Sort — radio list */}
-  <fieldset>
-    <legend class="t-caption tracking-wide text-muted">
-      {t("products.filters.sort")}
-    </legend>
-    <ul class="mt-3 space-y-2">
-      {
-        sortOptions.map((opt) => (
-          <li>
-            <label class="flex cursor-pointer items-center gap-2.5 text-fg">
-              <input
-                type="radio"
-                name="sort"
-                value={opt.value}
-                checked={activeSort === opt.value}
-                class="h-3.5 w-3.5 accent-accent"
-              />
-              <span>{opt.label}</span>
-            </label>
-          </li>
-        ))
-      }
-    </ul>
-  </fieldset>
+    <details class="group" data-filters-price-disclosure open={hasPriceFilter}>
+      <summary
+        class="flex cursor-pointer list-none items-center gap-1.5 t-caption text-muted transition-colors duration-150 hover:text-fg [&::-webkit-details-marker]:hidden"
+      >
+        <span>{t("products.filters.price")}</span>
+        <span aria-hidden="true" class="t-body">+</span>
+      </summary>
+      <div class="mt-3 flex items-center gap-3">
+        <label class="flex flex-1 flex-col">
+          <span class="sr-only">{t("products.filters.price_min")}</span>
+          <input
+            type="number"
+            name="min"
+            inputmode="numeric"
+            min="0"
+            placeholder={t("products.filters.price_min")}
+            value={active.minPrice ?? ""}
+            class="price-figure w-28 border-b border-line bg-transparent py-1 t-body text-fg placeholder:text-faint outline-none transition-colors duration-150 focus:border-fg"
+          />
+        </label>
+        <span class="text-faint" aria-hidden="true">—</span>
+        <label class="flex flex-1 flex-col">
+          <span class="sr-only">{t("products.filters.price_max")}</span>
+          <input
+            type="number"
+            name="max"
+            inputmode="numeric"
+            min="0"
+            placeholder={t("products.filters.price_max")}
+            value={active.maxPrice ?? ""}
+            class="price-figure w-28 border-b border-line bg-transparent py-1 t-body text-fg placeholder:text-faint outline-none transition-colors duration-150 focus:border-fg"
+          />
+        </label>
+      </div>
+    </details>
 
-  {/*
-    No-JS fallback. The script below hides this once auto-submit listeners
-    are attached, so JS users only see the rail respond to interaction.
-  */}
-  <button type="submit" data-filters-apply class="btn-primary w-full">
-    {t("products.filters.apply")}
-  </button>
+    {/*
+      No-JS fallback — the inline script below hides this once auto-submit
+      listeners attach. With JS, every change in the form auto-submits.
+    */}
+    <button
+      type="submit"
+      data-filters-apply
+      class="t-caption text-fg underline-offset-4 transition-colors duration-150 hover:text-accent hover:underline"
+    >
+      {t("products.filters.apply")}
+    </button>
+  </div>
 </form>
 
 <script>
   /**
-   * Auto-submit wiring for filter forms.
+   * Auto-submit wiring for the filter form(s).
    *
-   * Multiple instances may exist on the same page (the desktop sidebar
-   * and the mobile dialog), so we attach to every `[data-filters-form]`.
-   * Each form gets its own debounce timer keyed off the element itself.
+   * Multiple instances may exist on the same page (the desktop inline bar
+   * and the mobile sheet). Each gets its own debounce timer keyed off the
+   * element itself.
    */
   const DEBOUNCE_MS = 600;
 
@@ -242,9 +242,6 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
     let priceTimer: number | undefined;
 
     const submit = () => {
-      // Use requestSubmit when available so the form's submit event fires
-      // (matches a real button click); fall back to submit() for older
-      // browsers that lack it.
       if (typeof form.requestSubmit === "function") {
         form.requestSubmit();
       } else {
@@ -257,8 +254,6 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
       if (!target) return;
       const tag = target.tagName;
       const type = (target as HTMLInputElement).type;
-      // Radio + select changes submit immediately. Text/number/search
-      // inputs are handled by the debounced `input` listener below.
       if (tag === "SELECT" || type === "radio" || type === "checkbox") {
         submit();
       }
@@ -275,18 +270,14 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
       priceTimer = window.setTimeout(submit, DEBOUNCE_MS);
     });
 
-    // Enter inside an input fires the form's native submit; cancel any
-    // pending debounce so we don't fire a second submit afterward.
     form.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key !== "Enter") return;
       if (priceTimer !== undefined) {
         window.clearTimeout(priceTimer);
         priceTimer = undefined;
       }
-      // Let the browser handle the submit naturally.
     });
 
-    // Hide the explicit Apply button — its only role is no-JS fallback.
     const applyBtn = form.querySelector<HTMLButtonElement>("[data-filters-apply]");
     if (applyBtn) {
       applyBtn.hidden = true;

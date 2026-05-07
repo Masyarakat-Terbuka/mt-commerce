@@ -1,11 +1,14 @@
 ---
 /**
- * Footer — typographic, calm, no decoration.
+ * Footer — a single line of inline links and a copyright.
  *
- * Two columns on mobile, four on desktop. Bottom row carries the
- * copyright and a quiet language switcher mirroring the header. No
- * social icons, no newsletter signup — both are deferred until they
- * have something real to point at.
+ * The 4-column "site map" layout is intentionally gone. It read as
+ * generic ecommerce; the editorial direction calls for a single
+ * horizontal row of text-links separated by middots, followed by a
+ * copyright row with a quiet locale toggle on the right.
+ *
+ * No social icons, no newsletter signup, no "back to top" button. When
+ * something becomes worth pointing at, it earns a place inline here.
  */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 
@@ -20,76 +23,48 @@ const stripped = currentPath.replace(/^\/(en|id)(?=\/|$)/, "") || "/";
 const idHref = localePath("id", stripped);
 const enHref = localePath("en", stripped);
 
-const columns = [
-  {
-    title: t("footer.col.about.title"),
-    links: [
-      { label: t("footer.col.about.story"), href: localePath(locale, "/about") },
-      { label: t("footer.col.about.principles"), href: localePath(locale, "/about/principles") },
-      { label: t("footer.col.about.contact"), href: localePath(locale, "/contact") },
-    ],
-  },
-  {
-    title: t("footer.col.help.title"),
-    links: [
-      { label: t("footer.col.help.shipping"), href: localePath(locale, "/help/shipping") },
-      { label: t("footer.col.help.returns"), href: localePath(locale, "/help/returns") },
-      { label: t("footer.col.help.faq"), href: localePath(locale, "/help/faq") },
-    ],
-  },
-  {
-    title: t("footer.col.community.title"),
-    links: [
-      { label: t("footer.col.community.github"), href: "https://github.com" },
-      { label: t("footer.col.community.docs"), href: localePath(locale, "/docs") },
-      { label: t("footer.col.community.contributing"), href: localePath(locale, "/contributing") },
-    ],
-  },
-  {
-    title: t("footer.col.legal.title"),
-    links: [
-      { label: t("footer.col.legal.terms"), href: localePath(locale, "/legal/terms") },
-      { label: t("footer.col.legal.privacy"), href: localePath(locale, "/legal/privacy") },
-      { label: t("footer.col.legal.license"), href: localePath(locale, "/legal/license") },
-    ],
-  },
+const links = [
+  { label: t("footer.col.about.title"), href: localePath(locale, "/about") },
+  { label: t("footer.col.help.title"), href: localePath(locale, "/help/faq") },
+  { label: t("footer.col.community.title"), href: localePath(locale, "/contributing") },
+  { label: t("footer.col.legal.privacy"), href: localePath(locale, "/legal/privacy") },
+  { label: t("footer.col.legal.terms"), href: localePath(locale, "/legal/terms") },
 ];
 ---
 
-<footer class="mt-24 border-t border-line bg-cream">
-  <div class="mx-auto max-w-[1280px] px-4 py-12 md:px-8 md:py-16">
-    <div class="grid grid-cols-2 gap-8 md:grid-cols-4 md:gap-12">
+<footer class="mt-32 border-t border-line bg-cream">
+  <div class="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16">
+    {/* Single inline row of links — middot separated, wraps gracefully. */}
+    <ul class="flex flex-wrap items-center gap-x-3 gap-y-2 t-body">
       {
-        columns.map((col) => (
-          <div>
-            <h3 class="t-caption text-muted">{col.title}</h3>
-            <ul class="mt-4 space-y-2">
-              {col.links.map((link) => (
-                <li>
-                  <a
-                    class="t-body text-fg transition-colors duration-150 hover:text-accent"
-                    href={link.href}
-                  >
-                    {link.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
+        links.map((link, idx) => (
+          <li class="flex items-center gap-x-3">
+            <a
+              class="text-fg transition-colors duration-150 hover:text-accent"
+              href={link.href}
+            >
+              {link.label}
+            </a>
+            {idx < links.length - 1 && (
+              <span class="text-faint" aria-hidden="true">·</span>
+            )}
+          </li>
         ))
       }
-    </div>
+    </ul>
 
+    {/* Copyright + locale toggle. The line above does the navigational work;
+        this row is the page's quiet bottom edge. */}
     <div
-      class="mt-12 flex flex-col items-start gap-3 border-t border-line pt-6 md:mt-16 md:flex-row md:items-center md:justify-between"
+      class="mt-10 flex flex-col items-start gap-3 t-caption md:flex-row md:items-center md:justify-between"
     >
-      <p class="t-caption text-muted">© {year} {t("footer.copyright")}</p>
-      <div class="flex items-center gap-1 t-caption">
+      <p class="text-faint">© {year} {t("footer.copyright")}</p>
+      <div class="flex items-center gap-1">
         <a
           href={idHref}
           aria-current={locale === "id" ? "true" : undefined}
           class:list={[
-            "px-2 py-1 transition-colors duration-150",
+            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
             locale === "id" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
@@ -100,7 +75,7 @@ const columns = [
           href={enHref}
           aria-current={locale === "en" ? "true" : undefined}
           class:list={[
-            "px-2 py-1 transition-colors duration-150",
+            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
             locale === "en" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >

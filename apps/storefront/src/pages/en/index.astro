@@ -13,25 +13,50 @@ const description = t("home.hero.subhead");
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath("en", "/products");
 
+const heroImage =
+  "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9?w=2400&q=80&auto=format&fit=crop";
+const heroImageAlt = "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
+
 const categories = await listCategories();
 ---
 
 <BaseLayout title={title} description={description}>
-  {/* Hero mirrors the id/ home page — typography only, no image wash. */}
-  <section class="bg-cream" aria-labelledby="home-hero">
-    <div class="mx-auto max-w-[1280px] px-4 py-24 md:px-8 md:py-32">
-      <h1 id="home-hero" class="t-display max-w-[18ch] text-fg">
-        {t("home.hero.headline")}
-      </h1>
-      <p class="mt-5 max-w-[52ch] t-body text-muted">
-        {t("home.hero.subhead")}
-      </p>
+  {/* Mirrors id/index.astro — see comments there. */}
+  <section class="relative" aria-labelledby="home-hero">
+    <div class="relative h-[50vh] min-h-[420px] w-full overflow-hidden md:h-[70vh] md:min-h-[560px]">
+      <img
+        src={heroImage}
+        alt={heroImageAlt}
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
+        class="absolute inset-0 h-full w-full object-cover"
+      />
+      <div class="absolute inset-0 bg-cream/35" aria-hidden="true"></div>
+
+      <div class="absolute inset-0 flex items-end">
+        <div class="mx-auto w-full max-w-[1280px] px-5 pb-12 md:px-8 md:pb-20">
+          <h1 id="home-hero" class="t-display max-w-[20ch] text-fg">
+            {t("home.hero.headline")}
+          </h1>
+          <p class="mt-4 max-w-[44ch] t-body text-fg/85">
+            {t("home.hero.subhead")}
+          </p>
+          <a
+            href={localePath(locale, "/products")}
+            class="mt-8 inline-flex items-center gap-2 t-body text-fg underline-offset-[6px] transition-colors duration-200 hover:text-accent hover:underline"
+          >
+            {t("home.hero.cta")}
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+      </div>
     </div>
   </section>
 
-  <section class="mx-auto max-w-[1280px] border-t border-line px-4 py-16 md:px-8 md:py-24">
+  <section class="mx-auto max-w-[1280px] px-5 pb-24 pt-24 md:px-8 md:pb-32 md:pt-32">
     <div class="flex items-baseline justify-between">
-      <h2 class="t-h1 text-fg">{t("home.featured.title")}</h2>
+      <p class="t-overline text-muted">{t("home.featured.title")}</p>
       <a
         href={localePath(locale, "/products")}
         class="t-body text-muted transition-colors duration-150 hover:text-accent"
@@ -39,7 +64,7 @@ const categories = await listCategories();
         {t("products.list.title")} &rarr;
       </a>
     </div>
-    <div class="mt-8">
+    <div class="mt-10 md:mt-14">
       <ProductGrid
         client:load
         apiUrl={apiUrl}
@@ -48,10 +73,10 @@ const categories = await listCategories();
         emptyLabel={t("products.list.empty")}
         errorLabel={t("products.list.error")}
         skeletonLabel={t("products.list.skeleton_aria")}
-          photoComingSoonLabel={t("products.card.photo_coming_soon")}
-        query={{ pageSize: 4, sort: "newest" }}
-        limit={4}
-        skeletonCount={4}
+        photoComingSoonLabel={t("products.card.photo_coming_soon")}
+        query={{ pageSize: 3, sort: "newest" }}
+        limit={3}
+        skeletonCount={3}
       />
     </div>
   </section>
@@ -59,14 +84,12 @@ const categories = await listCategories();
   {
     categories.length > 0 && (
       <section class="border-t border-line">
-        <div class="mx-auto max-w-[1280px] px-4 py-10 md:px-8 md:py-12">
-          <h2 class="t-caption text-muted">
-            {t("home.categories.title")}
-          </h2>
-          <ul class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 t-body">
+        <div class="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16">
+          <p class="t-overline text-muted">{t("home.categories.title")}</p>
+          <ul class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 t-body">
             {
               categories.map((c, idx) => (
-                <li class="flex items-center gap-x-2">
+                <li class="flex items-center gap-x-3">
                   <a
                     href={`${localePath(locale, "/products")}?category=${c.slug}`}
                     class="text-fg transition-colors duration-150 hover:text-accent"

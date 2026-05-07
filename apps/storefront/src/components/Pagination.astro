@@ -1,11 +1,14 @@
 ---
 /**
- * Pagination — text-only.
+ * Pagination — text-only, tiny, breathing room above and below.
  *
- * Renders as `← Sebelumnya · 1 2 3 · Selanjutnya →`. No buttons-with-borders;
- * the calm direction calls for typographic restraint here too. The active
- * page is the only one rendered with full-strength foreground; siblings stay
- * muted, and disabled prev/next fade further.
+ * Renders as `← Sebelumnya · 1 · 2 · 3 · Selanjutnya →`. No buttons,
+ * no borders. The active page is the only one rendered with full-strength
+ * foreground; siblings stay muted. Disabled prev/next fade further.
+ *
+ * Sits in `.t-caption` (12px) instead of `.t-body` so it reads as a
+ * navigational footnote rather than a primary action — fits the editorial
+ * tone of the listing page.
  */
 import { createTranslator, resolveLocale, type Locale } from "@/lib/i18n";
 
@@ -36,7 +39,10 @@ const hasNext = page < totalPages;
 
 {
   totalPages > 1 && (
-    <nav class="mt-12 flex items-center justify-center gap-3 t-body" aria-label="Pagination">
+    <nav
+      class="mt-20 flex items-center justify-center gap-4 t-caption"
+      aria-label="Pagination"
+    >
       <a
         href={hasPrev ? buildHref(page - 1) : undefined}
         aria-disabled={!hasPrev}
@@ -50,7 +56,7 @@ const hasNext = page < totalPages;
 
       <span class="text-faint" aria-hidden="true">·</span>
 
-      <ul class="flex items-center gap-3">
+      <ul class="flex items-center gap-4">
         {pages.map((p) => (
           <li>
             <a
@@ -58,7 +64,7 @@ const hasNext = page < totalPages;
               aria-current={p === page ? "page" : undefined}
               class:list={[
                 "price-figure transition-colors duration-150",
-                p === page ? "font-medium text-fg" : "text-muted hover:text-accent",
+                p === page ? "text-fg" : "text-faint hover:text-accent",
               ]}
             >
               {p}

@@ -1,23 +1,22 @@
 ---
 /**
- * Header — typographic, sticky, calm.
+ * Header — single thin bar, sticky, calm.
  *
- * Layout:
- *   - Left: word-mark "mt-commerce" (weight 600).
- *   - Center: nav links (Beranda · Produk · Tentang) on desktop only.
- *   - Right: search toggle, cart link with count badge, language switcher,
- *     account link.
+ * Layout (left → right):
+ *   - Mobile menu toggle (mobile only)
+ *   - Lowercase wordmark "mt-commerce" — `t-body` weight 400, no styling
+ *   - Center nav: Beranda · Produk · Tentang (`t-body` weight 400, +0.02em
+ *     tracking, generous gap)
+ *   - Right cluster: small magnifier, cart icon with optional count dot,
+ *     account link, locale toggle (`id · en` lowercase, tiny)
  *
- * Interaction:
- *   - The search button is a `<details>` toggle. Opening it expands the
- *     header by ~56px and reveals an inline `<input>` that submits to
- *     `/products?q=…`. No JS, no React island; the browser handles the
- *     toggle and the form's GET submit handles the navigation.
- *   - Mobile collapses the nav into another `<details>` next to the
- *     word-mark. The search icon stays visible at every breakpoint.
+ * Surface: `bg-cream` (matches body) with a 1px hairline bottom border.
+ * No backdrop blur, no transparency tricks, no drop shadow — the header
+ * sits on top of the same cream the body uses, so it just dissolves into
+ * the page.
  *
  * The cart count is left at zero in markup until the cart store lands;
- * the badge structure is in place so the eventual store can hydrate it
+ * the dot structure is in place so the eventual store can hydrate it
  * without restyling the header.
  */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
@@ -40,68 +39,85 @@ const idHref = localePath("id", stripped);
 const enHref = localePath("en", stripped);
 ---
 
-<header
-  class="sticky top-0 z-40 border-b border-line bg-cream/95 backdrop-blur supports-[backdrop-filter]:bg-cream/80"
->
-  <div class="mx-auto flex h-14 max-w-[1280px] items-center justify-between gap-4 px-4 md:h-16 md:px-8">
-    {/* Left cluster: mobile menu + word-mark */}
+<header class="sticky top-0 z-40 border-b border-line bg-cream">
+  <div class="mx-auto flex h-14 max-w-[1280px] items-center justify-between gap-4 px-5 md:h-16 md:px-8">
+    {/* Left cluster: mobile menu + lowercase wordmark */}
     <div class="flex items-center gap-3">
       <details class="relative md:hidden">
         <summary
           class="flex h-9 w-9 cursor-pointer list-none items-center justify-center text-fg [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.menu")}
         >
-          {/* Three-line menu glyph drawn in CSS, no icon font. */}
-          <span class="block h-px w-5 bg-fg before:mb-1.5 before:block before:h-px before:w-5 before:bg-fg before:content-[''] after:mt-1.5 after:block after:h-px after:w-5 after:bg-fg after:content-['']"></span>
+          {/* Two thin lines — calmer than the usual three. */}
+          <span class="block h-px w-5 bg-fg before:mb-1.5 before:block before:h-px before:w-5 before:bg-fg before:content-['']"></span>
         </summary>
         <nav
-          class="absolute left-0 top-full z-30 mt-px w-[calc(100vw-2rem)] border border-line bg-paper p-4"
+          class="absolute left-0 top-full z-30 mt-px w-[calc(100vw-2.5rem)] border-b border-line bg-cream px-5 py-6"
           aria-label="Mobile"
         >
-          <ul class="flex flex-col gap-3 t-body">
-            <li><a class="block py-1 hover:text-accent" href={homeHref}>{t("nav.home")}</a></li>
-            <li><a class="block py-1 hover:text-accent" href={productsHref}>{t("nav.products")}</a></li>
-            <li><a class="block py-1 hover:text-accent" href={aboutHref}>{t("nav.about")}</a></li>
+          <ul class="flex flex-col gap-4 t-body">
+            <li><a class="block hover:text-accent" href={homeHref}>{t("nav.home")}</a></li>
+            <li><a class="block hover:text-accent" href={productsHref}>{t("nav.products")}</a></li>
+            <li><a class="block hover:text-accent" href={aboutHref}>{t("nav.about")}</a></li>
+            <li><a class="block hover:text-accent" href={accountHref}>{t("nav.account")}</a></li>
           </ul>
         </nav>
       </details>
 
-      <a href={homeHref} class="text-[15px] font-semibold tracking-tight text-fg">
+      <a
+        href={homeHref}
+        class="t-body font-normal lowercase tracking-tight text-fg transition-colors duration-150 hover:text-accent"
+      >
         mt-commerce
       </a>
     </div>
 
-    {/* Center: desktop nav */}
+    {/* Center: desktop nav. Tracking is wider than body to feel architectural. */}
     <nav class="hidden md:block" aria-label="Primary">
-      <ul class="flex items-center gap-8 t-body text-fg">
+      <ul class="flex items-center gap-10 t-body text-fg">
         <li>
-          <a class="transition-colors duration-150 hover:text-accent" href={homeHref}>{t("nav.home")}</a>
+          <a
+            class="tracking-[0.01em] transition-colors duration-150 hover:text-accent"
+            href={homeHref}
+          >
+            {t("nav.home")}
+          </a>
         </li>
         <li>
-          <a class="transition-colors duration-150 hover:text-accent" href={productsHref}>{t("nav.products")}</a>
+          <a
+            class="tracking-[0.01em] transition-colors duration-150 hover:text-accent"
+            href={productsHref}
+          >
+            {t("nav.products")}
+          </a>
         </li>
         <li>
-          <a class="transition-colors duration-150 hover:text-accent" href={aboutHref}>{t("nav.about")}</a>
+          <a
+            class="tracking-[0.01em] transition-colors duration-150 hover:text-accent"
+            href={aboutHref}
+          >
+            {t("nav.about")}
+          </a>
         </li>
       </ul>
     </nav>
 
-    {/* Right cluster: search, cart, language, account */}
-    <div class="flex items-center gap-1 md:gap-2">
+    {/* Right cluster: search, cart, account, locale toggle */}
+    <div class="flex items-center gap-1">
       <details class="group relative">
         <summary
           class="flex h-9 w-9 cursor-pointer list-none items-center justify-center text-fg transition-colors duration-150 hover:text-accent [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.search")}
         >
-          {/* Magnifier glyph as inline SVG so we don't add an icon dep. */}
+          {/* Magnifier glyph — 1px stroke, no fill. */}
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="18"
-            height="18"
+            width="17"
+            height="17"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="1.5"
+            stroke-width="1.25"
             stroke-linecap="round"
             stroke-linejoin="round"
             aria-hidden="true"
@@ -113,20 +129,19 @@ const enHref = localePath("en", stripped);
         <form
           method="get"
           action={searchAction}
-          class="absolute right-0 top-full z-30 mt-px flex w-[min(380px,calc(100vw-2rem))] items-center gap-2 border border-line bg-paper p-3"
+          class="absolute right-0 top-full z-30 mt-px flex w-[min(380px,calc(100vw-2.5rem))] items-center gap-3 border-b border-line bg-cream px-5 py-4"
           role="search"
         >
-          <label class="t-caption text-muted" for="header-search">
-            {t("nav.search")}
-          </label>
+          <label class="sr-only" for="header-search">{t("nav.search")}</label>
           <input
             id="header-search"
             type="search"
             name="q"
             autocomplete="off"
-            class="flex-1 border-b border-line bg-transparent py-1 t-body text-fg outline-none transition-colors duration-150 focus:border-accent"
+            placeholder={t("nav.search").toLowerCase()}
+            class="flex-1 border-b border-line bg-transparent py-1 t-body text-fg placeholder:text-faint outline-none transition-colors duration-150 focus:border-fg"
           />
-          <button type="submit" class="t-caption text-fg hover:text-accent">
+          <button type="submit" class="t-body text-fg hover:text-accent">
             &rarr;
           </button>
         </form>
@@ -134,34 +149,49 @@ const enHref = localePath("en", stripped);
 
       <a
         href={cartHref}
-        class="flex h-9 items-center gap-1.5 px-2 t-body text-fg transition-colors duration-150 hover:text-accent"
+        class="relative flex h-9 w-9 items-center justify-center text-fg transition-colors duration-150 hover:text-accent"
         aria-label={t("nav.cart")}
       >
+        {/* Bag glyph — 1px stroke. */}
         <svg
           xmlns="http://www.w3.org/2000/svg"
-          width="18"
-          height="18"
+          width="17"
+          height="17"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          stroke-width="1.5"
+          stroke-width="1.25"
           stroke-linecap="round"
           stroke-linejoin="round"
           aria-hidden="true"
         >
-          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6L18 2H6Z"></path>
-          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6L18 2H6Z"></path>
+          <line x1="4" y1="6" x2="20" y2="6"></line>
           <path d="M16 10a4 4 0 0 1-8 0"></path>
         </svg>
-        <span class="hidden md:inline">{t("nav.cart")}</span>
+        {/* Count dot — empty in markup until the cart store lands. The
+            element stays mounted so the layout stays stable when a count
+            arrives. */}
+        <span
+          data-cart-count
+          class="absolute -right-0.5 -top-0.5 hidden h-1.5 w-1.5 rounded-full bg-accent"
+          aria-hidden="true"
+        ></span>
       </a>
 
-      <div class="hidden items-center gap-0.5 t-caption tracking-tight md:flex">
+      <a
+        href={accountHref}
+        class="hidden h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
+      >
+        {t("nav.account")}
+      </a>
+
+      <div class="hidden items-center gap-1 pl-2 t-caption md:flex">
         <a
           href={idHref}
           aria-current={locale === "id" ? "true" : undefined}
           class:list={[
-            "px-2 py-1 transition-colors duration-150",
+            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
             locale === "id" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
@@ -172,20 +202,13 @@ const enHref = localePath("en", stripped);
           href={enHref}
           aria-current={locale === "en" ? "true" : undefined}
           class:list={[
-            "px-2 py-1 transition-colors duration-150",
+            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
             locale === "en" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
           en
         </a>
       </div>
-
-      <a
-        href={accountHref}
-        class="hidden h-9 items-center px-2 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
-      >
-        {t("nav.account")}
-      </a>
     </div>
   </div>
 </header>

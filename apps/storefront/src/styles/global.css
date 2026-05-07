@@ -23,9 +23,9 @@
  *   weight without ornament, which is exactly what we want a single accent
  *   to do.
  *
- *   The accent is used ONLY for: primary action buttons (Add to cart),
- *   active state on selected variant chips, and the focus ring. Everything
- *   else stays in the warm-neutral system.
+ *   The accent is reserved for: primary action buttons (Add to cart),
+ *   selected variant chip border, active category link, and link hover.
+ *   Everything else stays in the warm-neutral system.
  */
 @theme inline {
   /* Base surfaces */
@@ -38,7 +38,7 @@
   --color-faint: #a8a29a;
 
   /* Lines */
-  --color-line: #e8e2d9;
+  --color-line: #ebe5db;
   --color-line-strong: #1a1a1a;
 
   /* Single accent — terracotta. Reasoning above. */
@@ -57,9 +57,9 @@
   }
 
   /*
-   * Geist Variable is loaded via the layout's <link>. We pick three
-   * deliberate weights (400 / 500 / 600); 700+ is intentionally
-   * disallowed to keep type calm.
+   * Geist Variable is loaded via the layout's <link>. The redesign leans on
+   * the LIGHTER end of the scale — the layout uses 300/400/500. 600+ is
+   * intentionally avoided so headlines never read as "marketing chunky".
    */
   body {
     font-family:
@@ -86,26 +86,32 @@
 
 @layer components {
   /*
-   * Typography utilities — the only four sizes the storefront should ever
-   * use. Defining them as classes (rather than per-page Tailwind clusters)
-   * keeps authors from drifting.
+   * Typography utilities — five sizes the storefront uses everywhere.
+   * Defining them as classes (rather than per-page Tailwind clusters)
+   * keeps authors from drifting toward heavier weights or random sizes.
    *
-   *   .t-display   36/40 mobile → 48/52 desktop, weight 600, tight tracking
-   *   .t-h1        24/28 mobile → 32/36 desktop, weight 600
+   * The redesign drops everything to weight 400 (with 500 reserved for
+   * captions and the primary CTA label). Saturdays NYC and Muji both
+   * lean into LIGHT type — the photo carries the visual weight, not the
+   * headline. We follow that.
+   *
+   *   .t-display   32/40 mobile → 44/52 desktop, weight 400
+   *   .t-h1        22/28 mobile → 28/36 desktop, weight 400
    *   .t-body      14/22 mobile → 15/24 desktop, weight 400
    *   .t-caption   12/18,                          weight 500
+   *   .t-overline  11px caps, weight 500, +0.1em tracking — used SPARINGLY
    */
   .t-display {
-    font-size: 2.25rem; /* 36px */
+    font-size: 2rem; /* 32px */
     line-height: 2.5rem; /* 40px */
-    font-weight: 600;
+    font-weight: 400;
     letter-spacing: -0.02em;
   }
 
   .t-h1 {
-    font-size: 1.5rem; /* 24px */
+    font-size: 1.375rem; /* 22px */
     line-height: 1.75rem; /* 28px */
-    font-weight: 600;
+    font-weight: 400;
     letter-spacing: -0.01em;
   }
 
@@ -119,15 +125,30 @@
     font-size: 0.75rem; /* 12px */
     line-height: 1.125rem; /* 18px */
     font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+
+  /*
+   * Overline — the single deliberate caps moment per screen. Used for
+   * section labels ("Pilihan terbaru", "Produk serupa") and the
+   * category-as-breadcrumb pill on the detail page. If a screen has
+   * more than two of these, simplify.
+   */
+  .t-overline {
+    font-size: 0.6875rem; /* 11px */
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   @media (min-width: 768px) {
     .t-display {
-      font-size: 3rem; /* 48px */
+      font-size: 2.75rem; /* 44px */
       line-height: 3.25rem; /* 52px */
     }
     .t-h1 {
-      font-size: 2rem; /* 32px */
+      font-size: 1.75rem; /* 28px */
       line-height: 2.25rem; /* 36px */
     }
     .t-body {
@@ -142,12 +163,13 @@
    */
   .price-figure {
     font-variant-numeric: tabular-nums;
+    font-weight: 400;
   }
 
   /*
    * Primary action — the only button type that uses the accent color.
-   * Height is locked at 48px to match the spec for the detail page CTA;
-   * the size variants below adjust width/padding only.
+   * Height is locked at 48px to match the spec for the detail page CTA.
+   * Border-radius stays at 4px (slightly soft, never pill-shaped).
    */
   .btn-primary {
     display: inline-flex;
@@ -157,6 +179,7 @@
     padding: 0 1.25rem;
     background: var(--color-accent);
     color: var(--color-paper);
+    border-radius: 4px;
     font-size: 0.9375rem;
     font-weight: 500;
     transition:
@@ -172,7 +195,7 @@
   }
 
   /*
-   * Secondary action — quiet neutral, used for Cancel/back/etc.
+   * Secondary action — quiet neutral, used for cancel/back/etc.
    */
   .btn-secondary {
     display: inline-flex;
@@ -183,6 +206,7 @@
     background: transparent;
     color: var(--color-fg);
     border: 1px solid var(--color-line);
+    border-radius: 4px;
     font-size: 0.9375rem;
     font-weight: 500;
     transition:
@@ -194,13 +218,14 @@
   }
 
   /*
-   * Skeleton block — used for loading states. Matches the cream surface
-   * with a slightly darker placeholder rectangle and Tailwind's built-in
-   * `animate-pulse`. No new dependency.
+   * Skeleton block — lower-contrast than before. Earlier passes used a
+   * solid `--color-line` rectangle which read as "broken" rather than
+   * "loading". The new value sits ~3% darker than cream so the pulse is
+   * visible without competing with the eventual photograph.
    */
   .skeleton {
-    background: var(--color-line);
-    animation: pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    background: rgba(26, 26, 26, 0.045);
+    animation: pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
   @keyframes pulse {
     50% {
