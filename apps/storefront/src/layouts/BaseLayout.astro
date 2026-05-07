@@ -11,9 +11,17 @@ export interface Props {
   ogImage?: string;
   /** Canonical URL override; defaults to the current request URL. */
   canonical?: string;
+  /**
+   * Emit `<meta name="robots" content="noindex,follow">`. Used by pages
+   * that should not pollute the search index — search results in
+   * particular, where every `?q=...` would otherwise become a low-quality
+   * indexable page. Crawlers still follow outbound links so the rest of
+   * the catalog remains discoverable.
+   */
+  noindex?: boolean;
 }
 
-const { title, description, ogImage, canonical } = Astro.props;
+const { title, description, ogImage, canonical, noindex } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
 const canonicalUrl = canonical ?? new URL(Astro.url.pathname, siteUrl).toString();
@@ -29,6 +37,7 @@ const resolvedOgImage = ogImage ?? "/logo.png";
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
+    {noindex && <meta name="robots" content="noindex,follow" />}
     <link rel="canonical" href={canonicalUrl} />
     <link rel="icon" type="image/png" href="/logo.png" />
 

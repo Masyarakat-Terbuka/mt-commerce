@@ -35,7 +35,11 @@ const productsHref = localePath(locale, "/products");
 const aboutHref = localePath(locale, "/about");
 const cartHref = localePath(locale, "/cart");
 const accountHref = localePath(locale, "/account");
-const searchAction = localePath(locale, "/products");
+// The header form posts to the dedicated search results page rather than
+// the product listing. /products is for browsing the catalog; /search is
+// where a typed query (`?q=...`) renders results, breadcrumb, and a
+// no-results state. Keeps the two intents — browse vs. search — apart.
+const searchAction = localePath(locale, "/search");
 
 // Build language switcher hrefs by stripping the locale prefix from the
 // current path and re-prefixing for the target locale.

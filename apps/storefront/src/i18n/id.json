@@ -18,6 +18,22 @@
 
   "products.card.photo_coming_soon": "Foto segera hadir",
 
+  "breadcrumb.home": "Beranda",
+  "breadcrumb.search": "Pencarian",
+
+  "search.title": "Pencarian",
+  "search.title_with_query": "Hasil pencarian untuk '{query}'",
+  "search.empty.headline": "Mulai mengetik untuk mencari.",
+  "search.empty.body": "Cari produk berdasarkan nama atau deskripsi. Atau jelajahi semua produk.",
+  "search.no_results.headline": "Tidak ada hasil untuk '{query}'.",
+  "search.no_results.body": "Coba kata kunci lain, atau jelajahi semua produk.",
+  "search.error": "Gagal memuat hasil. Coba lagi.",
+  "search.skeleton_aria": "Memuat hasil pencarian",
+  "search.loading": "Memuat hasil…",
+  "search.count": "{count} hasil",
+  "search.browse_all": "Lihat semua produk",
+
+
   "products.list.title": "Semua produk",
   "products.list.empty": "Belum ada produk yang cocok dengan pencarian Anda.",
   "products.list.loading": "Memuat produk…",

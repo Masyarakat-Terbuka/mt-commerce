@@ -18,6 +18,22 @@
 
   "products.card.photo_coming_soon": "Photo coming soon",
 
+  "breadcrumb.home": "Home",
+  "breadcrumb.search": "Search",
+
+  "search.title": "Search",
+  "search.title_with_query": "Search results for '{query}'",
+  "search.empty.headline": "Start typing to search.",
+  "search.empty.body": "Find products by name or description. Or browse all products.",
+  "search.no_results.headline": "No results for '{query}'.",
+  "search.no_results.body": "Try different keywords, or browse all products.",
+  "search.error": "Failed to load results. Please try again.",
+  "search.skeleton_aria": "Loading search results",
+  "search.loading": "Loading results…",
+  "search.count": "{count} results",
+  "search.browse_all": "Browse all products",
+
+
   "products.list.title": "All products",
   "products.list.empty": "No products match your search.",
   "products.list.loading": "Loading products…",
