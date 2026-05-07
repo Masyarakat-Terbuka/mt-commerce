@@ -1,0 +1,104 @@
+---
+/**
+ * Icon — renders a `@hugeicons/core-free-icons` glyph as inline SVG.
+ *
+ * Why not `@hugeicons/react`? Mounting a React island just to draw a 17px
+ * glyph in the header would be wasteful — the icon is static markup. The
+ * `core-free-icons` package exports each icon as a small array of
+ * `[tagName, attrs]` tuples (raw SVG primitives), so we serialize them
+ * directly into the .astro template. React islands (e.g. CartDrawer) keep
+ * using `<HugeiconsIcon icon={...} />` from `@hugeicons/react` — the
+ * vocabulary is shared even though the renderer differs.
+ *
+ * Sizing/stroke defaults follow the storefront's calm aesthetic:
+ *   - 17px square (matches the previous inline SVG sizing in the header)
+ *   - 1.5 stroke (the hugeicons free pack ships paths at strokeWidth 1.5)
+ *
+ * Accessibility: pass `label` for a functional icon (renders an
+ * `<title>` and sets `role="img"`). Omit `label` for a decorative icon
+ * next to text — defaults to `aria-hidden="true"`.
+ */
+import type { HTMLAttributes } from "astro/types";
+
+// Mirrors the (unexported) IconSvgObject type from @hugeicons/core-free-icons:
+// each glyph is a list of [tagName, attrs] tuples. The package ships both
+// mutable and readonly variants depending on the icon, so we accept both.
+type HugeiconShape =
+  | [string, { [key: string]: string | number }][]
+  | readonly (readonly [string, { readonly [key: string]: string | number }])[];
+
+export interface Props extends Omit<HTMLAttributes<"svg">, "size"> {
+  /** Hugeicons free-icons array (e.g. `Search01Icon`). */
+  icon: HugeiconShape;
+  /** Square size in pixels. */
+  size?: number;
+  /** Stroke width override; the free pack defaults to 1.5. */
+  strokeWidth?: number;
+  /**
+   * Accessible label. When set, the icon is treated as functional
+   * (role="img" + <title>). When omitted, the icon is decorative
+   * (aria-hidden).
+   */
+  label?: string;
+}
+
+const {
+  icon,
+  size = 17,
+  strokeWidth = 1.5,
+  label,
+  class: className,
+  ...rest
+} = Astro.props;
+
+// Hugeicons ships path attrs in camelCase (strokeLinecap, strokeWidth) and
+// repeats stroke/strokeWidth on every node. The wrapping <svg> already sets
+// those via currentColor + the stroke-* attributes, so we strip the
+// redundant per-node copies. We also rewrite camelCase to kebab-case for
+// the few SVG attrs Hugeicons emits (strokeLinecap → stroke-linecap, etc.)
+// — though after stripping them above, only geometry attrs (`d`, `cx`,
+// `cy`, `r`, `x1`, `y1`, ...) remain, and those are already lowercase.
+const STRIP = new Set([
+  "stroke",
+  "strokeLinecap",
+  "strokeLinejoin",
+  "strokeWidth",
+  "key",
+]);
+
+function escapeAttr(v: unknown): string {
+  return String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+const innerHtml = icon
+  .map(([tag, attrs]) => {
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(attrs)) {
+      if (STRIP.has(k)) continue;
+      parts.push(`${k}="${escapeAttr(v)}"`);
+    }
+    // All Hugeicons free-pack nodes are self-closing SVG primitives
+    // (path, circle, line, rect, polyline, polygon).
+    return `<${tag}${parts.length ? " " + parts.join(" ") : ""}/>`;
+  })
+  .join("");
+---
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width={size}
+  height={size}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width={strokeWidth}
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  class={className}
+  role={label ? "img" : undefined}
+  aria-hidden={label ? undefined : "true"}
+  {...rest}
+>
+  {label && <title>{label}</title>}
+  <Fragment set:html={innerHtml} />
+</svg>

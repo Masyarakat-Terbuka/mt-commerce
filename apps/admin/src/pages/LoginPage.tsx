@@ -83,6 +83,13 @@ export function LoginPage() {
     <div className="flex min-h-svh items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
+          <img
+            src="/logo.png"
+            alt="mt-commerce"
+            width={40}
+            height={40}
+            className="size-10 rounded-sm mx-auto mb-6"
+          />
           <CardTitle>{t("login.title")}</CardTitle>
           <CardDescription>{t("login.description")}</CardDescription>
         </CardHeader>

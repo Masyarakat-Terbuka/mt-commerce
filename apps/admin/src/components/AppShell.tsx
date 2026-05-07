@@ -93,12 +93,16 @@ export function AppShell() {
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <div className="flex items-center gap-2 px-2 py-1.5">
-            <div className="flex size-7 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground text-xs font-semibold">
-              mt
-            </div>
+            <img
+              src="/logo.png"
+              alt="mt-commerce"
+              width={28}
+              height={28}
+              className="size-7 rounded-sm"
+            />
             <div className="flex flex-col leading-tight group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-medium">mt-commerce</span>
-              <span className="text-[0.6875rem] text-sidebar-foreground/70">
+              <span className="text-sm font-normal">mt-commerce</span>
+              <span className="text-[0.6875rem] text-muted-foreground">
                 Admin
               </span>
             </div>

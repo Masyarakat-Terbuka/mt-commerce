@@ -22,6 +22,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { format as formatMoney } from "@mt-commerce/core/money";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import {
   CART_OPEN_EVENT_NAME,
   CartProvider,
@@ -159,21 +161,14 @@ function CartDrawerInner(props: CartDrawerProps) {
             aria-label={closeLabel}
             className="-mr-2 flex h-9 w-9 items-center justify-center text-fg transition-colors duration-150 hover:text-accent"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.25"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            {/* Hugeicons Cancel01 — decorative; the button's aria-label
+                describes the close action. */}
+            <HugeiconsIcon
+              icon={Cancel01Icon}
+              size={18}
+              strokeWidth={1.5}
+              aria-hidden
+            />
           </button>
         </header>
 

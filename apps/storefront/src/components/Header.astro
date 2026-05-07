@@ -22,6 +22,10 @@
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 import CartCountBadge from "@/islands/CartCountBadge.tsx";
 import CartDrawer from "@/islands/CartDrawer.tsx";
+import Icon from "@/components/Icon.astro";
+// Hugeicons mirror the admin's icon vocabulary so glyphs match across apps.
+// Inline rendering through <Icon /> keeps the .astro tree React-island-free.
+import { Search01Icon, ShoppingBag01Icon } from "@hugeicons/core-free-icons";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -69,11 +73,30 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         </nav>
       </details>
 
+      {/*
+        Brand lockup: small logo tile + lowercase wordmark. The mark is a
+        white door silhouette on a black tile (~28px square) — used as a
+        modest accent rather than the wordmark itself, so the dark block
+        doesn't dominate the cream header. `loading="eager"` because it's
+        above the fold on every page.
+      */}
       <a
         href={homeHref}
-        class="t-body font-normal lowercase tracking-tight text-fg transition-colors duration-150 hover:text-accent"
+        aria-label={t("nav.home")}
+        class="flex items-center gap-2 text-fg transition-colors duration-150 hover:text-accent"
       >
-        mt-commerce
+        <img
+          src="/logo.png"
+          alt=""
+          width="28"
+          height="28"
+          loading="eager"
+          decoding="async"
+          class="size-7 rounded-sm"
+        />
+        <span class="t-body font-normal lowercase tracking-tight">
+          mt-commerce
+        </span>
       </a>
     </div>
 
@@ -114,22 +137,8 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
           class="flex h-9 w-9 cursor-pointer list-none items-center justify-center text-fg transition-colors duration-150 hover:text-accent [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.search")}
         >
-          {/* Magnifier glyph — 1px stroke, no fill. */}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="17"
-            height="17"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.25"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="7"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
+          {/* Hugeicons Search01 — decorative; the <summary> carries aria-label. */}
+          <Icon icon={Search01Icon} />
         </summary>
         <form
           method="get"
@@ -157,23 +166,10 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         class="relative flex h-9 w-9 items-center justify-center text-fg transition-colors duration-150 hover:text-accent"
         aria-label={t("nav.cart")}
       >
-        {/* Bag glyph — 1px stroke. */}
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="17"
-          height="17"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.25"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6L18 2H6Z"></path>
-          <line x1="4" y1="6" x2="20" y2="6"></line>
-          <path d="M16 10a4 4 0 0 1-8 0"></path>
-        </svg>
+        {/* Hugeicons ShoppingBag01 — calmer than the cart-with-wheels variant
+            and visually closer to the Saturdays NYC bag silhouette. The
+            anchor's aria-label describes the action; the icon stays decorative. */}
+        <Icon icon={ShoppingBag01Icon} />
         {/* Count dot — empty in markup until the cart store lands. The
             element stays mounted so the layout stays stable when a count
             arrives. */}

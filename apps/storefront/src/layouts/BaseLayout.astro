@@ -17,6 +17,9 @@ const { title, description, ogImage, canonical } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
 const canonicalUrl = canonical ?? new URL(Astro.url.pathname, siteUrl).toString();
+// Brand mark — same asset used in the header. Falls back as the social
+// preview image when callers don't pass one explicitly.
+const resolvedOgImage = ogImage ?? "/logo.png";
 ---
 
 <!doctype html>
@@ -27,12 +30,13 @@ const canonicalUrl = canonical ?? new URL(Astro.url.pathname, siteUrl).toString(
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
     <link rel="canonical" href={canonicalUrl} />
+    <link rel="icon" type="image/png" href="/logo.png" />
 
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     {description && <meta property="og:description" content={description} />}
     <meta property="og:url" content={canonicalUrl} />
-    {ogImage && <meta property="og:image" content={ogImage} />}
+    <meta property="og:image" content={resolvedOgImage} />
     <meta name="twitter:card" content="summary_large_image" />
 
     {/*
