@@ -264,6 +264,7 @@ export default function ProductDetail(props: ProductDetailProps) {
           <>
             <div className="mt-12">
               <VariantSelector
+                productId={product.id}
                 variants={variantOptions}
                 locale={locale}
                 heading={variantsHeading}
@@ -273,6 +274,7 @@ export default function ProductDetail(props: ProductDetailProps) {
 
             <div className="sticky bottom-0 -mx-5 mt-10 border-t border-line bg-cream px-5 py-4 md:static md:m-0 md:mt-12 md:border-0 md:bg-transparent md:p-0">
               <AddToCartButton
+                productId={product.id}
                 variantId={firstVariant.id}
                 label={addToCartLabel}
                 soldOutLabel={outOfStockLabel}

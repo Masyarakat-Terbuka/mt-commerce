@@ -117,6 +117,8 @@ These are tracked separately and are not part of this scaffold.
 - The legacy `src/lib/mock-products.ts` module is retained only for the
   current unit test fixture and is marked `@deprecated`. Pages, components,
   and islands import only from `src/lib/api.ts`.
-- Variant selector and add-to-cart islands talk to each other via a
-  `variant-change` `CustomEvent` on `document`. This is a temporary bridge
-  until a shared cart store lands.
+- Cross-island state on the PDP (variant selector ↔ add-to-cart) flows
+  through a tiny vanilla pub/sub at `src/islands/lib/variant-store.ts`,
+  keyed by product id. Each island subscribes via the `useSelectedVariant`
+  React adapter; the store has no top-level side effects, so importing it
+  from an SSR-rendered island is safe.
