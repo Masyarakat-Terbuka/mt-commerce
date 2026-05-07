@@ -176,6 +176,18 @@ We chose **mark `converted`** over **delete** for the source guest cart so
 operators retain an audit trail of "this cart became part of that one".
 The `cart_items` cascade keeps the row referentially clean.
 
+## Cross-module writes
+
+Per ADR-0005 the cart module is the sole owner of the `carts` and
+`cart_items` tables — but the checkout module makes one explicit,
+documented exception: setting `carts.status='converted'` from inside
+`checkout.complete()` so the cart→order transition is atomic with the
+order_intent insert. The write is performed directly by the checkout
+repository's `markCartConverted` (see
+`apps/api/src/modules/checkout/repository.ts`), not via `cartService`,
+because routing through the cart module would split the atomic unit
+across two transactions.
+
 ## Follow-ups (out of scope this round)
 
 - Stock reservation / inventory hold on add — currently the cart does not

@@ -22,7 +22,11 @@ import { installBigIntJsonSerializer } from "../../../src/lib/json.js";
 import { authService } from "../../../src/modules/auth/index.js";
 import { buildCheckoutAdminRoutes } from "../../../src/modules/checkout/routes/admin.js";
 import { buildCheckoutStorefrontRoutes } from "../../../src/modules/checkout/routes/storefront.js";
-import type { IdempotencyStore } from "../../../src/middleware/idempotency.js";
+import {
+  IDEMPOTENCY_STATUS_IN_FLIGHT,
+  type ClaimResult,
+  type IdempotencyStore,
+} from "../../../src/middleware/idempotency.js";
 import type { AppBindings } from "../../../src/lib/types.js";
 import type {
   Checkout,
@@ -244,11 +248,32 @@ function createMemoryStore(): IdempotencyStore {
     { requestHash: string; status: number; body: unknown }
   >();
   return {
-    async get(key) {
-      return map.get(key) ?? null;
+    async claim(key, requestHash): Promise<ClaimResult> {
+      if (!map.has(key)) {
+        map.set(key, {
+          requestHash,
+          status: IDEMPOTENCY_STATUS_IN_FLIGHT,
+          body: null,
+        });
+        return { kind: "claimed" };
+      }
+      return { kind: "existing", record: { ...map.get(key)! } };
     },
-    async save(key, requestHash, status, body) {
-      if (!map.has(key)) map.set(key, { requestHash, status, body });
+    async get(key) {
+      const row = map.get(key);
+      return row ? { ...row } : null;
+    },
+    async finalize(key, requestHash, status, body) {
+      const existing = map.get(key);
+      if (!existing) return;
+      if (existing.status !== IDEMPOTENCY_STATUS_IN_FLIGHT) return;
+      map.set(key, { requestHash, status, body });
+    },
+    async releaseInFlight(key) {
+      const existing = map.get(key);
+      if (!existing) return;
+      if (existing.status !== IDEMPOTENCY_STATUS_IN_FLIGHT) return;
+      map.delete(key);
     },
   };
 }

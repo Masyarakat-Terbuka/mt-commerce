@@ -17,6 +17,18 @@
  *   - match  → return the stored response.
  *   - differ → 409 `idempotency_key_reuse`.
  *
+ * `status`:
+ *   - `0` is the reserved "in-flight" sentinel inserted before the
+ *     handler runs. Real HTTP status codes start at 100, so `0` cannot
+ *     collide. Concurrent first-requests with the same key race on this
+ *     INSERT; the loser polls until the winner persists the real
+ *     response (or times out → 409 `idempotency_key_in_flight`).
+ *   - `>= 100` is a stored response (always 2xx today).
+ *
+ * `response_body` is NULLABLE so that 204 / empty-body 2xx replies can be
+ * stored without violating NOT NULL. The middleware reconstructs an empty
+ * body when `response_body IS NULL`.
+ *
  * `created_at` carries an index so a future cleanup job can scan by age
  * (TTL is 24 hours per the SECURITY.md commitment; the cleanup job itself
  * is out of scope for this module).
@@ -29,8 +41,10 @@ export const idempotencyKeys = pgTable(
     /** Stored as `sha256(scope ":" raw)` — see middleware for derivation. */
     key: text("key").primaryKey(),
     requestHash: text("request_hash").notNull(),
+    /** `0` = in-flight sentinel. `>= 100` = stored HTTP status. */
     status: integer("status").notNull(),
-    responseBody: jsonb("response_body").notNull(),
+    /** NULL means "no body / 204". See file header. */
+    responseBody: jsonb("response_body"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

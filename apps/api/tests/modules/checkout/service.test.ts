@@ -84,7 +84,26 @@ function tick(store: FakeStore): Date {
   return new Date(Date.UTC(2026, 4, 7, 12, 0, store.clock));
 }
 
-function createFakeRepo(store: FakeStore): CheckoutRepository {
+interface FakeRepoOptions {
+  /**
+   * Optional mutex applied to `withTransaction`. When set, only one
+   * transaction body runs at a time — used to model `SELECT ... FOR
+   * UPDATE` row-locking semantics in concurrent-completion tests.
+   */
+  serializeTransactions?: boolean;
+  /**
+   * Test seam for B1's belt-and-suspenders branch: throw a synthetic
+   * Postgres unique-violation from `insertOrderIntent`.
+   */
+  orderIntentInsertError?: unknown;
+}
+
+function createFakeRepo(
+  store: FakeStore,
+  options: FakeRepoOptions = {},
+): CheckoutRepository {
+  let txMutex: Promise<unknown> = Promise.resolve();
+
   const repo: CheckoutRepository = {
     async insertCheckout(row: NewCheckoutRow): Promise<CheckoutRow> {
       const now = tick(store);
@@ -110,6 +129,12 @@ function createFakeRepo(store: FakeStore): CheckoutRepository {
       return checkout;
     },
     async getCheckoutById(id) {
+      return store.checkouts.get(id) ?? null;
+    },
+    async getCheckoutByIdForUpdate(id) {
+      // The in-memory fake has no real row lock — when the test asks
+      // for transaction serialisation (`serializeTransactions: true`),
+      // the mutex on `withTransaction` provides equivalent ordering.
       return store.checkouts.get(id) ?? null;
     },
     async listCheckouts(filters) {
@@ -177,6 +202,9 @@ function createFakeRepo(store: FakeStore): CheckoutRepository {
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     },
     async insertOrderIntent(row: NewOrderIntentRow): Promise<OrderIntentRow> {
+      if (options.orderIntentInsertError !== undefined) {
+        throw options.orderIntentInsertError;
+      }
       const now = tick(store);
       const intent: OrderIntentRow = {
         id: row.id,
@@ -234,7 +262,26 @@ function createFakeRepo(store: FakeStore): CheckoutRepository {
       // In-memory fake — no real transactional semantics. Tests that need
       // to assert atomicity should use the real repo against a Postgres
       // instance; the unit suite focuses on the orchestration logic.
-      return fn(repo);
+      //
+      // When `serializeTransactions` is set, callers run one-at-a-time
+      // through a chained promise. This models the FOR UPDATE row lock:
+      // the second concurrent caller waits for the first to commit, then
+      // observes the committed state.
+      if (!options.serializeTransactions) {
+        return fn(repo);
+      }
+      const previous = txMutex;
+      let resolveSelf: () => void = () => undefined;
+      const self = new Promise<void>((resolve) => {
+        resolveSelf = resolve;
+      });
+      txMutex = self;
+      try {
+        await previous;
+        return await fn(repo);
+      } finally {
+        resolveSelf();
+      }
     },
   };
   return repo;
@@ -446,7 +493,7 @@ interface BuildResult {
   customers: Map<string, Customer>;
 }
 
-function buildService(): BuildResult {
+function buildService(repoOptions: FakeRepoOptions = {}): BuildResult {
   const store = createStore();
   const carts = new Map<string, Cart>();
   const addressesDomain = new Map<string, CustomerAddress>();
@@ -502,7 +549,7 @@ function buildService(): BuildResult {
   store.addresses.set(foreign.id, foreign);
   addressesDomain.set(foreign.id, makeCustomerAddressDomain(foreign));
 
-  const repo = createFakeRepo(store);
+  const repo = createFakeRepo(store, repoOptions);
   const cartService = makeFakeCartService(carts);
   const customerService = makeFakeCustomerService(addressesDomain, customers);
   const service = new CheckoutServiceImpl(repo, cartService, customerService);
@@ -736,5 +783,151 @@ describe("listEvents", () => {
       "awaiting_shipping",
       "awaiting_payment",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Concurrency and atomicity (B1, B2)
+// ---------------------------------------------------------------------------
+
+async function bringToAwaitingPayment(
+  service: CheckoutServiceImpl,
+): Promise<{ checkoutId: string }> {
+  const checkout = await service.startCheckout({ cartId: "cart_test" });
+  await service.setAddresses(checkout.id, { shippingAddressId: "adr_ship" });
+  await service.setShipping(checkout.id, {
+    shippingMethodCode: "flat",
+    shippingAmount: { amount: "10000", currency: "IDR" },
+  });
+  return { checkoutId: checkout.id };
+}
+
+describe("complete — race resilience (B1)", () => {
+  it("two concurrent complete() calls produce exactly one success and one already_completed", async () => {
+    const { service } = buildService({ serializeTransactions: true });
+    const { checkoutId } = await bringToAwaitingPayment(service);
+
+    const a = service.complete(checkoutId, {
+      paymentMethod: "manual_bank_transfer",
+      idempotencyKey: "key-a",
+    });
+    const b = service.complete(checkoutId, {
+      paymentMethod: "manual_bank_transfer",
+      idempotencyKey: "key-b",
+    });
+
+    const settled = await Promise.allSettled([a, b]);
+    const fulfilled = settled.filter((r) => r.status === "fulfilled");
+    const rejected = settled.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+
+    const err = (rejected[0] as PromiseRejectedResult).reason as ConflictError;
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.details.code).toBe("already_completed");
+  });
+
+  it("reclassifies a raw 23505 unique-violation as already_completed", async () => {
+    const synthetic = Object.assign(new Error("duplicate key"), {
+      code: "23505",
+      constraint_name: "order_intents_checkout_id_unique",
+    });
+    const { service } = buildService({ orderIntentInsertError: synthetic });
+    const { checkoutId } = await bringToAwaitingPayment(service);
+
+    await expect(
+      service.complete(checkoutId, {
+        paymentMethod: "manual_bank_transfer",
+        idempotencyKey: "key-1",
+      }),
+    ).rejects.toMatchObject({
+      details: { code: "already_completed" },
+    });
+  });
+});
+
+describe("events fire after commit, never on rollback (B2)", () => {
+  it("events fire in declared order on success", async () => {
+    const { service } = buildService();
+    const fired: string[] = [];
+    events.on("checkout.payment_initiated", () => {
+      fired.push("checkout.payment_initiated");
+    });
+    events.on("checkout.completed", () => {
+      fired.push("checkout.completed");
+    });
+
+    const { checkoutId } = await bringToAwaitingPayment(service);
+    await service.complete(checkoutId, {
+      paymentMethod: "manual_bank_transfer",
+      idempotencyKey: "key-1",
+    });
+
+    // payment_initiated comes before completed; nothing else fires.
+    expect(fired).toEqual([
+      "checkout.payment_initiated",
+      "checkout.completed",
+    ]);
+  });
+
+  it("no events fire when the transaction throws", async () => {
+    const synthetic = new Error("simulated DB failure");
+    const { service } = buildService({ orderIntentInsertError: synthetic });
+    const fired: string[] = [];
+    events.on("checkout.completed", () => {
+      fired.push("checkout.completed");
+    });
+    events.on("checkout.payment_initiated", () => {
+      fired.push("checkout.payment_initiated");
+    });
+
+    const { checkoutId } = await bringToAwaitingPayment(service);
+    await expect(
+      service.complete(checkoutId, {
+        paymentMethod: "manual_bank_transfer",
+        idempotencyKey: "key-1",
+      }),
+    ).rejects.toThrow();
+    // The transaction threw — no post-commit events should have fired.
+    expect(fired).toEqual([]);
+  });
+});
+
+describe("complete — empty cart (S10)", () => {
+  it("refuses with cart_empty when items were removed before completion", async () => {
+    const { service, store, carts } = buildService();
+    const { checkoutId } = await bringToAwaitingPayment(service);
+
+    // Remove items from both the snapshot view and the live cart so
+    // every code path sees an empty cart.
+    const cartId = "cart_test";
+    const cart = carts.get(cartId)!;
+    carts.set(cartId, { ...cart, items: [] });
+    const snapshot = store.carts.get(cartId)!;
+    store.carts.set(cartId, { ...snapshot, items: [] });
+
+    await expect(
+      service.complete(checkoutId, {
+        paymentMethod: "manual_bank_transfer",
+        idempotencyKey: "key-empty",
+      }),
+    ).rejects.toMatchObject({ details: { code: "cart_empty" } });
+
+    expect(store.cartConverted.has(cartId)).toBe(false);
+    expect(store.orderIntents.size).toBe(0);
+  });
+});
+
+describe("setAddresses — revision clears stale shipping (S11)", () => {
+  it("clears shipping_method_code, shipping_amount, shipping_currency on revision", async () => {
+    const { service } = buildService();
+    const { checkoutId } = await bringToAwaitingPayment(service);
+    // Revise back to awaiting_shipping by re-setting addresses.
+    const revised = await service.setAddresses(checkoutId, {
+      shippingAddressId: "adr_bill",
+    });
+    expect(revised.state).toBe("awaiting_shipping");
+    expect(revised.shippingMethodCode).toBeNull();
+    expect(revised.shippingAmount).toBeNull();
   });
 });

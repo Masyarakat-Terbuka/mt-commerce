@@ -177,7 +177,23 @@ export type CompleteCheckoutInput = z.infer<typeof completeCheckoutSchema>;
 
 export const cancelCheckoutSchema = z
   .object({
-    reason: z.string().min(1).max(500).optional(),
+    /**
+     * Optional free-text reason. Empty / whitespace-only values are
+     * folded to `null` so callers do not have to special-case "I omitted
+     * the field" vs "I sent `""`". Trim trailing whitespace because
+     * operators paste from notes and we should not store the trailing
+     * newline.
+     */
+    reason: z
+      .string()
+      .max(500)
+      .optional()
+      .nullable()
+      .transform((value) => {
+        if (value === undefined || value === null) return null;
+        const trimmed = value.trim();
+        return trimmed.length === 0 ? null : trimmed;
+      }),
   })
   .optional();
 export type CancelCheckoutInput = z.infer<typeof cancelCheckoutSchema>;

@@ -66,13 +66,20 @@ CREATE TABLE IF NOT EXISTS "order_intents" (
 CREATE TABLE IF NOT EXISTS "idempotency_keys" (
 	"key" text PRIMARY KEY NOT NULL,
 	"request_hash" text NOT NULL,
+	-- 0 is reserved as the "in-flight" sentinel inserted before the
+	-- handler runs; real HTTP status codes start at 100, so the two
+	-- cannot collide. The middleware updates the row to the real
+	-- status after the handler succeeds, or DELETEs it after a failure
+	-- so a retry can claim the key cleanly.
 	"status" integer NOT NULL,
-	"response_body" jsonb NOT NULL,
+	-- Nullable so we can store 204 / empty-body 2xx replies without
+	-- violating NOT NULL. The middleware reads NULL as "no body".
+	"response_body" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 DO $$ BEGIN
- ALTER TABLE "checkouts" ADD CONSTRAINT "checkouts_cart_id_carts_id_fk" FOREIGN KEY ("cart_id") REFERENCES "public"."carts"("id") ON DELETE no action ON UPDATE no action;
+ ALTER TABLE "checkouts" ADD CONSTRAINT "checkouts_cart_id_carts_id_fk" FOREIGN KEY ("cart_id") REFERENCES "public"."carts"("id") ON DELETE restrict ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;

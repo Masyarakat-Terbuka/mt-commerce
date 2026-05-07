@@ -53,7 +53,7 @@ export const cartItems = pgTable(
       .references(() => carts.id, { onDelete: "cascade" }),
     variantId: text("variant_id")
       .notNull()
-      .references(() => productVariants.id),
+      .references(() => productVariants.id, { onDelete: "restrict" }),
     quantity: integer("quantity").notNull(),
     unitPriceAmount: bigint("unit_price_amount", { mode: "bigint" }).notNull(),
     unitPriceCurrency: text("unit_price_currency").notNull(),

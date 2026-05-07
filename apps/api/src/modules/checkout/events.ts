@@ -26,6 +26,23 @@
  * Future work (out of scope here, documented in the README):
  *   - Move to a persistent backend (BullMQ) for events that must not be lost.
  *   - Add per-listener telemetry hooks.
+ *
+ * Delivery contract (read this before writing a listener):
+ *
+ *   - Events are emitted AFTER the originating database transaction has
+ *     committed. A listener that hits the database can therefore safely
+ *     SELECT the row that triggered the event without race conditions.
+ *
+ *   - At-least-once, NOT exactly-once. If the process crashes between a
+ *     committed transaction and the post-commit emit, the event is lost
+ *     entirely; if the process crashes mid-emit, some listeners may have
+ *     run and some not. Persistent jobs that must outlive a crash should
+ *     enqueue a BullMQ job in addition to listening to this bus.
+ *
+ *   - Listeners MUST be idempotent. The bus may re-fire across restarts
+ *     once persistence lands, and side effects (sending email, debiting
+ *     a balance) should be guarded by an idempotency check (the
+ *     orderIntentId / checkoutId on the payload is the natural key).
  */
 import { logger as rootLogger } from "../../lib/logger.js";
 

@@ -46,7 +46,7 @@ export const checkouts = pgTable(
     id: text("id").primaryKey(),
     cartId: text("cart_id")
       .notNull()
-      .references(() => carts.id),
+      .references(() => carts.id, { onDelete: "restrict" }),
     customerId: text("customer_id").references(() => customers.id),
     /**
      * State machine value. Stored as `text` to match the project's pattern

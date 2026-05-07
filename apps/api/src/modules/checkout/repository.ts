@@ -79,6 +79,14 @@ export interface CheckoutRepository {
   // Checkouts
   insertCheckout(row: NewCheckoutRow): Promise<CheckoutRow>;
   getCheckoutById(id: string): Promise<CheckoutRow | null>;
+  /**
+   * Same as `getCheckoutById` but acquires a `FOR UPDATE` row lock. Only
+   * meaningful inside `withTransaction(...)`; serialises concurrent
+   * mutators so the second waiter observes the committed state of the
+   * first (e.g. two parallel `complete()` calls — the loser sees
+   * `state='completed'` and surfaces `ConflictError`).
+   */
+  getCheckoutByIdForUpdate(id: string): Promise<CheckoutRow | null>;
   listCheckouts(filters: CheckoutListFilters): Promise<CheckoutListResult>;
   updateCheckout(
     id: string,
@@ -120,6 +128,19 @@ export function createCheckoutRepository(db: Db = defaultDb): CheckoutRepository
         .from(checkouts)
         .where(eq(checkouts.id, id))
         .limit(1);
+      return row ?? null;
+    },
+
+    async getCheckoutByIdForUpdate(id: string): Promise<CheckoutRow | null> {
+      // `.for("update")` issues `SELECT ... FOR UPDATE`. Only meaningful
+      // inside a transaction; the service guards this by calling it from
+      // the `withTransaction(...)` callback.
+      const [row] = await db
+        .select()
+        .from(checkouts)
+        .where(eq(checkouts.id, id))
+        .limit(1)
+        .for("update");
       return row ?? null;
     },
 

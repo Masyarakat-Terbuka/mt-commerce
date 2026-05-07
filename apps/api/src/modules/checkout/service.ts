@@ -32,6 +32,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "../../lib/errors.js";
+import { childLogger } from "../../lib/logger.js";
 import {
   cartService as defaultCartService,
   type Cart,
@@ -42,7 +43,7 @@ import {
   customerService as defaultCustomerService,
   type CustomerService,
 } from "../customer/index.js";
-import { events } from "./events.js";
+import { events, type EventName, type EventPayload } from "./events.js";
 import {
   toCheckout,
   toCheckoutEvent,
@@ -105,12 +106,45 @@ export interface CheckoutService {
   listEvents(checkoutId: string): Promise<CheckoutEvent[]>;
 }
 
+/**
+ * Captured event to fire AFTER the enclosing transaction commits. The
+ * `name` literal narrows `payload` to the right shape; we hand-roll a
+ * tagged union over `EventName` so a single typed array can hold any
+ * event variant without losing type-safety.
+ */
+type PendingEvent = {
+  [E in EventName]: { name: E; payload: EventPayload<E> };
+}[EventName];
+
+const log = childLogger("checkout");
+
 export class CheckoutServiceImpl implements CheckoutService {
   constructor(
     private readonly repo: CheckoutRepository,
     private readonly carts: CartService,
     private readonly customers: CustomerService,
   ) {}
+
+  /**
+   * Fire pending events after `withTransaction` returns. Each listener is
+   * awaited in order; the bus already catches per-listener throws so a
+   * single bad subscriber cannot stop the rest. See `events.ts` for the
+   * idempotency contract listeners must honor.
+   */
+  private async emitPending(pending: PendingEvent[]): Promise<void> {
+    for (const ev of pending) {
+      // Per-event narrowing: the generic emit signature requires the
+      // payload type matches the event name. The PendingEvent union is
+      // already correlated, so a per-iteration cast back to the matched
+      // pair is safe.
+      await (
+        events.emit as <E extends EventName>(
+          name: E,
+          payload: EventPayload<E>,
+        ) => Promise<void>
+      )(ev.name, ev.payload);
+    }
+  }
 
   // -------------------------------------------------------------------
   // Lifecycle
@@ -159,7 +193,7 @@ export class CheckoutServiceImpl implements CheckoutService {
     }
 
     const checkoutId = id("chk");
-    return this.repo.withTransaction(async (tx) => {
+    const { result, pending } = await this.repo.withTransaction(async (tx) => {
       const row = await tx.insertCheckout({
         id: checkoutId,
         cartId: cart.id,
@@ -174,13 +208,16 @@ export class CheckoutServiceImpl implements CheckoutService {
         toState: "pending",
         details: { cartId: cart.id },
       });
-      const checkout = toCheckout(row);
-      await events.emit("checkout.started", {
-        checkoutId,
-        cartId: cart.id,
-      });
-      return checkout;
+      const pendingEvents: PendingEvent[] = [
+        {
+          name: "checkout.started",
+          payload: { checkoutId, cartId: cart.id },
+        },
+      ];
+      return { result: toCheckout(row), pending: pendingEvents };
     });
+    await this.emitPending(pending);
+    return result;
   }
 
   async getCheckout(checkoutId: string): Promise<Checkout | null> {
@@ -242,11 +279,24 @@ export class CheckoutServiceImpl implements CheckoutService {
       await this.assertAddressOwnership(input.billingAddressId, row.customerId);
     }
 
+    // S11: when transitioning back from `awaiting_payment`, the stale
+    // shipping selection is no longer authoritative — the user is
+    // revising. Clear it so a follow-up read does not surface a method
+    // and amount that no longer match the (possibly different) address.
+    const isRevision = current === "awaiting_payment";
+
     return this.repo.withTransaction(async (tx) => {
       const updated = await tx.updateCheckout(checkoutId, {
         state: next,
         shippingAddressId: input.shippingAddressId,
         billingAddressId: input.billingAddressId ?? null,
+        ...(isRevision
+          ? {
+              shippingMethodCode: null,
+              shippingAmount: null,
+              shippingCurrency: null,
+            }
+          : {}),
       });
       if (!updated) {
         throw new NotFoundError("Checkout not found.", { checkoutId });
@@ -259,6 +309,7 @@ export class CheckoutServiceImpl implements CheckoutService {
         details: {
           shippingAddressId: input.shippingAddressId,
           billingAddressId: input.billingAddressId ?? null,
+          ...(isRevision ? { revisedFromAwaitingPayment: true } : {}),
         },
       });
       return toCheckout(updated);
@@ -318,7 +369,7 @@ export class CheckoutServiceImpl implements CheckoutService {
       });
     }
 
-    return this.repo.withTransaction(async (tx) => {
+    const { result, pending } = await this.repo.withTransaction(async (tx) => {
       const updated = await tx.updateCheckout(checkoutId, {
         state: next,
         shippingMethodCode: input.shippingMethodCode,
@@ -339,12 +390,19 @@ export class CheckoutServiceImpl implements CheckoutService {
           shippingCurrency: shippingAmount.currency,
         },
       });
-      await events.emit("checkout.shipping_set", {
-        checkoutId,
-        shippingMethodCode: input.shippingMethodCode,
-      });
-      return toCheckout(updated);
+      const pendingEvents: PendingEvent[] = [
+        {
+          name: "checkout.shipping_set",
+          payload: {
+            checkoutId,
+            shippingMethodCode: input.shippingMethodCode,
+          },
+        },
+      ];
+      return { result: toCheckout(updated), pending: pendingEvents };
     });
+    await this.emitPending(pending);
+    return result;
   }
 
   async complete(
@@ -391,14 +449,30 @@ export class CheckoutServiceImpl implements CheckoutService {
     // Issue payment-not-implemented detection upstream once the payment
     // module ships; for v0.1 we treat the call as authoritative ("the
     // payment was captured by some out-of-band step, mark this complete").
-    return this.repo.withTransaction(async (tx) => {
-      // Re-fetch under the transaction so a concurrent racer cannot push
-      // the row past awaiting_payment between our read and our write.
-      const fresh = await tx.getCheckoutById(checkoutId);
+    const { result, pending } = await this.repo.withTransaction(async (tx) => {
+      // Re-fetch UNDER A ROW LOCK (`SELECT ... FOR UPDATE`). Two parallel
+      // `complete()` calls would, under READ COMMITTED, both observe
+      // `state='awaiting_payment'` from a plain SELECT and both proceed
+      // to insert an `order_intent` — the loser would then hit the
+      // `order_intents_checkout_id_unique` constraint as a raw 23505.
+      // The row lock serialises the mutators: the second waiter blocks
+      // until the first commits, then sees `state='completed'` and
+      // surfaces a `ConflictError` cleanly.
+      const fresh = await tx.getCheckoutByIdForUpdate(checkoutId);
       if (!fresh) {
         throw new NotFoundError("Checkout not found.", { checkoutId });
       }
       if (fresh.state !== "awaiting_payment") {
+        // The same `already_completed` code is used for both the
+        // "racer-already-completed" and "raw unique-violation
+        // belt-and-suspenders" paths so callers can treat them
+        // uniformly.
+        if (fresh.state === "completed") {
+          throw new ConflictError(
+            "Checkout has already been completed.",
+            { code: "already_completed", checkoutId },
+          );
+        }
         throw new ConflictError(
           "Checkout state changed under the request — refusing to complete.",
           {
@@ -415,6 +489,15 @@ export class CheckoutServiceImpl implements CheckoutService {
         throw new NotFoundError("Underlying cart not found.", {
           cartId: fresh.cartId,
         });
+      }
+      // S10: a cart that was emptied between `setShipping` and `complete`
+      // would otherwise produce a zero-total order_intent and still mark
+      // the cart converted. Refuse explicitly.
+      if (snapshot.items.length === 0) {
+        throw new ConflictError(
+          "Cart is empty; cannot complete checkout.",
+          { code: "cart_empty", checkoutId, cartId: fresh.cartId },
+        );
       }
       const cart = await this.carts.getCartById(fresh.cartId);
       if (!cart) {
@@ -454,28 +537,42 @@ export class CheckoutServiceImpl implements CheckoutService {
       }));
 
       const orderIntentId = id("oint");
-      const orderIntentRow = await tx.insertOrderIntent({
-        id: orderIntentId,
-        checkoutId,
-        cartSnapshot: cartSnapshotJson.map((line) => ({
-          variantId: line.variantId,
-          quantity: line.quantity,
-          // Serialize bigint as decimal string so the JSON column round-trips
-          // through Postgres without precision loss.
-          unitPrice: {
-            amount: line.unitPrice.amount.toString(),
-            currency: line.unitPrice.currency,
-          },
-        })),
-        totalsSnapshot: serializeTotals(completedTotals),
-        shippingAddressSnapshot: addressToSnapshotJson(shippingAddrRow),
-        billingAddressSnapshot: billingAddrRow
-          ? addressToSnapshotJson(billingAddrRow)
-          : null,
-        email: fresh.email as string,
-        shippingMethodCode: fresh.shippingMethodCode as string,
-        paymentMethod: input.paymentMethod,
-      });
+      let orderIntentRow;
+      try {
+        orderIntentRow = await tx.insertOrderIntent({
+          id: orderIntentId,
+          checkoutId,
+          cartSnapshot: cartSnapshotJson.map((line) => ({
+            variantId: line.variantId,
+            quantity: line.quantity,
+            // Serialize bigint as decimal string so the JSON column round-trips
+            // through Postgres without precision loss.
+            unitPrice: {
+              amount: line.unitPrice.amount.toString(),
+              currency: line.unitPrice.currency,
+            },
+          })),
+          totalsSnapshot: serializeTotals(completedTotals),
+          shippingAddressSnapshot: addressToSnapshotJson(shippingAddrRow),
+          billingAddressSnapshot: billingAddrRow
+            ? addressToSnapshotJson(billingAddrRow)
+            : null,
+          email: fresh.email as string,
+          shippingMethodCode: fresh.shippingMethodCode as string,
+          paymentMethod: input.paymentMethod,
+        });
+      } catch (err) {
+        // Belt-and-suspenders: even with the FOR UPDATE lock above, a
+        // raw 23505 on `order_intents_checkout_id_unique` should never
+        // surface as a 500. Reclassify as `already_completed`.
+        if (isPostgresUniqueViolation(err, "order_intents_checkout_id_unique")) {
+          throw new ConflictError(
+            "Checkout has already been completed.",
+            { code: "already_completed", checkoutId },
+          );
+        }
+        throw err;
+      }
 
       // Mark the cart converted (cross-module write — see repo header).
       await tx.markCartConverted(fresh.cartId);
@@ -499,25 +596,38 @@ export class CheckoutServiceImpl implements CheckoutService {
         },
       });
 
-      // Emit AFTER the transaction commits would be ideal; we emit here
-      // because the in-process bus is synchronous and listeners that fail
-      // are logged-and-swallowed by the bus. Persistent jobs that must
-      // outlive a crash should use BullMQ (see README).
-      await events.emit("checkout.payment_initiated", {
-        checkoutId,
-        paymentMethod: input.paymentMethod,
-      });
-      await events.emit("checkout.completed", {
-        checkoutId,
-        orderIntentId,
-        cartId: fresh.cartId,
-      });
+      // Events fire AFTER commit — listeners that reach the DB would
+      // otherwise observe a checkout that does not exist if the
+      // transaction were to roll back between emit and commit. See
+      // `events.ts` for the at-least-once / idempotency contract.
+      const pendingEvents: PendingEvent[] = [
+        {
+          name: "checkout.payment_initiated",
+          payload: {
+            checkoutId,
+            paymentMethod: input.paymentMethod,
+          },
+        },
+        {
+          name: "checkout.completed",
+          payload: {
+            checkoutId,
+            orderIntentId,
+            cartId: fresh.cartId,
+          },
+        },
+      ];
 
       return {
-        checkout: toCheckout(updated),
-        orderIntent: toOrderIntent(orderIntentRow),
+        result: {
+          checkout: toCheckout(updated),
+          orderIntent: toOrderIntent(orderIntentRow),
+        },
+        pending: pendingEvents,
       };
     });
+    await this.emitPending(pending);
+    return result;
   }
 
   async cancel(
@@ -537,7 +647,7 @@ export class CheckoutServiceImpl implements CheckoutService {
       });
     }
 
-    return this.repo.withTransaction(async (tx) => {
+    const { result, pending } = await this.repo.withTransaction(async (tx) => {
       const updated = await tx.updateCheckout(checkoutId, {
         state: "failed",
         cancellationReason: input.reason ?? null,
@@ -554,12 +664,19 @@ export class CheckoutServiceImpl implements CheckoutService {
           reason: input.reason ?? null,
         },
       });
-      await events.emit("checkout.failed", {
-        checkoutId,
-        reason: input.reason ?? null,
-      });
-      return toCheckout(updated);
+      const pendingEvents: PendingEvent[] = [
+        {
+          name: "checkout.failed",
+          payload: {
+            checkoutId,
+            reason: input.reason ?? null,
+          },
+        },
+      ];
+      return { result: toCheckout(updated), pending: pendingEvents };
     });
+    await this.emitPending(pending);
+    return result;
   }
 
   // -------------------------------------------------------------------
@@ -654,8 +771,22 @@ function mergeShippingIntoTotals(
   // more than a rounding cent, surface it as a programming error.
   if (recomputedTax.amount !== cartTotals.tax.amount) {
     // We do NOT throw here — the cart layer is the source of truth for
-    // tax in v0.1. Logging is enough; tests pin the exact behavior.
-    // (The real tax module replaces this placeholder.)
+    // tax in v0.1. Log the divergence so operators can see it and the
+    // future tax module can be tuned. (The real tax module replaces
+    // this placeholder.)
+    log.warn(
+      {
+        recomputed: {
+          amount: recomputedTax.amount.toString(),
+          currency: recomputedTax.currency,
+        },
+        stored: {
+          amount: cartTotals.tax.amount.toString(),
+          currency: cartTotals.tax.currency,
+        },
+      },
+      "tax divergence detected at completion",
+    );
   }
   return {
     subtotal: cartTotals.subtotal,
@@ -706,6 +837,31 @@ function addressToSnapshotJson(
     postalCode: row.postalCode,
     notes: row.notes ?? null,
   };
+}
+
+/**
+ * Narrow on the postgres-js (and node-postgres) `code` SQLSTATE field.
+ * `23505` is `unique_violation`. When a constraint name is provided we
+ * also match `constraint_name`, which postgres-js exposes alongside the
+ * code. Used to reclassify the `order_intents_checkout_id_unique` race
+ * as a clean `ConflictError` rather than a 500.
+ */
+function isPostgresUniqueViolation(
+  err: unknown,
+  constraintName?: string,
+): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const candidate = err as {
+    code?: unknown;
+    constraint_name?: unknown;
+    constraint?: unknown;
+  };
+  if (candidate.code !== "23505") return false;
+  if (!constraintName) return true;
+  return (
+    candidate.constraint_name === constraintName ||
+    candidate.constraint === constraintName
+  );
 }
 
 function clampPage(page: number | undefined): number {
