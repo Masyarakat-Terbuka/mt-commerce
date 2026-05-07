@@ -201,6 +201,70 @@ describe("admin routes /admin/v1/products", () => {
     expect(typeof body.error.message).toBe("string");
   });
 
+  it("rejects an oversized inventory `delta` with 400 (not 500)", async () => {
+    // A delta past the configured bound must be caught at the Zod boundary
+    // and surface as a validation_error — never an unhandled DB int4 overflow.
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request(
+      "/admin/v1/variants/var_xyz/inventory/adjust",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ delta: 9_999_999 }),
+      },
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(body.error.code).toBe("validation_error");
+  });
+
+  it("rejects unknown ISO 4217 currency on product create", async () => {
+    // `defaultCurrency: "XXX"` matches the regex but is not in
+    // KNOWN_CURRENCIES — must surface as 400 validation_error, not 500.
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request("/admin/v1/products", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        slug: "unknown-currency",
+        title: "Unknown Currency",
+        defaultCurrency: "XXX",
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string };
+    };
+    expect(body.error.code).toBe("validation_error");
+  });
+
+  it("rejects a list query that supplies both categoryId and categorySlug", async () => {
+    // The schema's refine() should kick in and prevent ambiguity.
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request(
+      "/admin/v1/products?categoryId=cat_1&categorySlug=foo",
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: { code: string; message: string };
+    };
+    expect(body.error.code).toBe("validation_error");
+  });
+
   it("paginates the list response with { data, total, page, pageSize }", async () => {
     const products = new Map<string, Product>();
     for (let i = 0; i < 25; i++) {
@@ -237,6 +301,57 @@ describe("storefront routes /storefront/v1/products/:slug", () => {
     const app = buildStorefrontApp(createFakeService(state));
     const res = await app.request("/storefront/v1/products/draft-only");
     expect(res.status).toBe(404);
+  });
+
+  it("strips `?status=archived` and forces active-only when listing", async () => {
+    // Storefront callers must not be able to bypass the active-only filter
+    // by passing `status` on the query string. The route should drop the
+    // status field before delegating to the service. We assert two things:
+    //   (a) the response is 200 with active-only products,
+    //   (b) the service receives no `status` value (so it cannot leak
+    //       archived/draft listings even if the service had a bug).
+    const active = makeProduct({
+      id: "prod_active",
+      slug: "active-1",
+      status: "active",
+    });
+    const archived = makeProduct({
+      id: "prod_archived",
+      slug: "archived-1",
+      status: "archived",
+    });
+    const state: FakeServiceState = {
+      productsBySlug: new Map([
+        [active.slug, active],
+        [archived.slug, archived],
+      ]),
+      productsById: new Map([
+        [active.id, active],
+        [archived.id, archived],
+      ]),
+    };
+    const observed: Array<{ status?: string; activeOnly?: boolean }> = [];
+    const baseService = createFakeService(state);
+    const spyService: CatalogService = {
+      ...baseService,
+      async listProducts(query) {
+        observed.push({
+          status: query.status,
+          activeOnly: query.activeOnly,
+        });
+        return baseService.listProducts(query);
+      },
+    };
+    const app = buildStorefrontApp(spyService);
+    const res = await app.request(
+      "/storefront/v1/products?status=archived",
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Array<{ id: string }> };
+    expect(body.data.map((p) => p.id)).toEqual(["prod_active"]);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]?.status).toBeUndefined();
+    expect(observed[0]?.activeOnly).toBe(true);
   });
 
   it("returns active products with Money serialized as MoneyJSON", async () => {

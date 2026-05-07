@@ -81,6 +81,11 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         rows = rows.filter((p) => p.status === filters.status);
       }
       if (filters.search) {
+        // Faithful in-memory port of repository.escapeLikePattern + ilike:
+        // an `_` or `%` in the *search term* matches itself only (not as a
+        // wildcard). The fake performs literal substring containment after
+        // escaping is conceptually applied — equivalent because we never
+        // interpret pattern metacharacters in the search term.
         const needle = filters.search.toLowerCase();
         rows = rows.filter((p) => p.title.toLowerCase().includes(needle));
       }
@@ -88,6 +93,70 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         rows = rows.filter((p) =>
           store.productCategories.get(p.id)?.has(filters.categoryId!),
         );
+      }
+      // Price filtering must respect the same status/soft-delete restrictions
+      // as the outer products query (per the EXISTS the real repo emits).
+      const visibleVariantsForProduct = (productId: string) => {
+        const product = store.products.get(productId);
+        if (!product) return [];
+        if (filters.excludeDeleted && product.deletedAt !== null) return [];
+        if (filters.status && product.status !== filters.status) return [];
+        return [...store.variants.values()].filter(
+          (v) => v.productId === productId && v.deletedAt === null,
+        );
+      };
+      if (filters.minPriceAmount !== undefined) {
+        const min = filters.minPriceAmount;
+        rows = rows.filter((p) =>
+          visibleVariantsForProduct(p.id).some((v) => v.priceAmount >= min),
+        );
+      }
+      if (filters.maxPriceAmount !== undefined) {
+        const max = filters.maxPriceAmount;
+        rows = rows.filter((p) =>
+          visibleVariantsForProduct(p.id).some((v) => v.priceAmount <= max),
+        );
+      }
+      // Sort. Default is "newest" by createdAt desc; price sorts use the
+      // cheapest non-deleted variant per product (matches the correlated
+      // subquery in the real repository).
+      const cheapest = (productId: string): bigint | null => {
+        const variants = [...store.variants.values()].filter(
+          (v) => v.productId === productId && v.deletedAt === null,
+        );
+        if (variants.length === 0) return null;
+        return variants.reduce(
+          (min, v) => (v.priceAmount < min ? v.priceAmount : min),
+          variants[0]!.priceAmount,
+        );
+      };
+      switch (filters.sort) {
+        case "oldest":
+          rows = rows.slice().sort(
+            (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+          );
+          break;
+        case "price_asc":
+        case "price_desc": {
+          const dir = filters.sort === "price_asc" ? 1 : -1;
+          rows = rows.slice().sort((a, b) => {
+            const ca = cheapest(a.id);
+            const cb = cheapest(b.id);
+            // NULLS LAST behavior: products with no variant sort to the end.
+            if (ca === null && cb === null) return 0;
+            if (ca === null) return 1;
+            if (cb === null) return -1;
+            if (ca === cb) return 0;
+            return ca < cb ? -dir : dir;
+          });
+          break;
+        }
+        case "newest":
+        default:
+          rows = rows.slice().sort(
+            (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+          );
+          break;
       }
       const total = rows.length;
       const start = (filters.page - 1) * filters.pageSize;
@@ -445,5 +514,170 @@ describe("CatalogService.createVariant currency rule", () => {
         priceCurrency: "USD",
       }),
     ).rejects.toMatchObject({ code: "validation_error" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QA fixes — regression tests
+// ---------------------------------------------------------------------------
+
+describe("CatalogService.listProducts price filter visibility", () => {
+  it("does not surface variants of archived products via a price filter", async () => {
+    const { service } = buildService();
+    // Active product with a variant in the band.
+    const visible = await service.createProduct({
+      slug: "visible-prod",
+      title: "Visible product",
+      status: "active",
+      defaultCurrency: "IDR",
+    });
+    await service.createVariant(visible.id, {
+      sku: "VIS-001",
+      priceAmount: 5_000n,
+    });
+    // Archived product — must NOT appear in storefront price-band results,
+    // even though its variant matches the filter.
+    const hidden = await service.createProduct({
+      slug: "archived-prod",
+      title: "Archived product",
+      status: "archived",
+      defaultCurrency: "IDR",
+    });
+    await service.createVariant(hidden.id, {
+      sku: "HID-001",
+      priceAmount: 5_000n,
+    });
+
+    const result = await service.listProducts({
+      page: 1,
+      pageSize: 20,
+      sort: "newest",
+      activeOnly: true,
+      minPriceAmount: 1_000n,
+      maxPriceAmount: 10_000n,
+    });
+    const ids = result.data.map((p) => p.id);
+    expect(ids).toContain(visible.id);
+    expect(ids).not.toContain(hidden.id);
+  });
+});
+
+describe("CatalogService.listProducts price sort", () => {
+  async function seedThree() {
+    const { service } = buildService();
+    const a = await service.createProduct({
+      slug: "p-a",
+      title: "A",
+      status: "active",
+      defaultCurrency: "IDR",
+    });
+    await service.createVariant(a.id, { sku: "A-1", priceAmount: 100n });
+    const b = await service.createProduct({
+      slug: "p-b",
+      title: "B",
+      status: "active",
+      defaultCurrency: "IDR",
+    });
+    await service.createVariant(b.id, { sku: "B-1", priceAmount: 50n });
+    const c = await service.createProduct({
+      slug: "p-c",
+      title: "C",
+      status: "active",
+      defaultCurrency: "IDR",
+    });
+    await service.createVariant(c.id, { sku: "C-1", priceAmount: 200n });
+    return { service, ids: { a: a.id, b: b.id, c: c.id } };
+  }
+
+  it("price_asc orders products by cheapest variant ascending", async () => {
+    const { service, ids } = await seedThree();
+    const result = await service.listProducts({
+      page: 1,
+      pageSize: 20,
+      sort: "price_asc",
+      activeOnly: true,
+    });
+    expect(result.data.map((p) => p.id)).toEqual([ids.b, ids.a, ids.c]);
+  });
+
+  it("price_desc orders products by cheapest variant descending", async () => {
+    const { service, ids } = await seedThree();
+    const result = await service.listProducts({
+      page: 1,
+      pageSize: 20,
+      sort: "price_desc",
+      activeOnly: true,
+    });
+    expect(result.data.map((p) => p.id)).toEqual([ids.c, ids.a, ids.b]);
+  });
+});
+
+describe("CatalogService.updateProduct currency consistency", () => {
+  it("rejects defaultCurrency change when a variant prices in another currency", async () => {
+    const { service } = buildService();
+    const product = await service.createProduct({
+      slug: "ccy-mismatch",
+      title: "Currency mismatch",
+      defaultCurrency: "IDR",
+    });
+    await service.createVariant(product.id, {
+      sku: "CCY-001",
+      priceAmount: 100n,
+    });
+    await expect(
+      service.updateProduct(product.id, { defaultCurrency: "USD" }),
+    ).rejects.toMatchObject({
+      code: "validation_error",
+      details: { code: "currency_mismatch" },
+    });
+  });
+
+  it("allows defaultCurrency change when there are no variants yet", async () => {
+    const { service } = buildService();
+    const product = await service.createProduct({
+      slug: "ccy-empty",
+      title: "No variants",
+      defaultCurrency: "IDR",
+    });
+    const updated = await service.updateProduct(product.id, {
+      defaultCurrency: "USD",
+    });
+    expect(updated.defaultCurrency).toBe("USD");
+  });
+});
+
+describe("CatalogService.listProducts search escaping", () => {
+  it("treats `%` and `_` in the search term as literals, not wildcards", async () => {
+    const { service } = buildService();
+    const a = await service.createProduct({
+      slug: "coffee-100",
+      title: "Coffee 100% Arabica",
+      status: "active",
+      defaultCurrency: "IDR",
+    });
+    const b = await service.createProduct({
+      slug: "coffee-robusta",
+      title: "Coffee Robusta",
+      status: "active",
+      defaultCurrency: "IDR",
+    });
+    const c = await service.createProduct({
+      slug: "tea",
+      title: "Tea Beverage",
+      status: "active",
+      defaultCurrency: "IDR",
+    });
+    void b;
+    void c;
+
+    const result = await service.listProducts({
+      page: 1,
+      pageSize: 20,
+      sort: "newest",
+      activeOnly: true,
+      search: "100%",
+    });
+    const ids = result.data.map((p) => p.id);
+    expect(ids).toEqual([a.id]);
   });
 });

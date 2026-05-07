@@ -13,7 +13,7 @@
  * Every method accepts an optional `tx` so callers can run multi-statement
  * work in a single transaction. The default uses the module-level `db`.
  */
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as defaultDb } from "../../db/client.js";
 import {
@@ -33,6 +33,19 @@ import {
 } from "../../db/schema/index.js";
 import type * as schema from "../../db/schema/index.js";
 import type { ProductSort, ProductStatus } from "./types.js";
+
+/**
+ * Escape characters that have special meaning to a Postgres `ILIKE` pattern.
+ * Without escaping, a search term that legitimately contains `%` or `_` (e.g.
+ * `"100%"`, `"foo_bar"`) silently turns into a wildcard. Backslash is escaped
+ * first so we do not double-escape the escapes we add for `%` and `_`.
+ */
+export function escapeLikePattern(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_");
+}
 
 type Schema = typeof schema;
 type Db = PostgresJsDatabase<Schema>;
@@ -100,7 +113,7 @@ export function createCatalogRepository(db: Db = defaultDb) {
      * variant's amount, which matches the storefront's "from Rp X" semantics.
      */
     async listProducts(filters: ProductListFilters): Promise<ProductListResult> {
-      const conditions = [] as ReturnType<typeof eq>[];
+      const conditions: SQL[] = [];
       if (filters.excludeDeleted) {
         conditions.push(isNull(products.deletedAt));
       }
@@ -109,7 +122,10 @@ export function createCatalogRepository(db: Db = defaultDb) {
       }
       if (filters.search) {
         // ILIKE on title is sufficient for v0.1; full-text search lands later.
-        conditions.push(ilike(products.title, `%${filters.search}%`));
+        // Escape `%`, `_`, and `\` so the user-supplied term cannot smuggle
+        // wildcards into the pattern.
+        const safe = escapeLikePattern(filters.search);
+        conditions.push(ilike(products.title, `%${safe}%`));
       }
       if (filters.categoryId) {
         const productIds = db
@@ -126,29 +142,38 @@ export function createCatalogRepository(db: Db = defaultDb) {
           .where(eq(categories.slug, filters.categorySlug));
         conditions.push(inArray(products.id, productIds));
       }
+      // Price filters MUST respect the same status/soft-delete restrictions as
+      // the outer products query. We use a correlated EXISTS that joins
+      // explicitly back to the `products` table and re-applies the same
+      // visibility predicates. Defense in depth: even if the outer WHERE were
+      // ever bypassed, the variant subquery alone cannot match a variant
+      // belonging to a draft/archived/soft-deleted product.
+      const buildPriceExists = (
+        cmp: "min" | "max",
+        amount: bigint,
+      ): SQL => {
+        const op = cmp === "min" ? sql`>=` : sql`<=`;
+        const statusGuard = filters.status
+          ? sql`AND p.status = ${filters.status}`
+          : sql``;
+        const deletedGuard = filters.excludeDeleted
+          ? sql`AND p.deleted_at IS NULL`
+          : sql``;
+        return sql`EXISTS (
+          SELECT 1 FROM ${productVariants} pv
+          INNER JOIN ${products} p ON p.id = pv.product_id
+          WHERE pv.product_id = ${products.id}
+            AND pv.deleted_at IS NULL
+            AND pv.price_amount ${op} ${amount}
+            ${statusGuard}
+            ${deletedGuard}
+        )`;
+      };
       if (filters.minPriceAmount !== undefined) {
-        const minVariants = db
-          .select({ pid: productVariants.productId })
-          .from(productVariants)
-          .where(
-            and(
-              isNull(productVariants.deletedAt),
-              gte(productVariants.priceAmount, filters.minPriceAmount),
-            ),
-          );
-        conditions.push(inArray(products.id, minVariants));
+        conditions.push(buildPriceExists("min", filters.minPriceAmount));
       }
       if (filters.maxPriceAmount !== undefined) {
-        const maxVariants = db
-          .select({ pid: productVariants.productId })
-          .from(productVariants)
-          .where(
-            and(
-              isNull(productVariants.deletedAt),
-              lte(productVariants.priceAmount, filters.maxPriceAmount),
-            ),
-          );
-        conditions.push(inArray(products.id, maxVariants));
+        conditions.push(buildPriceExists("max", filters.maxPriceAmount));
       }
 
       const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -160,16 +185,26 @@ export function createCatalogRepository(db: Db = defaultDb) {
       const total = countRows[0]?.count ?? 0;
 
       const offset = (filters.page - 1) * filters.pageSize;
+      // Price sort uses a correlated subquery selecting the cheapest non-
+      // deleted variant per product. Chosen over LATERAL JOIN for two
+      // reasons: (a) Drizzle's type-safe ordering plays nicer with `sql`
+      // fragments here, (b) the subquery is independent per row so the
+      // planner can reuse the variant index on (product_id) without us
+      // shaping the FROM clause.
       const orderBy = (() => {
         switch (filters.sort) {
           case "oldest":
             return asc(products.createdAt);
           case "price_asc":
+            return sql`(
+              SELECT min(pv.price_amount) FROM ${productVariants} pv
+              WHERE pv.product_id = ${products.id} AND pv.deleted_at IS NULL
+            ) ASC NULLS LAST`;
           case "price_desc":
-            // Price-based sort needs the variants table. Do it in a follow-up
-            // if/when storefront demands it — for v0.1 we degrade to "newest"
-            // so the response is still useful.
-            return desc(products.createdAt);
+            return sql`(
+              SELECT min(pv.price_amount) FROM ${productVariants} pv
+              WHERE pv.product_id = ${products.id} AND pv.deleted_at IS NULL
+            ) DESC NULLS LAST`;
           case "newest":
           default:
             return desc(products.createdAt);

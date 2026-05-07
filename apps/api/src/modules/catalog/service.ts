@@ -188,6 +188,39 @@ export class CatalogServiceImpl implements CatalogService {
       }
     }
 
+    // Currency consistency: a product's `defaultCurrency` and its variants'
+    // `priceCurrency` must agree. Changing the product currency while any
+    // variant still prices in the old currency would silently introduce a
+    // cross-currency product, which the rest of the domain forbids.
+    //
+    // We refuse rather than auto-rewriting variant currencies, because that
+    // would amount to a silent bulk price change (Rp 250,000 is not USD
+    // 250,000). The merchant must explicitly update each conflicting variant
+    // first.
+    if (
+      patch.defaultCurrency !== undefined &&
+      patch.defaultCurrency !== existing.defaultCurrency
+    ) {
+      const variants = await this.repo.listVariantsForProducts([productId]);
+      const conflicts = variants.filter(
+        (v) => v.priceCurrency !== patch.defaultCurrency,
+      );
+      if (conflicts.length > 0) {
+        throw new ValidationError(
+          "Cannot change defaultCurrency while variants price in a different currency. Update variant prices first.",
+          {
+            code: "currency_mismatch",
+            requestedCurrency: patch.defaultCurrency,
+            currentCurrency: existing.defaultCurrency,
+            conflictingVariants: conflicts.map((v) => ({
+              variantId: v.id,
+              priceCurrency: v.priceCurrency,
+            })),
+          },
+        );
+      }
+    }
+
     const updated = await this.repo.updateProduct(productId, {
       ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
       ...(patch.title !== undefined ? { title: patch.title } : {}),
@@ -410,7 +443,29 @@ export class CatalogServiceImpl implements CatalogService {
       });
     }
 
-    const updated = await this.repo.adjustInventoryAtomic(variantId, delta);
+    let updated: Awaited<ReturnType<CatalogRepository["adjustInventoryAtomic"]>>;
+    try {
+      updated = await this.repo.adjustInventoryAtomic(variantId, delta);
+    } catch (err) {
+      // Postgres `22003` (numeric_value_out_of_range) — the resulting
+      // `available` would overflow `int4`. The Zod schema bounds `delta`
+      // at the boundary, but a colossal pre-existing `available` plus a
+      // legal-but-large delta could still overflow at the database. We
+      // convert this single, well-understood case into a 400 here rather
+      // than a generic 500 — and crucially do NOT add a wider catch.
+      if (isPostgresErrorWithCode(err, "22003")) {
+        throw new ValidationError(
+          "Inventory adjustment would overflow the supported range.",
+          {
+            code: "out_of_range",
+            variantId,
+            delta,
+            available: existing.available,
+          },
+        );
+      }
+      throw err;
+    }
     if (!updated) {
       // The atomic update returned nothing, which means the WHERE guard
       // (`available + delta >= 0`) failed. Surface a clear conflict so the
@@ -448,6 +503,19 @@ function clampPageSize(size: number | undefined): number {
   if (!size || size < 1) return DEFAULT_PAGE_SIZE;
   if (size > MAX_PAGE_SIZE) return MAX_PAGE_SIZE;
   return Math.floor(size);
+}
+
+/**
+ * Narrow on the postgres-js (and node-postgres) `code` SQLSTATE field. We
+ * read the field defensively because the error type is `unknown` once it
+ * bubbles up from a catch block. Used only to reclassify a single
+ * well-understood Postgres error in `adjustInventory`; intentionally not
+ * exported and intentionally narrow.
+ */
+function isPostgresErrorWithCode(err: unknown, code: string): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const candidate = (err as { code?: unknown }).code;
+  return candidate === code;
 }
 
 function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {

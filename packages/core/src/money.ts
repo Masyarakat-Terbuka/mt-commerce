@@ -54,6 +54,21 @@ const MINOR_UNIT_DIGITS: Record<string, number> = {
   CAD: 2,
 };
 
+/**
+ * The set of currency codes mt-commerce currently supports as first-class.
+ * This is the same key set as `MINOR_UNIT_DIGITS` and is exported so that
+ * other modules (catalog, checkout, etc.) can validate input currency codes
+ * without duplicating the list. Treat as the source of truth — adding a
+ * currency means a single edit here.
+ *
+ * Note: this is a subset of ISO 4217 by design. Currencies outside this list
+ * may format with the default minor-unit assumption but are not validated
+ * for input — open a PR to add them.
+ */
+export const KNOWN_CURRENCIES: readonly string[] = Object.freeze(
+  Object.keys(MINOR_UNIT_DIGITS),
+);
+
 const DEFAULT_MINOR_UNITS = 2;
 
 function minorUnitDigits(currency: string): number {

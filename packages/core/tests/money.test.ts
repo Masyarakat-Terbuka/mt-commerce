@@ -10,6 +10,7 @@ import {
   isNegative,
   isPositive,
   isZero,
+  KNOWN_CURRENCIES,
   multiply,
   negate,
   subtract,
@@ -221,6 +222,20 @@ describe("format — locale and currency overrides", () => {
     // German locale: "1.500,00 €" — assert structural bits.
     expect(out).toContain("1.500,00");
     expect(out).toContain("€"); // €
+  });
+});
+
+describe("KNOWN_CURRENCIES", () => {
+  it("exposes the set of first-class supported currencies", () => {
+    // Stable subset that downstream consumers (catalog) depend on. Keep this
+    // assertion liberal — the list may grow, but these must always be present.
+    expect(KNOWN_CURRENCIES).toContain("IDR");
+    expect(KNOWN_CURRENCIES).toContain("USD");
+    expect(KNOWN_CURRENCIES).toContain("EUR");
+    expect(KNOWN_CURRENCIES).toContain("JPY");
+  });
+  it("is frozen so consumers cannot mutate the source of truth", () => {
+    expect(Object.isFrozen(KNOWN_CURRENCIES)).toBe(true);
   });
 });
 

@@ -16,7 +16,7 @@
  * route handlers can import from a single, stable contract.
  */
 import { z } from "zod";
-import type { Money } from "@mt-commerce/core/money";
+import { KNOWN_CURRENCIES, type Money } from "@mt-commerce/core/money";
 
 // ----------------------------------------------------------------------------
 // Domain types
@@ -93,10 +93,21 @@ const slugSchema = z
     message: "slug must be lowercase, hyphen-separated alphanumerics",
   });
 
-/** ISO 4217 currency code, three uppercase letters. Values like "IDR", "USD". */
+/**
+ * ISO 4217 currency code restricted to the set mt-commerce supports as
+ * first-class (see `KNOWN_CURRENCIES` in `@mt-commerce/core/money`). A naive
+ * `^[A-Z]{3}$` regex would happily accept e.g. "XXX" or "ZZZ", which then
+ * silently flows through pricing and formatting and only surfaces as an
+ * `Intl.NumberFormat` runtime error at the storefront. Validating against
+ * the known list at the boundary fails fast with a clear message.
+ */
+const knownCurrencySet = new Set<string>(KNOWN_CURRENCIES);
 const currencySchema = z
   .string()
-  .regex(/^[A-Z]{3}$/, { message: "currency must be a 3-letter ISO 4217 code" });
+  .regex(/^[A-Z]{3}$/, { message: "currency must be a 3-letter ISO 4217 code" })
+  .refine((code) => knownCurrencySet.has(code), {
+    message: `currency must be one of: ${[...KNOWN_CURRENCIES].sort().join(", ")}`,
+  });
 
 const moneyAmountSchema = z
   .union([z.string(), z.number()])
@@ -197,10 +208,29 @@ export const updateCategorySchema = z
   });
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 
+/**
+ * Inventory adjustments are bounded to ±1,000,000 to keep the value safely
+ * inside Postgres `int4` (max ~2.1B) even when added to a large existing
+ * `available`. Real-world adjustments are receipts/sales/audits, which fit
+ * comfortably; bulk loads should paginate. Without these bounds an oversized
+ * `delta` overflowed `int4` and surfaced as a Postgres `22003` error mapped
+ * to a 500 — a validation failure leaking as a server error.
+ */
+const INVENTORY_DELTA_LIMIT = 1_000_000;
+
 export const adjustInventorySchema = z.object({
-  delta: z.number().int().refine((n) => n !== 0, {
-    message: "delta must be a non-zero integer",
-  }),
+  delta: z
+    .number()
+    .int({ message: "delta must be an integer" })
+    .min(-INVENTORY_DELTA_LIMIT, {
+      message: `delta must be between -${INVENTORY_DELTA_LIMIT} and ${INVENTORY_DELTA_LIMIT}`,
+    })
+    .max(INVENTORY_DELTA_LIMIT, {
+      message: `delta must be between -${INVENTORY_DELTA_LIMIT} and ${INVENTORY_DELTA_LIMIT}`,
+    })
+    .refine((n) => n !== 0, {
+      message: "delta must be a non-zero integer",
+    }),
 });
 export type AdjustInventoryInput = z.infer<typeof adjustInventorySchema>;
 
@@ -225,20 +255,28 @@ export const MAX_PAGE_SIZE = 100;
  * or `categorySlug` (storefront) — not both — so the storefront does not have
  * to know about IDs.
  */
-export const listProductsQuerySchema = z.object({
-  status: productStatusSchema.optional(),
-  categoryId: z.string().min(1).optional(),
-  categorySlug: slugSchema.optional(),
-  search: z.string().min(1).max(200).optional(),
-  minPriceAmount: moneyAmountSchema.optional(),
-  maxPriceAmount: moneyAmountSchema.optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_PAGE_SIZE)
-    .default(DEFAULT_PAGE_SIZE),
-  sort: productSortSchema.default("newest"),
-});
+export const listProductsQuerySchema = z
+  .object({
+    status: productStatusSchema.optional(),
+    categoryId: z.string().min(1).optional(),
+    categorySlug: slugSchema.optional(),
+    search: z.string().min(1).max(200).optional(),
+    minPriceAmount: moneyAmountSchema.optional(),
+    maxPriceAmount: moneyAmountSchema.optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_PAGE_SIZE)
+      .default(DEFAULT_PAGE_SIZE),
+    sort: productSortSchema.default("newest"),
+  })
+  .refine(
+    (q) => !(q.categoryId !== undefined && q.categorySlug !== undefined),
+    {
+      message: "Use either categoryId or categorySlug, not both.",
+      path: ["categorySlug"],
+    },
+  );
 export type ListProductsQuery = z.infer<typeof listProductsQuerySchema>;
