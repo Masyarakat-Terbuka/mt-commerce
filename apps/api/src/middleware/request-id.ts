@@ -8,7 +8,7 @@
  * lets a frontend or a load balancer correlate logs across hops.
  */
 import type { MiddlewareHandler } from "hono";
-import { rawUlid } from "../lib/ulid.js";
+import { rawUlid } from "@mt-commerce/core/ulid";
 import type { AppBindings } from "../lib/types.js";
 
 const HEADER = "x-request-id";

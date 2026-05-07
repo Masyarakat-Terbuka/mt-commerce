@@ -15,13 +15,13 @@
   "dependencies": {
     "@hono/swagger-ui": "^0.5.0",
     "@hono/zod-openapi": "^0.18.0",
+    "@mt-commerce/core": "workspace:*",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
     "postgres": "^3.4.5",
-    "ulid": "^2.3.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

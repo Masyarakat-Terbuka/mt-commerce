@@ -19,7 +19,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { healthPings } from "../../db/schema/index.js";
-import { id } from "../../lib/ulid.js";
+import { id } from "@mt-commerce/core/ulid";
 import { AppError, ValidationError, issuesToDetails } from "../../lib/errors.js";
 import type { AppBindings } from "../../lib/types.js";
 

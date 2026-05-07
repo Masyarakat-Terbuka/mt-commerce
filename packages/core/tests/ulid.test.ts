@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { id, rawUlid } from "../../src/lib/ulid.js";
+import { id, rawUlid } from "../src/ulid.js";
 
 describe("id", () => {
   it("returns a value with the requested prefix", () => {
