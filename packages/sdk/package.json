@@ -1,0 +1,29 @@
+{
+  "name": "@mt-commerce/sdk",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./types": "./src/types.ts",
+    "./errors": "./src/errors.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mt-commerce/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/bun": "^1.2.0",
+    "eslint": "^9.39.4",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,16 +1,15 @@
 ---
-// English entry. The shared content lives in `lib`/`components`; only the
-// route shell differs by locale. Astro's i18n routing sets `Astro.currentLocale`
-// to "en" for any page under `/en/`.
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import ProductCard from "@/components/ProductCard.astro";
-import { listFeaturedProducts } from "@/lib/api";
-import { createTranslator } from "@/lib/i18n";
+import ProductGrid from "@/islands/ProductGrid.tsx";
+import { resolveApiUrl } from "@/lib/api";
+import { createTranslator, localePath } from "@/lib/i18n";
 
 const t = createTranslator("en");
-const featured = listFeaturedProducts(4);
 const title = `${t("home.hero.title")} — mt-commerce`;
 const description = t("home.hero.subtitle");
+
+const apiUrl = resolveApiUrl();
+const detailHrefBase = localePath("en", "/products");
 ---
 
 <BaseLayout title={title} description={description}>
@@ -25,8 +24,16 @@ const description = t("home.hero.subtitle");
 
   <section class="py-4">
     <h2 class="mb-4 text-lg font-semibold text-neutral-900">{t("home.featured")}</h2>
-    <div class="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-      {featured.map((p) => <ProductCard product={p} />)}
-    </div>
+    <ProductGrid
+      client:load
+      apiUrl={apiUrl}
+      locale="en-US"
+      detailHrefBase={detailHrefBase}
+      emptyLabel={t("products.list.empty")}
+      loadingLabel={t("products.list.loading")}
+      errorLabel={t("products.list.error")}
+      query={{ pageSize: 4, sort: "newest" }}
+      limit={4}
+    />
   </section>
 </BaseLayout>

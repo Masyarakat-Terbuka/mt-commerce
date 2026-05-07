@@ -1,18 +1,83 @@
-// Replace with @mt-commerce/sdk once it ships (see ADR-0008).
-//
-// This module is the single boundary the storefront uses to talk to "the API".
-// While the SDK is not yet available, it serves mock data from `mock-products.ts`.
-// Pages and components import only from here, so the swap to the real SDK is a
-// localized change.
+/**
+ * The single boundary the storefront uses to talk to the API.
+ *
+ * Wraps `@mt-commerce/sdk` with two storefront-specific concerns:
+ *
+ *   1. Resilience — the storefront builds statically, and at build time the
+ *      API may not be running. Every call here is wrapped in try/catch and
+ *      returns an empty result on failure (the page renders the empty state
+ *      rather than crashing). Errors are logged to the console so they are
+ *      visible in development without leaking through to the visitor.
+ *
+ *   2. Shape adaptation — the SDK returns `Product` shapes typed by
+ *      `@mt-commerce/sdk`. The existing storefront components (Price,
+ *      ProductCard, Filters) consume a slightly older `mock-products`-style
+ *      shape with localized title/description objects. We adapt at this
+ *      boundary so the swap to real data was a localized change instead of a
+ *      sweep through every page and component.
+ *
+ * The API base URL is read from `import.meta.env.PUBLIC_API_URL`. Astro
+ * inlines `PUBLIC_*` env vars at build time for both server- and client-side
+ * code, which is what the React product islands need to call the API on the
+ * visitor's machine.
+ */
+import { createClient, type Product as SdkProduct } from "@mt-commerce/sdk";
+import type { Money } from "@mt-commerce/core/money";
 
-import {
-  MOCK_CATEGORIES,
-  MOCK_PRODUCTS,
-  type Category,
-  type Product,
-} from "./mock-products.js";
+export const DEFAULT_API_URL = "http://localhost:8000";
+
+export function resolveApiUrl(): string {
+  // Falls back to localhost so a developer who forgets to set the env var
+  // still sees something useful in the dev server.
+  const raw =
+    typeof import.meta.env !== "undefined"
+      ? (import.meta.env.PUBLIC_API_URL as string | undefined)
+      : undefined;
+  return raw && raw.length > 0 ? raw : DEFAULT_API_URL;
+}
+
+const client = createClient({ baseUrl: resolveApiUrl() });
+
+// ---------------------------------------------------------------------------
+// Storefront-facing types — narrower and bilingual-safe.
+// ---------------------------------------------------------------------------
 
 export type SortKey = "newest" | "price_asc" | "price_desc";
+
+export type StoreCategory = {
+  id: string;
+  slug: string;
+  /**
+   * The API returns a single category name (today, untranslated). The
+   * storefront historically used `{ id, en }` per locale; we expose both
+   * forms by mirroring the same string into both keys until the API grows
+   * a translations field.
+   */
+  name: { id: string; en: string };
+};
+
+export type StoreVariant = {
+  id: string;
+  name: { id: string; en: string };
+  price: Money;
+  compareAt?: Money;
+  available: boolean;
+};
+
+export type StoreProduct = {
+  id: string;
+  slug: string;
+  title: { id: string; en: string };
+  description: { id: string; en: string };
+  imageUrl: string;
+  imageAlt: { id: string; en: string };
+  categorySlug: string;
+  variants: StoreVariant[];
+  /** ISO 8601 — used for "newest" sort. */
+  createdAt: string;
+  /** Lowest variant price; convenience for cards and structured data. */
+  basePrice: Money;
+};
 
 export type ListProductsQuery = {
   category?: string;
@@ -25,7 +90,7 @@ export type ListProductsQuery = {
 };
 
 export type ListProductsResult = {
-  items: Product[];
+  items: StoreProduct[];
   total: number;
   page: number;
   pageSize: number;
@@ -34,19 +99,88 @@ export type ListProductsResult = {
 
 const DEFAULT_PAGE_SIZE = 12;
 
-export function listCategories(): Category[] {
-  return MOCK_CATEGORIES;
+// ---------------------------------------------------------------------------
+// SDK → store-shape adapters.
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the lowest-priced variant. Storefront cards display this as the
+ * product's "from" price. Falls back to a zero amount if a product has no
+ * variants — in practice the API filters those out for storefront reads,
+ * but the fallback keeps the type non-nullable.
+ */
+function computeBasePrice(product: SdkProduct): Money {
+  if (product.variants.length === 0) {
+    return { amount: 0n, currency: product.defaultCurrency };
+  }
+  let lowest = product.variants[0]!.price;
+  for (const v of product.variants) {
+    if (v.price.amount < lowest.amount) lowest = v.price;
+  }
+  return lowest;
 }
 
-export function getCategoryBySlug(slug: string): Category | undefined {
-  return MOCK_CATEGORIES.find((c) => c.slug === slug);
+/**
+ * Best-effort image URL — the API has no image field yet (see the catalog
+ * module). We render a neutral placeholder until the field lands. This
+ * keeps `<img src>` non-empty so the layout is stable.
+ */
+function placeholderImage(title: string): string {
+  const text = encodeURIComponent(title.slice(0, 24));
+  return `https://placehold.co/800x800/png?text=${text}`;
 }
 
-export function getProductBySlug(slug: string): Product | undefined {
-  return MOCK_PRODUCTS.find((p) => p.slug === slug);
+function adaptProduct(product: SdkProduct): StoreProduct {
+  const title = product.title;
+  const description = product.description ?? "";
+  const adaptedVariants: StoreVariant[] = product.variants.map((v) => ({
+    id: v.id,
+    name: { id: v.title ?? v.sku, en: v.title ?? v.sku },
+    price: v.price,
+    ...(v.compareAtPrice ? { compareAt: v.compareAtPrice } : {}),
+    // The catalog API returns no inventory field on variants today.
+    // Treat everything as available; replace once the SDK exposes inventory.
+    available: true,
+  }));
+  return {
+    id: product.id,
+    slug: product.slug,
+    title: { id: title, en: title },
+    description: { id: description, en: description },
+    imageUrl: placeholderImage(title),
+    imageAlt: { id: title, en: title },
+    // The API exposes `categoryIds`; the storefront filters by slug. Use the
+    // first category id as a slug-like identifier until the SDK joins the
+    // category in the product payload. Empty string falls through to "no
+    // matching category" which the filter handles cleanly.
+    categorySlug: product.categoryIds[0] ?? "",
+    variants: adaptedVariants,
+    createdAt: product.createdAt.toISOString(),
+    basePrice: computeBasePrice(product),
+  };
 }
 
-export function listProducts(query: ListProductsQuery = {}): ListProductsResult {
+// ---------------------------------------------------------------------------
+// Public API — async, resilient.
+// ---------------------------------------------------------------------------
+
+export async function listCategories(): Promise<StoreCategory[]> {
+  try {
+    const cats = await client.storefront.categories.list();
+    return cats.map((c) => ({
+      id: c.id,
+      slug: c.slug,
+      name: { id: c.name, en: c.name },
+    }));
+  } catch (err) {
+    console.error("[storefront] listCategories failed:", err);
+    return [];
+  }
+}
+
+export async function listProducts(
+  query: ListProductsQuery = {},
+): Promise<ListProductsResult> {
   const {
     category,
     search,
@@ -57,57 +191,44 @@ export function listProducts(query: ListProductsQuery = {}): ListProductsResult 
     pageSize = DEFAULT_PAGE_SIZE,
   } = query;
 
-  let items = [...MOCK_PRODUCTS];
-
-  if (category) {
-    items = items.filter((p) => p.categorySlug === category);
+  try {
+    const result = await client.storefront.products.list({
+      ...(category ? { categorySlug: category } : {}),
+      ...(search ? { search } : {}),
+      ...(typeof minPrice === "bigint" ? { minPriceAmount: minPrice } : {}),
+      ...(typeof maxPrice === "bigint" ? { maxPriceAmount: maxPrice } : {}),
+      page,
+      pageSize,
+      sort,
+    });
+    const items = result.data.map(adaptProduct);
+    const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
+    return {
+      items,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      totalPages,
+    };
+  } catch (err) {
+    console.error("[storefront] listProducts failed:", err);
+    return { items: [], total: 0, page: 1, pageSize, totalPages: 1 };
   }
-  if (search) {
-    const needle = search.toLowerCase();
-    items = items.filter(
-      (p) =>
-        p.title.id.toLowerCase().includes(needle) ||
-        p.title.en.toLowerCase().includes(needle) ||
-        p.description.id.toLowerCase().includes(needle),
-    );
-  }
-  if (typeof minPrice === "bigint") {
-    items = items.filter((p) => p.basePrice.amount >= minPrice);
-  }
-  if (typeof maxPrice === "bigint") {
-    items = items.filter((p) => p.basePrice.amount <= maxPrice);
-  }
-
-  switch (sort) {
-    case "price_asc":
-      items.sort((a, b) => Number(a.basePrice.amount - b.basePrice.amount));
-      break;
-    case "price_desc":
-      items.sort((a, b) => Number(b.basePrice.amount - a.basePrice.amount));
-      break;
-    case "newest":
-    default:
-      items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-      break;
-  }
-
-  const total = items.length;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(Math.max(1, page), totalPages);
-  const start = (safePage - 1) * pageSize;
-  const paged = items.slice(start, start + pageSize);
-
-  return {
-    items: paged,
-    total,
-    page: safePage,
-    pageSize,
-    totalPages,
-  };
 }
 
-export function listFeaturedProducts(limit = 4): Product[] {
-  return [...MOCK_PRODUCTS]
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    .slice(0, limit);
+export async function listFeaturedProducts(limit = 4): Promise<StoreProduct[]> {
+  const result = await listProducts({ pageSize: limit, sort: "newest" });
+  return result.items.slice(0, limit);
+}
+
+export async function getProductBySlug(
+  slug: string,
+): Promise<StoreProduct | null> {
+  try {
+    const product = await client.storefront.products.bySlug(slug);
+    return adaptProduct(product);
+  } catch (err) {
+    console.error(`[storefront] getProductBySlug(${slug}) failed:`, err);
+    return null;
+  }
 }

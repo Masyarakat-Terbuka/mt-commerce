@@ -15,7 +15,7 @@ export interface Props {
 const { active } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
-const categories = listCategories();
+const categories = await listCategories();
 const formAction = localePath(locale, "/products");
 ---
 

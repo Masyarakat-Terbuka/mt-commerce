@@ -1,9 +1,8 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import ProductCard from "@/components/ProductCard.astro";
 import Filters from "@/components/Filters.astro";
-import Pagination from "@/components/Pagination.astro";
-import { listProducts, type SortKey } from "@/lib/api";
+import ProductGrid from "@/islands/ProductGrid.tsx";
+import { resolveApiUrl } from "@/lib/api";
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
@@ -17,21 +16,24 @@ const maxRaw = url.searchParams.get("max");
 const sortRaw = url.searchParams.get("sort");
 const pageRaw = url.searchParams.get("page");
 
-const sort: SortKey | undefined =
-  sortRaw === "price_asc" || sortRaw === "price_desc" || sortRaw === "newest" ? sortRaw : undefined;
+type SortKey = "newest" | "price_asc" | "price_desc";
+const sort: SortKey =
+  sortRaw === "price_asc" || sortRaw === "price_desc" || sortRaw === "newest"
+    ? sortRaw
+    : "newest";
 const page = pageRaw ? Math.max(1, Number.parseInt(pageRaw, 10) || 1) : 1;
-const minPrice = minRaw && /^\d+$/.test(minRaw) ? BigInt(minRaw) : undefined;
-const maxPrice = maxRaw && /^\d+$/.test(maxRaw) ? BigInt(maxRaw) : undefined;
-
-const result = listProducts({ search, category, minPrice, maxPrice, sort, page });
-
-// Build a base URL preserving filters but stripping `page`.
-const preserved = new URLSearchParams(url.searchParams);
-preserved.delete("page");
-const qs = preserved.toString();
-const baseUrl = qs ? `${localePath(locale, "/products")}?${qs}` : localePath(locale, "/products");
+const minPrice = minRaw && /^\d+$/.test(minRaw) ? minRaw : undefined;
+const maxPrice = maxRaw && /^\d+$/.test(maxRaw) ? maxRaw : undefined;
 
 const title = `${t("products.list.title")} — mt-commerce`;
+const apiUrl = resolveApiUrl();
+const detailHrefBase = localePath(locale, "/products");
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
+
+// Categories are fetched at build time. If the API is down, `Filters`
+// receives an empty list and renders only the search/price/sort controls.
+// We keep this server-side because the form is a plain HTML <form> that
+// posts back to the same URL — no client JS would help here.
 ---
 
 <BaseLayout title={title} description={t("products.list.title")}>
@@ -48,20 +50,22 @@ const title = `${t("products.list.title")} — mt-commerce`;
   />
 
   <div class="mt-6">
-    {
-      result.items.length === 0 ? (
-        <p class="rounded border border-neutral-200 bg-neutral-50 p-6 text-center text-sm text-neutral-600">
-          {t("products.list.empty")}
-        </p>
-      ) : (
-        <div class="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-          {result.items.map((p) => (
-            <ProductCard product={p} />
-          ))}
-        </div>
-      )
-    }
+    <ProductGrid
+      client:load
+      apiUrl={apiUrl}
+      locale={intlLocale}
+      detailHrefBase={detailHrefBase}
+      emptyLabel={t("products.list.empty")}
+      loadingLabel={t("products.list.loading")}
+      errorLabel={t("products.list.error")}
+      query={{
+        ...(category ? { categorySlug: category } : {}),
+        ...(search ? { search } : {}),
+        ...(minPrice ? { minPriceAmount: minPrice } : {}),
+        ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
+        page,
+        sort,
+      }}
+    />
   </div>
-
-  <Pagination page={result.page} totalPages={result.totalPages} baseUrl={baseUrl} />
 </BaseLayout>

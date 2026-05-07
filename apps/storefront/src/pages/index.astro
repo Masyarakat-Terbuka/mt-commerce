@@ -1,15 +1,18 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import ProductCard from "@/components/ProductCard.astro";
-import { listFeaturedProducts } from "@/lib/api";
-import { createTranslator, resolveLocale, type Locale } from "@/lib/i18n";
+import ProductGrid from "@/islands/ProductGrid.tsx";
+import { resolveApiUrl } from "@/lib/api";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
-const featured = listFeaturedProducts(4);
 
 const title = `${t("home.hero.title")} — mt-commerce`;
 const description = t("home.hero.subtitle");
+
+const apiUrl = resolveApiUrl();
+const detailHrefBase = localePath(locale, "/products");
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
 ---
 
 <BaseLayout title={title} description={description}>
@@ -24,8 +27,16 @@ const description = t("home.hero.subtitle");
 
   <section class="py-4">
     <h2 class="mb-4 text-lg font-semibold text-neutral-900">{t("home.featured")}</h2>
-    <div class="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-      {featured.map((p) => <ProductCard product={p} />)}
-    </div>
+    <ProductGrid
+      client:load
+      apiUrl={apiUrl}
+      locale={intlLocale}
+      detailHrefBase={detailHrefBase}
+      emptyLabel={t("products.list.empty")}
+      loadingLabel={t("products.list.loading")}
+      errorLabel={t("products.list.error")}
+      query={{ pageSize: 4, sort: "newest" }}
+      limit={4}
+    />
   </section>
 </BaseLayout>

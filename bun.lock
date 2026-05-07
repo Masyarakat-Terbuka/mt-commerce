@@ -74,6 +74,7 @@
         "@astrojs/check": "^0.9.4",
         "@astrojs/react": "^4.2.0",
         "@mt-commerce/core": "workspace:*",
+        "@mt-commerce/sdk": "workspace:*",
         "@tailwindcss/vite": "^4.2.1",
         "astro": "^5.1.0",
         "react": "^19.2.4",
@@ -100,6 +101,21 @@
       "version": "0.0.1",
       "dependencies": {
         "ulid": "^2.3.0",
+      },
+      "devDependencies": {
+        "@eslint/js": "^9.39.4",
+        "@types/bun": "^1.2.0",
+        "eslint": "^9.39.4",
+        "typescript": "~5.9.3",
+        "typescript-eslint": "^8.57.1",
+        "vitest": "^2.1.0",
+      },
+    },
+    "packages/sdk": {
+      "name": "@mt-commerce/sdk",
+      "version": "0.0.1",
+      "dependencies": {
+        "@mt-commerce/core": "workspace:*",
       },
       "devDependencies": {
         "@eslint/js": "^9.39.4",
@@ -423,6 +439,8 @@
     "@mt-commerce/api": ["@mt-commerce/api@workspace:apps/api"],
 
     "@mt-commerce/core": ["@mt-commerce/core@workspace:packages/core"],
+
+    "@mt-commerce/sdk": ["@mt-commerce/sdk@workspace:packages/sdk"],
 
     "@mt-commerce/storefront": ["@mt-commerce/storefront@workspace:apps/storefront"],
 

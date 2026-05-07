@@ -9,6 +9,10 @@
 
   "products.list.title": "All products",
   "products.list.empty": "No products match your selection.",
+  "products.list.loading": "Loading products…",
+  "products.list.error": "Failed to load products. Please try again later.",
+  "products.detail.loading": "Loading product…",
+  "products.detail.not_found": "Product not found.",
   "products.filters.category": "Category",
   "products.filters.price": "Price range",
   "products.filters.search": "Search products",

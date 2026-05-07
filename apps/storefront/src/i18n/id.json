@@ -9,6 +9,10 @@
 
   "products.list.title": "Semua produk",
   "products.list.empty": "Belum ada produk yang cocok dengan pilihan Anda.",
+  "products.list.loading": "Memuat produk…",
+  "products.list.error": "Gagal memuat produk. Silakan coba lagi nanti.",
+  "products.detail.loading": "Memuat produk…",
+  "products.detail.not_found": "Produk tidak ditemukan.",
   "products.filters.category": "Kategori",
   "products.filters.price": "Rentang harga",
   "products.filters.search": "Cari produk",

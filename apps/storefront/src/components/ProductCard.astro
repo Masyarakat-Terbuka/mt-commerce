@@ -1,10 +1,10 @@
 ---
 import Price from "./Price.astro";
 import { resolveLocale, localePath, type Locale } from "@/lib/i18n";
-import type { Product } from "@/lib/mock-products";
+import type { StoreProduct } from "@/lib/api";
 
 export interface Props {
-  product: Product;
+  product: StoreProduct;
 }
 
 const { product } = Astro.props;

@@ -1,13 +1,22 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import VariantSelector from "@/islands/VariantSelector.tsx";
-import AddToCartButton from "@/islands/AddToCartButton.tsx";
-import { getProductBySlug } from "@/lib/api";
-import { MOCK_PRODUCTS } from "@/lib/mock-products";
+import ProductDetail from "@/islands/ProductDetail.tsx";
+import { getProductBySlug, listProducts, resolveApiUrl } from "@/lib/api";
 import { createTranslator, resolveLocale, type Locale } from "@/lib/i18n";
 
-export function getStaticPaths() {
-  return MOCK_PRODUCTS.map((p) => ({ params: { slug: p.slug } }));
+/**
+ * `getStaticPaths` runs at build time. It tries to enumerate slugs through
+ * the SDK; if the API is unreachable (common for offline builds in CI), it
+ * returns an empty array — no detail pages are generated, and the listing
+ * page's empty state is what visitors see. When the API is up at build
+ * time, every active product slug is pre-rendered for SEO.
+ */
+export async function getStaticPaths() {
+  // Pull a generous first page; finer pagination at build time would mean
+  // chasing every page just to know slugs. The catalog ships with far fewer
+  // than 100 products at v0.1, so a single request is enough.
+  const result = await listProducts({ pageSize: 100, sort: "newest" });
+  return result.items.map((p) => ({ params: { slug: p.slug } }));
 }
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
@@ -15,82 +24,56 @@ const t = createTranslator(locale);
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
 const { slug } = Astro.params as { slug: string };
-const product = getProductBySlug(slug);
 
-if (!product) {
-  return Astro.redirect("/404");
-}
+// Best-effort build-time fetch to populate <title>, <meta> and the JSON-LD
+// product structured data. If the build-time fetch fails we still render
+// the page; the React island re-fetches on the client.
+const product = await getProductBySlug(slug);
 
-const title = product.title[locale];
-const description = product.description[locale];
-const firstVariant = product.variants[0]!;
+const pageTitle = product ? product.title[locale] : slug;
+const description = product ? product.description[locale] : "";
+const ogImage = product?.imageUrl;
 
-// Variant options serialized for the React island. Money survives because
-// `bigint` is preserved through Astro's island prop serialization.
-const variantOptions = product.variants.map((v) => ({
-  id: v.id,
-  name: v.name[locale],
-  price: v.price,
-  compareAt: v.compareAt,
-  available: v.available,
-}));
+const jsonLd = product
+  ? {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: pageTitle,
+      description,
+      image: product.imageUrl,
+      sku: product.id,
+      offers: {
+        "@type": "Offer",
+        price: product.basePrice.amount.toString(),
+        priceCurrency: product.basePrice.currency,
+        availability: product.variants.some((v) => v.available)
+          ? "https://schema.org/InStock"
+          : "https://schema.org/OutOfStock",
+      },
+    }
+  : null;
 
-// JSON-LD product structured data. Search engines and link previews read this
-// without needing JS. We use the lowest variant price for `offers.price` and
-// list the IDR currency unit (whole rupiah) as a string.
-const jsonLd = {
-  "@context": "https://schema.org",
-  "@type": "Product",
-  name: title,
-  description,
-  image: product.imageUrl,
-  sku: product.id,
-  offers: {
-    "@type": "Offer",
-    price: product.basePrice.amount.toString(),
-    priceCurrency: product.basePrice.currency,
-    availability: product.variants.some((v) => v.available)
-      ? "https://schema.org/InStock"
-      : "https://schema.org/OutOfStock",
-  },
-};
+const apiUrl = resolveApiUrl();
 ---
 
-<BaseLayout title={`${title} — mt-commerce`} description={description} ogImage={product.imageUrl}>
-  <article class="grid grid-cols-1 gap-6 md:grid-cols-2">
-    <div class="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-100">
-      <img
-        src={product.imageUrl}
-        alt={product.imageAlt[locale]}
-        loading="eager"
-        decoding="async"
-        class="h-full w-full object-cover"
-      />
-    </div>
+<BaseLayout
+  title={`${pageTitle} — mt-commerce`}
+  description={description}
+  ogImage={ogImage}
+>
+  <ProductDetail
+    client:load
+    apiUrl={apiUrl}
+    slug={slug}
+    locale={intlLocale}
+    loadingLabel={t("products.detail.loading")}
+    errorLabel={t("products.list.error")}
+    notFoundLabel={t("products.detail.not_found")}
+    variantsHeading={t("products.detail.variants")}
+    compareAtLabel={t("products.detail.compare_at")}
+    addToCartLabel={t("products.detail.add_to_cart")}
+    outOfStockLabel={t("products.detail.out_of_stock")}
+  />
 
-    <div class="space-y-5">
-      <header>
-        <h1 class="text-2xl font-semibold text-neutral-900 md:text-3xl">{title}</h1>
-        <p class="mt-2 text-sm text-neutral-600 md:text-base">{description}</p>
-      </header>
-
-      <VariantSelector
-        client:load
-        variants={variantOptions}
-        locale={intlLocale}
-        heading={t("products.detail.variants")}
-        compareAtLabel={t("products.detail.compare_at")}
-      />
-
-      <AddToCartButton
-        client:load
-        variantId={firstVariant.id}
-        label={t("products.detail.add_to_cart")}
-        soldOutLabel={t("products.detail.out_of_stock")}
-        soldOut={!firstVariant.available}
-      />
-    </div>
-  </article>
-
-  <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
 </BaseLayout>

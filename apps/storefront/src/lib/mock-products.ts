@@ -1,9 +1,10 @@
 /**
- * Mock product catalog for the storefront scaffold.
+ * @deprecated Kept only for the storefront's existing unit tests.
  *
- * This is replaced by `@mt-commerce/sdk` once it ships (see ADR-0008).
- * The shape here intentionally mirrors what the SDK is expected to return
- * for `storefront/v1/products` so swapping it in is a narrow change.
+ * The runtime catalog now flows through `@mt-commerce/sdk` via
+ * `src/lib/api.ts`. Pages, components, and islands MUST NOT import this
+ * file — point them at `src/lib/api.ts` instead. This module will be
+ * deleted once the test suite has been ported off the static fixture.
  *
  * Money amounts are stored as `bigint` in whole rupiah per ADR-0007.
  */
