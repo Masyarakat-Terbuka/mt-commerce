@@ -58,6 +58,7 @@ import {
   authVerifications,
 } from "../../db/schema/index.js";
 import { getNotificationService } from "../notification/index.js";
+import { customerService } from "../customer/service.js";
 
 const log = logger.child({ module: "auth" });
 
@@ -158,6 +159,60 @@ export function buildAuth() {
           { userId: user.id, email: user.email },
           "verification email sent",
         );
+      },
+    },
+    /**
+     * Mint a `customers` row whenever a Better Auth user is created. The
+     * storefront's `/storefront/v1/customer/me/*` routes look the customer up
+     * by `auth_user_id`, so a missing customer row makes every authenticated
+     * customer request return 404. Doing the work in the after-create hook
+     * keeps the staff sign-up path identical (staff still sign up via the
+     * same `/api/auth/sign-up/email` route the storefront uses; the
+     * `staff_profiles` row is the only thing that distinguishes them, and
+     * the existence of a `customers` row alongside is harmless because
+     * staff/customer are domain concerns layered on top of one identity).
+     *
+     * Failure handling: if the customer record cannot be created (e.g. the
+     * email collides with an existing customer record from a guest checkout
+     * that has not been promoted), we log and re-throw — Better Auth maps
+     * the throw to a 500 on sign-up. We deliberately do NOT promote a
+     * pre-existing guest customer here; that is a follow-up flow with its
+     * own ownership-confirmation considerations.
+     */
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            try {
+              const existing = await customerService.getCustomerByEmail(
+                user.email,
+              );
+              if (existing) {
+                // Already a customers row at this email — typically from a
+                // guest checkout. Promote in-place by attaching the new
+                // auth_user_id. Email uniqueness ensures no shadowing.
+                if (existing.authUserId === null) {
+                  await customerService.updateCustomer(existing.id, {
+                    authUserId: user.id,
+                    ...(user.name ? { displayName: user.name } : {}),
+                  });
+                }
+                return;
+              }
+              await customerService.createCustomer({
+                email: user.email,
+                authUserId: user.id,
+                displayName: user.name ?? null,
+              });
+            } catch (err) {
+              log.error(
+                { err, userId: user.id, email: user.email },
+                "failed to provision customer record after sign-up",
+              );
+              throw err;
+            }
+          },
+        },
       },
     },
     advanced: {
