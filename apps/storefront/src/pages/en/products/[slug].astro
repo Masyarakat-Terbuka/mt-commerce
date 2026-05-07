@@ -5,7 +5,9 @@ import { getProductBySlug, listProducts, resolveApiUrl } from "@/lib/api";
 import { createTranslator, localePath } from "@/lib/i18n";
 
 export async function getStaticPaths() {
-  const result = await listProducts({ pageSize: 100, sort: "newest" });
+  // Slugs aren't localized in v0.1, so the default locale is fine here.
+  // Mirrors `/products/[slug]`'s rationale.
+  const result = await listProducts("id", { pageSize: 100, sort: "newest" });
   return result.items.map((p) => ({ params: { slug: p.slug } }));
 }
 
@@ -14,7 +16,7 @@ const t = createTranslator(locale);
 const intlLocale = "en-US";
 
 const { slug } = Astro.params as { slug: string };
-const product = await getProductBySlug(slug);
+const product = await getProductBySlug(locale, slug);
 
 const pageTitle = product ? product.title[locale] : slug;
 const description = product ? product.description[locale] : "";
@@ -53,6 +55,7 @@ const detailHrefBase = localePath(locale, "/products");
     apiUrl={apiUrl}
     slug={slug}
     locale={intlLocale}
+    apiLocale={locale}
     loadingLabel={t("products.detail.loading")}
     errorLabel={t("products.list.error")}
     notFoundLabel={t("products.detail.not_found")}

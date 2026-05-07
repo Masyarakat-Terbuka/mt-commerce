@@ -39,7 +39,14 @@ import AddToCartButton from "./AddToCartButton";
 export type ProductDetailProps = {
   apiUrl: string;
   slug: string;
+  /** BCP47 locale for currency formatting (e.g. "id-ID", "en-US"). */
   locale: string;
+  /**
+   * Short locale tag (`"id" | "en"`) sent as `?locale=` to the API so
+   * product `title` / `description` come back already translated. Kept
+   * separate from `locale` (BCP47) — see ProductGrid for the rationale.
+   */
+  apiLocale: string;
   loadingLabel: string;
   errorLabel: string;
   notFoundLabel: string;
@@ -75,6 +82,7 @@ export default function ProductDetail(props: ProductDetailProps) {
     apiUrl,
     slug,
     locale,
+    apiLocale,
     loadingLabel,
     errorLabel,
     notFoundLabel,
@@ -90,7 +98,10 @@ export default function ProductDetail(props: ProductDetailProps) {
 
   useEffect(() => {
     const controller = new AbortController();
-    const client = createClient({ baseUrl: apiUrl });
+    // Bake the API locale into the client — see ProductGrid for the
+    // rationale. Without this the API would resolve from the browser's
+    // Accept-Language, which can disagree with the URL the visitor is on.
+    const client = createClient({ baseUrl: apiUrl, locale: apiLocale });
 
     async function load() {
       try {
@@ -136,7 +147,7 @@ export default function ProductDetail(props: ProductDetailProps) {
 
     void load();
     return () => controller.abort();
-  }, [apiUrl, slug]);
+  }, [apiUrl, apiLocale, slug]);
 
   if (state.status === "loading") {
     return (

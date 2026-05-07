@@ -43,8 +43,15 @@ export type ProductGridQuery = {
 
 export type ProductGridProps = {
   apiUrl: string;
-  /** BCP 47 locale used for currency formatting. */
+  /** BCP 47 locale used for currency formatting (e.g. "id-ID", "en-US"). */
   locale: string;
+  /**
+   * Short locale tag (`"id" | "en"`) sent to the API so product titles and
+   * descriptions come back already translated. Kept separate from `locale`
+   * because BCP47 ("id-ID") and the API's short codes ("id") are different
+   * shapes; conflating them was the bug we want to avoid.
+   */
+  apiLocale: string;
   /**
    * Path prefix for product detail links — `/products` for the default
    * locale, `/en/products` for English. The page builds this; the island
@@ -105,6 +112,7 @@ const GRID_CLASSES =
 export default function ProductGrid({
   apiUrl,
   locale,
+  apiLocale,
   detailHrefBase,
   emptyLabel,
   errorLabel,
@@ -129,7 +137,12 @@ export default function ProductGrid({
 
   useEffect(() => {
     const controller = new AbortController();
-    const client = createClient({ baseUrl: apiUrl });
+    // Bake the API locale into the client so every call from this island
+    // hits the right translation. The page passes `apiLocale` explicitly;
+    // we do not rely on `Accept-Language` because the storefront serves
+    // `/en/` from a static build and the visitor's browser language may
+    // not match the URL prefix.
+    const client = createClient({ baseUrl: apiUrl, locale: apiLocale });
 
     async function load() {
       try {
@@ -159,6 +172,7 @@ export default function ProductGrid({
     return () => controller.abort();
   }, [
     apiUrl,
+    apiLocale,
     limit,
     query?.categorySlug,
     query?.search,

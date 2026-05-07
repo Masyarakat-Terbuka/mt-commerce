@@ -27,7 +27,7 @@ const heroImageAlt =
 
 // Build-time fetch for the category strip; the featured grid still
 // hydrates client-side.
-const categories = await listCategories();
+const categories = await listCategories(locale);
 ---
 
 <BaseLayout title={title} description={description}>
@@ -97,6 +97,7 @@ const categories = await listCategories();
         client:load
         apiUrl={apiUrl}
         locale={intlLocale}
+        apiLocale={locale}
         detailHrefBase={detailHrefBase}
         emptyLabel={t("products.list.empty")}
         errorLabel={t("products.list.error")}

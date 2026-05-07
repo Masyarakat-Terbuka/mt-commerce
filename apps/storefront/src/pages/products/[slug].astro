@@ -14,8 +14,9 @@ import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/
 export async function getStaticPaths() {
   // Pull a generous first page; finer pagination at build time would mean
   // chasing every page just to know slugs. The catalog ships with far fewer
-  // than 100 products at v0.1, so a single request is enough.
-  const result = await listProducts({ pageSize: 100, sort: "newest" });
+  // than 100 products at v0.1, so a single request is enough. The default
+  // locale is fine for slug enumeration — slugs are not localized in v0.1.
+  const result = await listProducts("id", { pageSize: 100, sort: "newest" });
   return result.items.map((p) => ({ params: { slug: p.slug } }));
 }
 
@@ -28,7 +29,7 @@ const { slug } = Astro.params as { slug: string };
 // Best-effort build-time fetch to populate <title>, <meta>, OG image, and
 // the JSON-LD product structured data. If the build-time fetch fails the
 // React island re-fetches on the client.
-const product = await getProductBySlug(slug);
+const product = await getProductBySlug(locale, slug);
 
 const pageTitle = product ? product.title[locale] : slug;
 const description = product ? product.description[locale] : "";
@@ -69,6 +70,7 @@ const detailHrefBase = localePath(locale, "/products");
     apiUrl={apiUrl}
     slug={slug}
     locale={intlLocale}
+    apiLocale={locale}
     loadingLabel={t("products.detail.loading")}
     errorLabel={t("products.list.error")}
     notFoundLabel={t("products.detail.not_found")}

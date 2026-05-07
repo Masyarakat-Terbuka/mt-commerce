@@ -21,8 +21,9 @@
  * code, which is what the React product islands need to call the API on the
  * visitor's machine.
  */
-import { createClient, type Product as SdkProduct } from "@mt-commerce/sdk";
+import { createClient, type Product as SdkProduct, type MtCommerceClient } from "@mt-commerce/sdk";
 import type { Money } from "@mt-commerce/core/money";
+import type { Locale } from "./i18n.js";
 
 export const DEFAULT_API_URL = "http://localhost:8000";
 
@@ -36,7 +37,25 @@ export function resolveApiUrl(): string {
   return raw && raw.length > 0 ? raw : DEFAULT_API_URL;
 }
 
-const client = createClient({ baseUrl: resolveApiUrl() });
+/**
+ * Build an SDK client with `locale` baked in as the instance default. The
+ * storefront has two locale shapes:
+ *   - Short `Locale` (`"id" | "en"`) used for routing and the API.
+ *   - BCP47 (`"id-ID"` / `"en-US"`) used by `Intl.NumberFormat` for prices.
+ * The SDK only cares about the short form. Use this factory at every
+ * server-rendered call site that needs locale-aware data.
+ */
+export function createStoreClient(locale: Locale): MtCommerceClient {
+  return createClient({ baseUrl: resolveApiUrl(), locale });
+}
+
+/**
+ * Map our short `Locale` to the BCP47 tag used for `Intl.NumberFormat`.
+ * Centralized so islands and pages don't redo the mapping inline.
+ */
+export function toIntlLocale(locale: Locale): string {
+  return locale === "en" ? "en-US" : "id-ID";
+}
 
 // ---------------------------------------------------------------------------
 // Storefront-facing types — narrower and bilingual-safe.
@@ -185,9 +204,15 @@ function adaptProduct(product: SdkProduct): StoreProduct {
 // Public API — async, resilient.
 // ---------------------------------------------------------------------------
 
-export async function listCategories(): Promise<StoreCategory[]> {
+export async function listCategories(locale: Locale): Promise<StoreCategory[]> {
   try {
-    const cats = await client.storefront.categories.list();
+    const cats = await createStoreClient(locale).storefront.categories.list();
+    // The API returns a single locale-resolved `name`. The storefront's
+    // historical shape mirrored both locales for consumers; we keep the
+    // shape but populate both keys with the resolved string. Pages already
+    // know their locale and pick `name[locale]`, so this is a no-op visible
+    // to callers — and lets us delete the bilingual shape later without a
+    // sweep through every page.
     return cats.map((c) => ({
       id: c.id,
       slug: c.slug,
@@ -200,6 +225,7 @@ export async function listCategories(): Promise<StoreCategory[]> {
 }
 
 export async function listProducts(
+  locale: Locale,
   query: ListProductsQuery = {},
 ): Promise<ListProductsResult> {
   const {
@@ -213,7 +239,7 @@ export async function listProducts(
   } = query;
 
   try {
-    const result = await client.storefront.products.list({
+    const result = await createStoreClient(locale).storefront.products.list({
       ...(category ? { categorySlug: category } : {}),
       ...(search ? { search } : {}),
       ...(typeof minPrice === "bigint" ? { minPriceAmount: minPrice } : {}),
@@ -237,16 +263,20 @@ export async function listProducts(
   }
 }
 
-export async function listFeaturedProducts(limit = 4): Promise<StoreProduct[]> {
-  const result = await listProducts({ pageSize: limit, sort: "newest" });
+export async function listFeaturedProducts(
+  locale: Locale,
+  limit = 4,
+): Promise<StoreProduct[]> {
+  const result = await listProducts(locale, { pageSize: limit, sort: "newest" });
   return result.items.slice(0, limit);
 }
 
 export async function getProductBySlug(
+  locale: Locale,
   slug: string,
 ): Promise<StoreProduct | null> {
   try {
-    const product = await client.storefront.products.bySlug(slug);
+    const product = await createStoreClient(locale).storefront.products.bySlug(slug);
     return adaptProduct(product);
   } catch (err) {
     console.error(`[storefront] getProductBySlug(${slug}) failed:`, err);

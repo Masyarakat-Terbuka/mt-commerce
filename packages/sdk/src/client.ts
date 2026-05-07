@@ -43,6 +43,7 @@ import type {
   ListKelurahanQuery,
   ListKotaKabupatenQuery,
   ListProductsQuery,
+  LocaleQuery,
   Paginated,
   Product,
   Province,
@@ -75,6 +76,14 @@ export interface ClientOptions {
   fetch?: FetchLike;
   /** Default timeout in ms; overridable per call. Defaults to 5000. */
   defaultTimeoutMs?: number;
+  /**
+   * Instance-default translation locale (e.g. `"id"`, `"en"`). Sent on every
+   * storefront catalog request unless a per-call `locale` overrides it. When
+   * unset, the API falls back to `Accept-Language` and ultimately its default
+   * locale. The pragmatic shape here is one client per locale rather than
+   * threading the param through every call site.
+   */
+  locale?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -243,6 +252,25 @@ interface RequestContext {
    * read endpoints and never authenticates with a cookie in v0.1.
    */
   withCredentials: boolean;
+  /**
+   * Instance-default locale. Methods that accept `locale` per call resolve
+   * `perCallLocale ?? ctx.defaultLocale ?? undefined`. `undefined` here means
+   * "do not send `?locale=`" — the API resolves from `Accept-Language`.
+   */
+  defaultLocale: string | undefined;
+}
+
+/**
+ * Resolve the locale for a single request: per-call wins, instance default
+ * is the fallback. Returns `undefined` when neither is set so the query
+ * builder can omit the param entirely.
+ */
+function resolveLocale(
+  ctx: RequestContext,
+  perCall: string | undefined,
+): string | undefined {
+  if (perCall !== undefined) return perCall;
+  return ctx.defaultLocale;
 }
 
 interface RequestInternalOptions extends RequestOptions {
@@ -370,11 +398,16 @@ async function request<T>(
 
 export interface StorefrontProductsApi {
   list(query?: ListProductsQuery, options?: RequestOptions): Promise<Paginated<Product>>;
-  bySlug(slug: string, options?: RequestOptions): Promise<Product>;
+  /**
+   * `opts` is a unified bag — it carries both the optional translation
+   * `locale` and the standard `RequestOptions` (timeout, signal). One
+   * argument, fewer call-site shapes.
+   */
+  bySlug(slug: string, opts?: LocaleQuery & RequestOptions): Promise<Product>;
 }
 
 export interface StorefrontCategoriesApi {
-  list(options?: RequestOptions): Promise<Category[]>;
+  list(opts?: LocaleQuery & RequestOptions): Promise<Category[]>;
 }
 
 export interface StorefrontRegionsApi {
@@ -437,6 +470,7 @@ export function createClient(options: ClientOptions): MtCommerceClient {
     baseUrl: trimTrailingSlash(options.baseUrl),
     defaultTimeoutMs: options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
     withCredentials: false,
+    defaultLocale: options.locale,
   };
   // Admin context piggybacks on the same base URL but flips the credentials
   // flag so the session cookie travels on every call. Storefront traffic
@@ -454,6 +488,7 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           page: query?.page,
           pageSize: query?.pageSize,
           sort: query?.sort,
+          locale: resolveLocale(ctx, query?.locale),
         });
         const wire = await request<WirePaginated<WireProduct>>(
           ctx,
@@ -467,20 +502,27 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           pageSize: wire.pageSize,
         };
       },
-      async bySlug(slug, requestOptions) {
+      async bySlug(slug, opts) {
+        // `opts` mixes a per-call locale with the standard RequestOptions
+        // (timeout/signal). Split them at the boundary: the locale shapes
+        // the URL, the rest is forwarded to the request helper untouched.
+        const { locale, ...requestOptions } = opts ?? {};
+        const qs = buildQuery({ locale: resolveLocale(ctx, locale) });
         const wire = await request<WireProduct>(
           ctx,
-          `/storefront/v1/products/${encodeURIComponent(slug)}`,
+          `/storefront/v1/products/${encodeURIComponent(slug)}${qs}`,
           requestOptions,
         );
         return toProduct(wire);
       },
     },
     categories: {
-      async list(requestOptions) {
+      async list(opts) {
+        const { locale, ...requestOptions } = opts ?? {};
+        const qs = buildQuery({ locale: resolveLocale(ctx, locale) });
         const wire = await request<WireListEnvelope<WireCategory>>(
           ctx,
-          "/storefront/v1/categories",
+          `/storefront/v1/categories${qs}`,
           requestOptions,
         );
         return wire.data.map(toCategory);
@@ -627,6 +669,7 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           page: query?.page,
           pageSize: query?.pageSize,
           sort: query?.sort,
+          locale: resolveLocale(adminCtx, query?.locale),
         });
         const wire = await request<WirePaginated<WireProduct>>(
           adminCtx,

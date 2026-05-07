@@ -17,7 +17,7 @@ const heroImage =
   "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9?w=2400&q=80&auto=format&fit=crop";
 const heroImageAlt = "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
 
-const categories = await listCategories();
+const categories = await listCategories(locale);
 ---
 
 <BaseLayout title={title} description={description}>
@@ -69,6 +69,7 @@ const categories = await listCategories();
         client:load
         apiUrl={apiUrl}
         locale="en-US"
+        apiLocale={locale}
         detailHrefBase={detailHrefBase}
         emptyLabel={t("products.list.empty")}
         errorLabel={t("products.list.error")}

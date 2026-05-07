@@ -43,13 +43,13 @@ export interface Props {
 const { active, inline = false } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
-const categories = await listCategories();
+const categories = await listCategories(locale);
 const formAction = localePath(locale, "/products");
 
 let totalCount = 0;
 const countsBySlug = new Map<string, number>();
 try {
-  const all = await listProducts({ pageSize: 100 });
+  const all = await listProducts(locale, { pageSize: 100 });
   totalCount = all.total;
   for (const p of all.items) {
     const slug = p.categorySlug;

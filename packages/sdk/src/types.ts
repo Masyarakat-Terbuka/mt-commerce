@@ -199,6 +199,13 @@ export interface ListProductsQuery {
   page?: number;
   pageSize?: number;
   sort?: ProductSort;
+  /**
+   * Translation locale for product fields (`title`, `description`). Sent as
+   * `?locale=<value>`. Omit to let the API fall back to `Accept-Language` /
+   * its default. The shape stays a string rather than `Locale` because the
+   * SDK is locale-set-agnostic — the API decides which codes are valid.
+   */
+  locale?: string;
 }
 
 export interface ListKotaKabupatenQuery {
@@ -279,6 +286,17 @@ export interface AdminListProductsQuery {
   page?: number;
   pageSize?: number;
   sort?: ProductSort;
+  /** See `ListProductsQuery.locale` — same semantics on the admin surface. */
+  locale?: string;
+}
+
+/**
+ * Per-call options for storefront category and product-by-slug calls that
+ * accept only the locale parameter. Kept separate from `ListProductsQuery`
+ * so callers don't see filter fields they cannot use.
+ */
+export interface LocaleQuery {
+  locale?: string;
 }
 
 // ----------------------------------------------------------------------------

@@ -221,6 +221,94 @@ describe("createClient — error handling", () => {
   });
 });
 
+describe("createClient — locale", () => {
+  // Track A's API accepts `?locale=id|en` on storefront catalog routes.
+  // The SDK's contract: send the locale when set, otherwise omit the param
+  // entirely (the API falls back to Accept-Language). A per-call value
+  // overrides the instance default; an instance default applies only when
+  // the caller didn't specify one.
+  const emptyList = { data: [], total: 0, page: 1, pageSize: 20 };
+
+  it("omits the locale query param when neither default nor per-call is set", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: emptyList });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.storefront.products.list();
+
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.has("locale")).toBe(false);
+  });
+
+  it("sends the per-call locale on products.list", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: emptyList });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.storefront.products.list({ locale: "en" });
+
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.get("locale")).toBe("en");
+  });
+
+  it("sends the per-call locale on products.bySlug", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        ...sampleProductsPayload.data[0],
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.storefront.products.bySlug("kopi-arabika-gayo-200g", { locale: "en" });
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/storefront/v1/products/kopi-arabika-gayo-200g");
+    expect(url.searchParams.get("locale")).toBe("en");
+  });
+
+  it("sends the per-call locale on categories.list", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: { data: [] } });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.storefront.categories.list({ locale: "en" });
+
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.get("locale")).toBe("en");
+  });
+
+  it("uses the instance-default locale when no per-call locale is passed", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: emptyList });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch, locale: "en" });
+
+    await client.storefront.products.list();
+    await client.storefront.categories.list();
+
+    expect(new URL(calls[0]!.url).searchParams.get("locale")).toBe("en");
+    expect(new URL(calls[1]!.url).searchParams.get("locale")).toBe("en");
+  });
+
+  it("per-call locale overrides the instance default", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: emptyList });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch, locale: "id" });
+
+    await client.storefront.products.list({ locale: "en" });
+
+    expect(new URL(calls[0]!.url).searchParams.get("locale")).toBe("en");
+  });
+
+  it("forwards the instance default to bySlug when no per-call locale is set", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: { ...sampleProductsPayload.data[0] },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch, locale: "id" });
+
+    await client.storefront.products.bySlug("kopi-arabika-gayo-200g");
+
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.get("locale")).toBe("id");
+  });
+});
+
 describe("createClient — regions", () => {
   it("lists provinces and returns plain shapes", async () => {
     const { fetch, calls } = mockFetch({
