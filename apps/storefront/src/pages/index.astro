@@ -14,6 +14,43 @@ const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
+// Site-wide structured data emitted on the home page only.
+//   - `Organization` advertises the brand name, URL, and logo so search
+//     engines can populate the knowledge panel and rich previews.
+//   - `WebSite` with a `SearchAction` exposes the on-site search box;
+//     Google's "sitelinks search box" feature reads this. The query
+//     placeholder uses the standard `{search_term_string}` template.
+//     The search route lives at `/search` (id) and `/en/search` (en);
+//     pointing at the locale-prefixed path keeps query traffic in the
+//     visitor's locale.
+const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
+const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
+const searchUrl = new URL(localePath(locale, "/search?q={search_term_string}"), siteUrl).toString();
+const jsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "mt-commerce",
+    url: siteUrl,
+    logo: new URL("/logo.png", siteUrl).toString(),
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "mt-commerce",
+    url: homeUrl,
+    inLanguage: locale === "id" ? "id-ID" : "en-US",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate: searchUrl,
+      },
+      "query-input": "required name=search_term_string",
+    },
+  },
+];
+
 // Hero image — chosen for the editorial moment. The gerabah (earthenware)
 // photograph reads as warm, low-saturation, and culturally specific without
 // being decorative. The cream wash (`bg-cream/35`) keeps any text on top
@@ -30,7 +67,7 @@ const heroImageAlt =
 const categories = await listCategories(locale);
 ---
 
-<BaseLayout title={title} description={description}>
+<BaseLayout title={title} description={description} jsonLd={jsonLd}>
   {/*
     Hero — editorial image moment.
 

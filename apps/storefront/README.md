@@ -32,6 +32,48 @@ The dev server runs at `http://localhost:4321`. Indonesian routes are at `/`, En
 the same URL is used by build-time SDK calls and the React islands that
 re-fetch in the browser. See [`.env.example`](./.env.example).
 
+`SITE` — public origin the storefront is served from. Used to build
+canonical URLs, hreflang alternates, JSON-LD links, the sitemap, and
+absolute Open Graph image URLs. Read by `astro.config.mjs` at build
+time and exposed to pages through `Astro.site`. Default if unset:
+`https://mt-commerce.example` (a sentinel — production builds should
+override). Example for a deploy:
+
+```bash
+SITE=https://shop.example.com bun --filter '@mt-commerce/storefront' build
+```
+
+The bundled [`public/robots.txt`](./public/robots.txt) references the
+placeholder host on its `Sitemap:` line. Fork it for production deploys,
+or post-process it during deploy if you prefer a single source of truth.
+
+## SEO
+
+The storefront emits SEO essentials at build time:
+
+- **Sitemap.** `@astrojs/sitemap` writes `dist/sitemap-index.xml` and
+  per-locale sitemaps with `xhtml:link` alternates for the id/en pair.
+- **robots.txt.** Allows all crawlers and references the sitemap.
+- **Structured data (JSON-LD).** `Organization` + `WebSite` (with
+  `SearchAction`) on the home; `BreadcrumbList` + `ItemList` on the
+  products listing; `Product` + `BreadcrumbList` on the product
+  detail page.
+- **Open Graph + Twitter cards.** `og:title`, `og:description`,
+  `og:image`, `og:url`, `og:type`, `og:locale`, `og:locale:alternate`,
+  `og:site_name`, plus `twitter:card`, `twitter:title`,
+  `twitter:description`, and `twitter:image`.
+- **hreflang.** `link rel="alternate"` for `id`, `en`, and
+  `x-default` on every page.
+
+To verify a production-style build locally:
+
+```bash
+SITE=https://example.com bun --filter '@mt-commerce/storefront' build
+bun --filter '@mt-commerce/storefront' preview
+# Then `view-source:` on a page, or paste the URL into:
+#   https://search.google.com/test/rich-results
+```
+
 ## Build
 
 ```bash

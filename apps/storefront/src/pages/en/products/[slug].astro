@@ -22,33 +22,72 @@ const pageTitle = product ? product.title[locale] : slug;
 const description = product ? product.description[locale] : "";
 const ogImage = product?.hasImage ? product.imageUrl : undefined;
 
-const jsonLd = product
-  ? {
-      "@context": "https://schema.org",
-      "@type": "Product",
-      name: pageTitle,
-      description,
-      ...(product.hasImage ? { image: product.imageUrl } : {}),
-      sku: product.id,
-      offers: {
-        "@type": "Offer",
-        price: product.basePrice.amount.toString(),
-        priceCurrency: product.basePrice.currency,
-        availability: product.variants.some((v) => v.available)
-          ? "https://schema.org/InStock"
-          : "https://schema.org/OutOfStock",
-      },
-    }
-  : null;
-
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
+
+// Mirrors `pages/products/[slug].astro` — see comments there.
+const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
+const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
+const productsUrl = new URL(localePath(locale, "/products"), siteUrl).toString();
+const productUrl = new URL(`${detailHrefBase}/${slug}`, siteUrl).toString();
+
+const jsonLd = product
+  ? [
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        name: pageTitle,
+        description,
+        ...(product.hasImage ? { image: product.imageUrl } : {}),
+        sku: product.id,
+        brand: {
+          "@type": "Brand",
+          name: "mt-commerce",
+        },
+        offers: {
+          "@type": "Offer",
+          url: productUrl,
+          price: product.basePrice.amount.toString(),
+          priceCurrency: product.basePrice.currency,
+          availability: product.variants.some((v) => v.available)
+            ? "https://schema.org/InStock"
+            : "https://schema.org/OutOfStock",
+        },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          {
+            "@type": "ListItem",
+            position: 1,
+            name: t("products.detail.breadcrumbs.home"),
+            item: homeUrl,
+          },
+          {
+            "@type": "ListItem",
+            position: 2,
+            name: t("products.list.title"),
+            item: productsUrl,
+          },
+          {
+            "@type": "ListItem",
+            position: 3,
+            name: pageTitle,
+            item: productUrl,
+          },
+        ],
+      },
+    ]
+  : undefined;
 ---
 
 <BaseLayout
   title={`${pageTitle} — mt-commerce`}
   description={description}
   ogImage={ogImage}
+  ogType="product"
+  jsonLd={jsonLd}
 >
   <ProductDetail
     client:load
@@ -69,6 +108,4 @@ const detailHrefBase = localePath(locale, "/products");
     relatedTitle={t("products.detail.related_title")}
     detailHrefBase={detailHrefBase}
   />
-
-  {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
 </BaseLayout>

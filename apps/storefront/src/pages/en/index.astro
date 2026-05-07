@@ -13,6 +13,35 @@ const description = t("home.hero.subhead");
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath("en", "/products");
 
+// Mirrors `pages/index.astro` — see comments there for rationale.
+const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
+const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
+const searchUrl = new URL(localePath(locale, "/search?q={search_term_string}"), siteUrl).toString();
+const jsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "mt-commerce",
+    url: siteUrl,
+    logo: new URL("/logo.png", siteUrl).toString(),
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "mt-commerce",
+    url: homeUrl,
+    inLanguage: "en-US",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate: searchUrl,
+      },
+      "query-input": "required name=search_term_string",
+    },
+  },
+];
+
 const heroImage =
   "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9?w=2400&q=80&auto=format&fit=crop";
 const heroImageAlt = "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
@@ -20,7 +49,7 @@ const heroImageAlt = "Photograph of earthenware pottery — Kasongan artisans, Y
 const categories = await listCategories(locale);
 ---
 
-<BaseLayout title={title} description={description}>
+<BaseLayout title={title} description={description} jsonLd={jsonLd}>
   {/* Mirrors id/index.astro — see comments there. */}
   <section class="relative" aria-labelledby="home-hero">
     <div class="relative h-[50vh] min-h-[420px] w-full overflow-hidden md:h-[70vh] md:min-h-[560px]">
