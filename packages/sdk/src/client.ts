@@ -48,6 +48,8 @@ import type {
   CompleteCheckoutInput,
   CompleteCheckoutResult,
   City,
+  CreateAddressInput,
+  Customer,
   CreateCartInput,
   CreateCategoryInput,
   CreateProductInput,
@@ -57,6 +59,7 @@ import type {
   ListKecamatanQuery,
   ListKelurahanQuery,
   ListKotaKabupatenQuery,
+  ListMyOrdersQuery,
   ListProductsQuery,
   ListShippingMethodsQuery,
   LocaleQuery,
@@ -69,6 +72,9 @@ import type {
   OrderStatusEvent,
   Paginated,
   Product,
+  SetDefaultAddressInput,
+  SignUpInput,
+  StorefrontMe,
   TransitionOrderInput,
   Province,
   RequestOptions,
@@ -78,8 +84,10 @@ import type {
   SignInInput,
   StartCheckoutInput,
   Subdistrict,
+  UpdateAddressInput,
   UpdateCartItemInput,
   UpdateCategoryInput,
+  UpdateCustomerInput,
   UpdateProductInput,
   UpdateVariantInput,
   Variant,
@@ -92,6 +100,7 @@ import type {
   WireCheckout,
   WireCity,
   WireCompleteCheckoutResult,
+  WireCustomer,
   WireCustomerAddress,
   WireDistrict,
   WireListEnvelope,
@@ -105,6 +114,7 @@ import type {
   WireProduct,
   WireProvince,
   WireShippingMethod,
+  WireStorefrontMeResponse,
   WireSubdistrict,
   WireVariant,
 } from "./types.js";
@@ -248,6 +258,21 @@ function toCart(w: WireCart): Cart {
     expiresAt: new Date(w.expiresAt),
     createdAt: new Date(w.createdAt),
     updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toCustomer(w: WireCustomer): Customer {
+  return {
+    id: w.id,
+    authUserId: w.authUserId,
+    email: w.email,
+    displayName: w.displayName,
+    phone: w.phone,
+    taxIdentifier: w.taxIdentifier,
+    companyName: w.companyName,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+    deletedAt: w.deletedAt ? new Date(w.deletedAt) : null,
   };
 }
 
@@ -784,9 +809,97 @@ export interface CustomerScopedOptions extends RequestOptions {
   customerId?: string;
 }
 
+export interface StorefrontCustomerProfileApi {
+  /** GET /storefront/v1/customer/me — requires customerId stand-in (until session-based resolution lands server-side). */
+  get(options?: CustomerScopedOptions): Promise<Customer>;
+  /** PATCH /storefront/v1/customer/me — partial update; at least one field required. */
+  update(
+    patch: UpdateCustomerInput,
+    options?: CustomerScopedOptions,
+  ): Promise<Customer>;
+}
+
+export interface StorefrontCustomerAddressesApi {
+  /** GET /storefront/v1/customer/me/addresses. */
+  list(options?: CustomerScopedOptions): Promise<CustomerAddress[]>;
+  /** POST /storefront/v1/customer/me/addresses. */
+  create(
+    input: CreateAddressInput,
+    options?: CustomerScopedOptions,
+  ): Promise<CustomerAddress>;
+  /** PATCH /storefront/v1/customer/me/addresses/{id}. */
+  update(
+    addressId: string,
+    patch: UpdateAddressInput,
+    options?: CustomerScopedOptions,
+  ): Promise<CustomerAddress>;
+  /** DELETE /storefront/v1/customer/me/addresses/{id} (soft-delete). */
+  remove(
+    addressId: string,
+    options?: CustomerScopedOptions,
+  ): Promise<void>;
+  /** PUT /storefront/v1/customer/me/addresses/{id}/default — set as default for kind. */
+  setDefault(
+    addressId: string,
+    input: SetDefaultAddressInput,
+    options?: CustomerScopedOptions,
+  ): Promise<CustomerAddress>;
+}
+
+export interface StorefrontCustomerOrdersApi {
+  /** GET /storefront/v1/customer/me/orders — newest first. */
+  list(
+    query?: ListMyOrdersQuery,
+    options?: CustomerScopedOptions,
+  ): Promise<Paginated<Order>>;
+  /**
+   * GET /storefront/v1/customer/me/orders/{orderNumber} — friendly handle
+   * lookup. There is no by-id endpoint for customers at v0.1; the
+   * order-number is the customer-facing identifier.
+   */
+  byNumber(
+    orderNumber: string,
+    options?: CustomerScopedOptions & LocaleQuery,
+  ): Promise<Order>;
+}
+
 export interface StorefrontCustomerApi {
-  /** GET /storefront/v1/customer/me/addresses — requires customerId stand-in. */
+  profile: StorefrontCustomerProfileApi;
+  addresses: StorefrontCustomerAddressesApi;
+  orders: StorefrontCustomerOrdersApi;
+  /**
+   * Back-compat shim for the legacy `client.storefront.customer.myAddresses()`
+   * call surface used by the existing checkout island. New code should call
+   * `client.storefront.customer.addresses.list()`.
+   *
+   * @deprecated Use `addresses.list(...)` instead.
+   */
   myAddresses(options?: CustomerScopedOptions): Promise<CustomerAddress[]>;
+}
+
+export interface StorefrontAuthApi {
+  /**
+   * POST /api/auth/sign-up/email (Better Auth). Creates a new auth user and,
+   * via the after-create hook, a linked customer record. Returns the
+   * authoritative `me` payload so callers know the customerId immediately.
+   *
+   * The `phone` field is reserved on the input shape but is NOT currently
+   * forwarded to Better Auth's sign-up endpoint — the payload Better Auth
+   * accepts is just `{ email, password, name }`. After sign-up the storefront
+   * can call `customer.profile.update({ phone })` to attach it.
+   */
+  signUp(input: SignUpInput, options?: RequestOptions): Promise<StorefrontMe>;
+  /** POST /api/auth/sign-in/email (Better Auth). Returns the `me` payload. */
+  signIn(input: SignInInput, options?: RequestOptions): Promise<StorefrontMe>;
+  /** POST /api/auth/sign-out (Better Auth). Drops the session cookie. */
+  signOut(options?: RequestOptions): Promise<void>;
+  /**
+   * GET /storefront/v1/auth/me. Returns `{ user: null, customer: null }` for
+   * an anonymous caller; otherwise the auth user and the linked customer
+   * summary so the storefront can render its account header without an
+   * extra round-trip.
+   */
+  me(options?: RequestOptions): Promise<StorefrontMe>;
 }
 
 export interface StorefrontCheckoutApi {
@@ -833,6 +946,7 @@ export interface StorefrontApi {
   checkout: StorefrontCheckoutApi;
   shipping: StorefrontShippingApi;
   customer: StorefrontCustomerApi;
+  auth: StorefrontAuthApi;
 }
 
 // ---- Admin surface --------------------------------------------------------
@@ -945,6 +1059,15 @@ export function createClient(options: ClientOptions): MtCommerceClient {
   // flag so the session cookie travels on every call. Storefront traffic
   // stays cookieless.
   const adminCtx: RequestContext = { ...ctx, withCredentials: true };
+  /**
+   * Storefront-customer context — same base URL as `ctx`, with cookies
+   * enabled. Used for `/storefront/v1/auth/*`, `/api/auth/*` (Better Auth
+   * sign-up/in/out), `/storefront/v1/customer/me/*`, and the customer-side
+   * orders surface. The split from `ctx` is deliberate: anonymous catalog
+   * reads (which ride `ctx`) must not carry session cookies through CDN
+   * caches that key on `Cookie`.
+   */
+  const customerCtx: RequestContext = { ...ctx, withCredentials: true };
 
   const storefront: StorefrontApi = {
     products: {
@@ -1184,15 +1307,198 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         return wire.data.map(toShippingMethod);
       },
     },
+    // Storefront customer surface — profile, addresses, orders.
+    //
+    // Cookies travel on every call via `customerCtx`. The `customerId`
+    // stand-in is forwarded as the `x-customer-id` header until the API's
+    // session→customer resolution lands; once the API stops requiring the
+    // header, the SDK becomes a no-op forwarder. Splitting `customerId` out
+    // of `RequestOptions` keeps the call sites stable on both sides of the
+    // server-side change.
     customer: {
+      profile: {
+        async get(options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const wire = await request<WireCustomer>(
+            customerCtx,
+            "/storefront/v1/customer/me",
+            {
+              ...requestOptions,
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return toCustomer(wire);
+        },
+        async update(patch, options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const wire = await request<WireCustomer>(
+            customerCtx,
+            "/storefront/v1/customer/me",
+            {
+              ...requestOptions,
+              method: "PATCH",
+              body: omitUndefined({
+                email: patch.email,
+                displayName: patch.displayName,
+                phone: patch.phone,
+                taxIdentifier: patch.taxIdentifier,
+                companyName: patch.companyName,
+              }),
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return toCustomer(wire);
+        },
+      },
+      addresses: {
+        async list(options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const wire = await request<WireListEnvelope<WireCustomerAddress>>(
+            customerCtx,
+            "/storefront/v1/customer/me/addresses",
+            {
+              ...requestOptions,
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return wire.data.map(toCustomerAddress);
+        },
+        async create(input, options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const wire = await request<WireCustomerAddress>(
+            customerCtx,
+            "/storefront/v1/customer/me/addresses",
+            {
+              ...requestOptions,
+              method: "POST",
+              body: omitUndefined({
+                kind: input.kind,
+                isDefaultShipping: input.isDefaultShipping,
+                isDefaultBilling: input.isDefaultBilling,
+                recipientName: input.recipientName,
+                phone: input.phone,
+                addressLine1: input.addressLine1,
+                addressLine2: input.addressLine2,
+                provinsiId: input.provinsiId,
+                kotaKabupatenId: input.kotaKabupatenId,
+                kecamatanId: input.kecamatanId,
+                kelurahanId: input.kelurahanId,
+                postalCode: input.postalCode,
+                notes: input.notes,
+              }),
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return toCustomerAddress(wire);
+        },
+        async update(addressId, patch, options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const wire = await request<WireCustomerAddress>(
+            customerCtx,
+            `/storefront/v1/customer/me/addresses/${encodeURIComponent(addressId)}`,
+            {
+              ...requestOptions,
+              method: "PATCH",
+              body: omitUndefined({
+                kind: patch.kind,
+                isDefaultShipping: patch.isDefaultShipping,
+                isDefaultBilling: patch.isDefaultBilling,
+                recipientName: patch.recipientName,
+                phone: patch.phone,
+                addressLine1: patch.addressLine1,
+                addressLine2: patch.addressLine2,
+                provinsiId: patch.provinsiId,
+                kotaKabupatenId: patch.kotaKabupatenId,
+                kecamatanId: patch.kecamatanId,
+                kelurahanId: patch.kelurahanId,
+                postalCode: patch.postalCode,
+                notes: patch.notes,
+              }),
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return toCustomerAddress(wire);
+        },
+        async remove(addressId, options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          await request<unknown>(
+            customerCtx,
+            `/storefront/v1/customer/me/addresses/${encodeURIComponent(addressId)}`,
+            {
+              ...requestOptions,
+              method: "DELETE",
+              ...(headers ? { headers } : {}),
+            },
+          );
+        },
+        async setDefault(addressId, input, options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const wire = await request<WireCustomerAddress>(
+            customerCtx,
+            `/storefront/v1/customer/me/addresses/${encodeURIComponent(addressId)}/default`,
+            {
+              ...requestOptions,
+              method: "PUT",
+              body: { kind: input.kind },
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return toCustomerAddress(wire);
+        },
+      },
+      orders: {
+        async list(query, options) {
+          const { customerId, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const qs = buildQuery({
+            page: query?.page,
+            pageSize: query?.pageSize,
+            locale: resolveLocale(customerCtx, query?.locale),
+          });
+          const wire = await request<WirePaginated<WireOrder>>(
+            customerCtx,
+            `/storefront/v1/customer/me/orders${qs}`,
+            {
+              ...requestOptions,
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return {
+            data: wire.data.map(toOrder),
+            total: wire.total,
+            page: wire.page,
+            pageSize: wire.pageSize,
+          };
+        },
+        async byNumber(orderNumber, options) {
+          const { customerId, locale, ...requestOptions } = options ?? {};
+          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const qs = buildQuery({ locale: resolveLocale(customerCtx, locale) });
+          const wire = await request<WireOrder>(
+            customerCtx,
+            `/storefront/v1/customer/me/orders/${encodeURIComponent(orderNumber)}${qs}`,
+            {
+              ...requestOptions,
+              ...(headers ? { headers } : {}),
+            },
+          );
+          return toOrder(wire);
+        },
+      },
+      // Back-compat shim — keeps existing checkout-island callers working.
+      // New code should call `addresses.list(...)` directly.
       async myAddresses(options) {
-        // Split the customer-id stand-in out of the standard RequestOptions
-        // bag so it lands in the per-request headers map without polluting
-        // the request signature once auth replaces this stand-in.
         const { customerId, ...requestOptions } = options ?? {};
         const headers = customerId ? { "x-customer-id": customerId } : undefined;
         const wire = await request<WireListEnvelope<WireCustomerAddress>>(
-          ctx,
+          customerCtx,
           "/storefront/v1/customer/me/addresses",
           {
             ...requestOptions,
@@ -1200,6 +1506,64 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           },
         );
         return wire.data.map(toCustomerAddress);
+      },
+    },
+    auth: {
+      // Better Auth's sign-up/sign-in routes return their own payload shape.
+      // We discard it and follow up with a `/storefront/v1/auth/me` call so
+      // the SDK contract is uniform: every "you are now authenticated"
+      // response is the canonical `StorefrontMe`. The cost is one extra
+      // round-trip; the benefit is callers never need to think about
+      // Better Auth's response shape (which can shift across versions).
+      async signUp(input, requestOptions) {
+        await request<unknown>(customerCtx, "/api/auth/sign-up/email", {
+          ...(requestOptions ?? {}),
+          method: "POST",
+          body: { email: input.email, password: input.password, name: input.name },
+        });
+        const wire = await request<WireStorefrontMeResponse>(
+          customerCtx,
+          "/storefront/v1/auth/me",
+          requestOptions,
+        );
+        return {
+          user: wire.user,
+          customer: wire.customer ?? null,
+        };
+      },
+      async signIn(input, requestOptions) {
+        await request<unknown>(customerCtx, "/api/auth/sign-in/email", {
+          ...(requestOptions ?? {}),
+          method: "POST",
+          body: input,
+        });
+        const wire = await request<WireStorefrontMeResponse>(
+          customerCtx,
+          "/storefront/v1/auth/me",
+          requestOptions,
+        );
+        return {
+          user: wire.user,
+          customer: wire.customer ?? null,
+        };
+      },
+      async signOut(requestOptions) {
+        await request<unknown>(customerCtx, "/api/auth/sign-out", {
+          ...(requestOptions ?? {}),
+          method: "POST",
+          body: {},
+        });
+      },
+      async me(requestOptions) {
+        const wire = await request<WireStorefrontMeResponse>(
+          customerCtx,
+          "/storefront/v1/auth/me",
+          requestOptions,
+        );
+        return {
+          user: wire.user,
+          customer: wire.customer ?? null,
+        };
       },
     },
   };

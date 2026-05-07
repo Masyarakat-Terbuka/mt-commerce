@@ -278,6 +278,37 @@ export interface UpdateCartItemInput {
 }
 
 // ----------------------------------------------------------------------------
+// Customer profile wire and domain shapes — mirror
+// `apps/api/src/modules/customer/routes/wire.ts` (WireCustomer / Customer).
+// ----------------------------------------------------------------------------
+
+export interface WireCustomer {
+  id: string;
+  authUserId: string | null;
+  email: string;
+  displayName: string | null;
+  phone: string | null;
+  taxIdentifier: string | null;
+  companyName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface Customer {
+  id: string;
+  authUserId: string | null;
+  email: string;
+  displayName: string | null;
+  phone: string | null;
+  taxIdentifier: string | null;
+  companyName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+// ----------------------------------------------------------------------------
 // Customer-address wire and domain shapes — mirror
 // `apps/api/src/modules/customer/routes/wire.ts`. Storefront checkout reads
 // the signed-in customer's saved addresses to populate the address-step
@@ -937,6 +968,109 @@ export interface UpdateCategoryInput {
   slug?: string;
   translations?: CategoryTranslationsUpdateInput;
   parentId?: string | null;
+}
+
+// ----------------------------------------------------------------------------
+// Storefront customer auth — what the customer-facing site needs from the
+// `/storefront/v1/auth/*` and `/api/auth/*` endpoints. Mirrors the API's
+// `MeStorefrontResponse` and the `register` / `signIn` Better Auth payloads.
+// ----------------------------------------------------------------------------
+
+export interface WireStorefrontCustomerSummary {
+  id: string;
+  email: string;
+  displayName: string | null;
+  phone: string | null;
+}
+
+export interface WireStorefrontMeResponse {
+  user: WireAuthUser | null;
+  /**
+   * Optional in the wire shape so an older API deployment that has not yet
+   * adopted the customer-summary projection (the server-side change that
+   * lands together with this client surface) still parses cleanly. The
+   * SDK coalesces a missing value to `null` on the domain side.
+   */
+  customer?: WireStorefrontCustomerSummary | null;
+}
+
+/**
+ * Storefront-side `me()` payload. Customers do NOT have a staff role, so the
+ * shape is narrower than the admin `AuthMe`. The `customer` field is the
+ * piece that lets the storefront pass `customerId` into `/customer/me/*`
+ * calls without a second round-trip.
+ */
+export interface StorefrontMe {
+  /** `null` when no session is present (anonymous browse). */
+  user: WireAuthUser | null;
+  /** `null` for anonymous, or when the auth user has no linked customer. */
+  customer: WireStorefrontCustomerSummary | null;
+}
+
+export interface SignUpInput {
+  email: string;
+  password: string;
+  /**
+   * Display name. Better Auth requires `name` on email/password sign-up; we
+   * surface it as required here so callers cannot forget it.
+   */
+  name: string;
+  /**
+   * Optional phone, attached to the customer record after the user.create
+   * hook runs. v0.1: not yet plumbed through Better Auth's sign-up payload —
+   * see the SDK README for the gap. The field is reserved here so the
+   * client surface stays stable when the plumbing lands.
+   */
+  phone?: string;
+}
+
+// ----------------------------------------------------------------------------
+// Storefront customer profile and address inputs — mirror the Zod schemas in
+// `apps/api/src/modules/customer/types.ts`. Fields are optional on update;
+// every field accepts `null` where the API allows clearing.
+// ----------------------------------------------------------------------------
+
+export interface UpdateCustomerInput {
+  email?: string;
+  displayName?: string | null;
+  phone?: string | null;
+  taxIdentifier?: string | null;
+  companyName?: string | null;
+}
+
+export type CreateAddressInput = {
+  kind: AddressKind;
+  isDefaultShipping?: boolean;
+  isDefaultBilling?: boolean;
+  recipientName: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2?: string | null;
+  provinsiId: string;
+  kotaKabupatenId: string;
+  kecamatanId: string;
+  kelurahanId?: string | null;
+  postalCode: string;
+  notes?: string | null;
+};
+
+export type UpdateAddressInput = Partial<CreateAddressInput>;
+
+export interface SetDefaultAddressInput {
+  kind: AddressKind;
+}
+
+// ----------------------------------------------------------------------------
+// Storefront orders — `me/orders`. The wire shape is the same `WireOrder`
+// the admin surface returns; the storefront only needs the list and a
+// by-orderNumber lookup at v0.1.
+// ----------------------------------------------------------------------------
+
+export interface ListMyOrdersQuery {
+  page?: number;
+  pageSize?: number;
+  /** Translation locale for line-item title resolution. */
+  locale?: string;
 }
 
 // ----------------------------------------------------------------------------
