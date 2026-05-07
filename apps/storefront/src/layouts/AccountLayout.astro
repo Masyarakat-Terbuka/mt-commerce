@@ -1,0 +1,87 @@
+---
+/**
+ * AccountLayout — chrome shared by every page under `/account/*`.
+ *
+ * Layout:
+ *   - Desktop: 220px sidebar on the left, content column on the right.
+ *   - Mobile: single column. The sidebar collapses to a horizontal nav
+ *     row above the content; the active link is the only one styled.
+ *
+ * The sidebar links are server-rendered for SEO and JS-disabled fallback.
+ * Sign-out is the only item that needs JavaScript (it has to call the
+ * SDK and clear local state), so it is rendered as a small island.
+ *
+ * The page renders no interstitial — the actual auth gate lives inside
+ * the per-page island, which fetches `me()` on mount and either renders
+ * the page or redirects to `/sign-in?next=<currentPath>`. Server-side
+ * rendering does not know whether a session cookie is present (the build
+ * is static), so the gate has to live on the client.
+ */
+import BaseLayout from "./BaseLayout.astro";
+import AccountSidebarSignOut from "@/islands/AccountSidebarSignOut.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+
+export interface Props {
+  title: string;
+  description?: string;
+  /** Which sidebar item to mark as current; matches the entry's path key. */
+  active: "overview" | "orders" | "addresses" | "profile";
+}
+
+const { title, description, active } = Astro.props;
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+
+const links = [
+  { key: "overview" as const, href: localePath(locale, "/account"), label: t("account.sidebar.overview") },
+  { key: "orders" as const, href: localePath(locale, "/account/orders"), label: t("account.sidebar.orders") },
+  { key: "addresses" as const, href: localePath(locale, "/account/addresses"), label: t("account.sidebar.addresses") },
+  { key: "profile" as const, href: localePath(locale, "/account/profile"), label: t("account.sidebar.profile") },
+];
+
+const homeHref = localePath(locale, "/");
+const signOutLabels = {
+  signOut: t("account.sidebar.sign_out"),
+  signingOut: t("account.sidebar.signing_out"),
+};
+---
+
+<BaseLayout title={title} description={description}>
+  <div class="mx-auto grid w-full max-w-[1100px] gap-10 px-5 py-12 md:grid-cols-[220px_1fr] md:gap-12 md:px-8 md:py-16">
+    <aside class="md:sticky md:top-24 md:self-start">
+      <h2 class="t-overline text-faint">{t("account.sidebar.heading")}</h2>
+      <nav aria-label={t("account.sidebar.heading")} class="mt-4">
+        <ul class="flex flex-row flex-wrap gap-x-6 gap-y-2 md:flex-col md:gap-y-3">
+          {links.map((link) => (
+            <li>
+              <a
+                href={link.href}
+                aria-current={active === link.key ? "page" : undefined}
+                class:list={[
+                  "block t-body transition-colors duration-150",
+                  active === link.key
+                    ? "text-fg"
+                    : "text-muted hover:text-accent",
+                ]}
+              >
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+
+      <div class="mt-8 border-t border-line pt-6 md:mt-10">
+        <AccountSidebarSignOut
+          client:load
+          homeHref={homeHref}
+          labels={signOutLabels}
+        />
+      </div>
+    </aside>
+
+    <section>
+      <slot />
+    </section>
+  </div>
+</BaseLayout>

@@ -1,0 +1,54 @@
+---
+import AccountLayout from "@/layouts/AccountLayout.astro";
+import AccountOrdersList from "@/islands/AccountOrdersList.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import type { OrderStatus } from "@mt-commerce/sdk";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
+
+const signInHref = localePath(locale, "/sign-in");
+const currentPath = localePath(locale, "/account/orders");
+const shopHref = localePath(locale, "/products");
+const detailHrefPrefix = localePath(locale, "/account/orders/detail");
+
+const status: Record<OrderStatus, string> = {
+  pending_payment: t("account.orders.status.pending_payment"),
+  paid: t("account.orders.status.paid"),
+  fulfilled: t("account.orders.status.fulfilled"),
+  cancelled: t("account.orders.status.cancelled"),
+  refunded: t("account.orders.status.refunded"),
+};
+
+const labels = {
+  title: t("account.orders.title"),
+  empty: t("account.orders.empty"),
+  shopCta: t("account.orders.shop_cta"),
+  loading: t("account.orders.loading"),
+  error: t("account.orders.error"),
+  colNumber: t("account.orders.col_number"),
+  colDate: t("account.orders.col_date"),
+  colStatus: t("account.orders.col_status"),
+  colTotal: t("account.orders.col_total"),
+  detailLink: t("account.orders.detail_link"),
+  paginationPrev: t("products.list.pagination.prev"),
+  paginationNext: t("products.list.pagination.next"),
+  status,
+};
+
+const title = `${t("account.orders.title")} — mt-commerce`;
+---
+
+<AccountLayout title={title} description={t("account.orders.title")} active="orders">
+  <AccountOrdersList
+    client:load
+    locale={intlLocale}
+    apiLocale={locale}
+    signInHref={signInHref}
+    currentPath={currentPath}
+    shopHref={shopHref}
+    detailHrefPrefix={detailHrefPrefix}
+    labels={labels}
+  />
+</AccountLayout>

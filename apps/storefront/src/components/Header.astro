@@ -22,6 +22,7 @@
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 import CartCountBadge from "@/islands/CartCountBadge.tsx";
 import CartDrawer from "@/islands/CartDrawer.tsx";
+import HeaderAccountLink from "@/islands/HeaderAccountLink.tsx";
 import Icon from "@/components/Icon.astro";
 // Hugeicons mirror the admin's icon vocabulary so glyphs match across apps.
 // Inline rendering through <Icon /> keeps the .astro tree React-island-free.
@@ -180,12 +181,25 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         ></span>
       </a>
 
-      <a
+      {/*
+        The account label upgrades to the customer's display name on hydration.
+        Server-renders as a static link so JavaScript-disabled visitors and the
+        initial paint always see a usable element.
+      */}
+      <HeaderAccountLink
+        client:idle
         href={accountHref}
-        class="hidden h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
-      >
-        {t("nav.account")}
-      </a>
+        fallbackLabel={t("nav.account")}
+        className="hidden h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
+      />
+      <noscript>
+        <a
+          href={accountHref}
+          class="hidden h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
+        >
+          {t("nav.account")}
+        </a>
+      </noscript>
 
       <div class="hidden items-center gap-1 pl-2 t-caption md:flex">
         <a

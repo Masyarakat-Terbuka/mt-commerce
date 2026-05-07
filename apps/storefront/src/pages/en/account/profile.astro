@@ -1,0 +1,41 @@
+---
+import AccountLayout from "@/layouts/AccountLayout.astro";
+import AccountProfileForm from "@/islands/AccountProfileForm.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+
+const signInHref = localePath(locale, "/sign-in");
+const currentPath = localePath(locale, "/account/profile");
+
+const labels = {
+  title: t("account.profile.title"),
+  name: t("account.profile.name"),
+  email: t("account.profile.email"),
+  emailHint: t("account.profile.email_hint"),
+  phone: t("account.profile.phone"),
+  phoneHint: t("auth.sign_up.phone_hint"),
+  submit: t("account.profile.submit"),
+  submitting: t("account.profile.submitting"),
+  saved: t("account.profile.saved"),
+  errors: {
+    fieldRequired: t("auth.errors.field_required"),
+    invalidPhone: t("auth.errors.invalid_phone"),
+    network: t("auth.errors.network"),
+    generic: t("auth.errors.generic"),
+  },
+};
+
+const title = `${t("account.profile.title")} — mt-commerce`;
+---
+
+<AccountLayout title={title} description={t("account.profile.title")} active="profile">
+  <AccountProfileForm
+    client:load
+    apiLocale={locale}
+    signInHref={signInHref}
+    currentPath={currentPath}
+    labels={labels}
+  />
+</AccountLayout>

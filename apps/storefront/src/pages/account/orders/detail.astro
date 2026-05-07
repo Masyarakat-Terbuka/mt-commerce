@@ -1,0 +1,72 @@
+---
+/**
+ * /account/orders/detail — single-order view, identified by `?o=<orderNumber>`.
+ *
+ * Static-build limitation: dynamic Astro segments need `getStaticPaths`,
+ * which we cannot satisfy for an unbounded set of orders. Following the
+ * checkout-confirmation page's pattern, the route is static and the
+ * specific order is read from the query string by the island. The orders
+ * list links here with `?o=ORD-...`.
+ */
+import AccountLayout from "@/layouts/AccountLayout.astro";
+import AccountOrderDetail from "@/islands/AccountOrderDetail.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import type { OrderStatus } from "@mt-commerce/sdk";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
+
+const signInHref = localePath(locale, "/sign-in");
+const currentPath = localePath(locale, "/account/orders/detail");
+const ordersHref = localePath(locale, "/account/orders");
+// `/help/contact` does not exist yet (it's a v0.1-pending content page).
+// Linking to it now keeps the slot in place for when the page lands.
+const contactHref = localePath(locale, "/help/contact");
+
+const status: Record<OrderStatus, string> = {
+  pending_payment: t("account.orders.status.pending_payment"),
+  paid: t("account.orders.status.paid"),
+  fulfilled: t("account.orders.status.fulfilled"),
+  cancelled: t("account.orders.status.cancelled"),
+  refunded: t("account.orders.status.refunded"),
+};
+
+const labels = {
+  titlePattern: t("account.order_detail.title"),
+  back: t("account.order_detail.back"),
+  placedOn: t("account.order_detail.placed_on"),
+  statusLabel: t("account.order_detail.status"),
+  shippingAddress: t("account.order_detail.shipping_address"),
+  billingAddress: t("account.order_detail.billing_address"),
+  items: t("account.order_detail.items"),
+  paymentMethod: t("account.order_detail.payment_method"),
+  shippingMethod: t("account.order_detail.shipping_method"),
+  totals: t("account.order_detail.totals"),
+  contact: t("account.order_detail.contact"),
+  contactLink: t("account.order_detail.contact_link"),
+  notFound: t("account.order_detail.not_found"),
+  error: t("account.orders.error"),
+  loading: t("account.orders.loading"),
+  totalsSubtotal: t("cart.subtotal"),
+  totalsTax: t("cart.tax"),
+  totalsShipping: t("cart.shipping"),
+  totalsTotal: t("cart.total"),
+  status,
+};
+
+const title = `${t("account.orders.title")} — mt-commerce`;
+---
+
+<AccountLayout title={title} description={t("account.orders.title")} active="orders">
+  <AccountOrderDetail
+    client:load
+    locale={intlLocale}
+    apiLocale={locale}
+    signInHref={signInHref}
+    currentPath={currentPath}
+    ordersHref={ordersHref}
+    contactHref={contactHref}
+    labels={labels}
+  />
+</AccountLayout>
