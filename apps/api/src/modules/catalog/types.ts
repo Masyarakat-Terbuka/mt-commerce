@@ -31,6 +31,14 @@ export interface Product {
   description: string | null;
   status: ProductStatus;
   defaultCurrency: string;
+  /**
+   * Primary product image URL. Null when the product has no image yet —
+   * the storefront falls back to a neutral placeholder so the layout
+   * never collapses.
+   */
+  imageUrl: string | null;
+  /** Alt text for `imageUrl`. Null when no image is set. */
+  imageAlt: string | null;
   categoryIds: string[];
   variants: Variant[];
   createdAt: Date;
@@ -139,12 +147,26 @@ const moneyAmountSchema = z
 
 export const productStatusSchema = z.enum(["draft", "active", "archived"]);
 
+/**
+ * Image URL constraints. Cap the length to keep accidental data-URLs out
+ * (a base64 PNG can run into the megabytes; the column is for short URLs).
+ * URL validity is enforced separately so the message is precise on bad
+ * input rather than dumping a Zod union error.
+ */
+const imageUrlSchema = z.string().min(1).max(2048).url({
+  message: "imageUrl must be a valid http(s) URL",
+});
+
+const imageAltSchema = z.string().min(1).max(500);
+
 export const createProductSchema = z.object({
   slug: slugSchema,
   title: z.string().min(1).max(200),
   description: z.string().max(10_000).nullable().optional(),
   status: productStatusSchema.optional(),
   defaultCurrency: currencySchema,
+  imageUrl: imageUrlSchema.nullable().optional(),
+  imageAlt: imageAltSchema.nullable().optional(),
   categoryIds: z.array(z.string().min(1)).optional(),
 });
 export type CreateProductInput = z.infer<typeof createProductSchema>;
@@ -156,6 +178,8 @@ export const updateProductSchema = z
     description: z.string().max(10_000).nullable().optional(),
     status: productStatusSchema.optional(),
     defaultCurrency: currencySchema.optional(),
+    imageUrl: imageUrlSchema.nullable().optional(),
+    imageAlt: imageAltSchema.nullable().optional(),
     categoryIds: z.array(z.string().min(1)).optional(),
   })
   .refine((patch) => Object.keys(patch).length > 0, {

@@ -30,42 +30,87 @@ const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
-// Categories are fetched at build time. If the API is down, `Filters`
-// receives an empty list and renders only the search/price/sort controls.
-// We keep this server-side because the form is a plain HTML <form> that
-// posts back to the same URL — no client JS would help here.
+const activeFilters = {
+  category,
+  search,
+  minPrice: minRaw ?? undefined,
+  maxPrice: maxRaw ?? undefined,
+  sort: sortRaw ?? undefined,
+};
 ---
 
 <BaseLayout title={title} description={t("products.list.title")}>
-  <h1 class="mb-4 text-xl font-semibold md:text-2xl">{t("products.list.title")}</h1>
+  <div class="mx-auto max-w-[1280px] px-4 py-10 md:px-8 md:py-16">
+    {/* Page header — typographic only. */}
+    <header class="mb-10 md:mb-16">
+      <h1 class="t-h1 text-fg">{t("products.list.title")}</h1>
+    </header>
 
-  <Filters
-    active={{
-      category,
-      search,
-      minPrice: minRaw ?? undefined,
-      maxPrice: maxRaw ?? undefined,
-      sort: sortRaw ?? undefined,
-    }}
-  />
+    {/* Mobile filter trigger — opens the dialog below via inline JS. */}
+    <div class="mb-6 flex items-center justify-between md:hidden">
+      <button
+        type="button"
+        class="t-caption uppercase tracking-wide text-fg"
+        onclick="document.getElementById('mobile-filters')?.showModal()"
+      >
+        {t("products.list.filter_button")} &rarr;
+      </button>
+    </div>
 
-  <div class="mt-6">
-    <ProductGrid
-      client:load
-      apiUrl={apiUrl}
-      locale={intlLocale}
-      detailHrefBase={detailHrefBase}
-      emptyLabel={t("products.list.empty")}
-      loadingLabel={t("products.list.loading")}
-      errorLabel={t("products.list.error")}
-      query={{
-        ...(category ? { categorySlug: category } : {}),
-        ...(search ? { search } : {}),
-        ...(minPrice ? { minPriceAmount: minPrice } : {}),
-        ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
-        page,
-        sort,
-      }}
-    />
+    {/* Two-column layout on desktop: 240px sidebar + grid. */}
+    <div class="grid grid-cols-1 gap-12 md:grid-cols-[240px_1fr] md:gap-16">
+      {/* Desktop sidebar — sticky on scroll. */}
+      <aside class="hidden md:block">
+        <Filters active={activeFilters} />
+      </aside>
+
+      {/* Grid */}
+      <div>
+        <ProductGrid
+          client:load
+          apiUrl={apiUrl}
+          locale={intlLocale}
+          detailHrefBase={detailHrefBase}
+          emptyLabel={t("products.list.empty")}
+          errorLabel={t("products.list.error")}
+          skeletonLabel={t("products.list.skeleton_aria")}
+          query={{
+            ...(category ? { categorySlug: category } : {}),
+            ...(search ? { search } : {}),
+            ...(minPrice ? { minPriceAmount: minPrice } : {}),
+            ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
+            page,
+            sort,
+          }}
+          skeletonCount={12}
+        />
+      </div>
+    </div>
   </div>
+
+  {/*
+    Mobile filters dialog — native <dialog>, opened by the button above
+    via inline `showModal()`. Closed via the close button at top-right
+    or by submitting the form (which navigates and dismounts the dialog).
+  */}
+  <dialog
+    id="mobile-filters"
+    class="m-0 max-h-screen w-screen max-w-full bg-cream p-0 backdrop:bg-fg/50 md:hidden"
+  >
+    <div class="flex items-center justify-between border-b border-line bg-cream px-4 py-4">
+      <span class="t-caption uppercase tracking-wide text-muted">
+        {t("products.list.filter_button")}
+      </span>
+      <button
+        type="button"
+        class="t-caption uppercase tracking-wide text-fg"
+        onclick="document.getElementById('mobile-filters')?.close()"
+      >
+        {t("products.list.filter_close")}
+      </button>
+    </div>
+    <div class="overflow-y-auto px-4 py-6">
+      <Filters active={activeFilters} inline />
+    </div>
+  </dialog>
 </BaseLayout>

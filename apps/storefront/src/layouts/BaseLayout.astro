@@ -34,10 +34,29 @@ const canonicalUrl = canonical ?? new URL(Astro.url.pathname, siteUrl).toString(
     <meta property="og:url" content={canonicalUrl} />
     {ogImage && <meta property="og:image" content={ogImage} />}
     <meta name="twitter:card" content="summary_large_image" />
+
+    {/*
+      Geist Variable served from Google Fonts. Hosted, not bundled — keeps
+      the storefront free of a new top-level dep while still delivering a
+      distinctive type face. `display=swap` avoids flashing invisible text
+      on slow connections, which matches the platform's "fast on modest
+      hardware" principle.
+    */}
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap"
+    />
   </head>
-  <body class="min-h-screen bg-white text-neutral-900">
+  <body class="min-h-screen bg-cream text-fg">
     <Header />
-    <main class="mx-auto max-w-6xl px-4 py-6">
+    {/*
+      No inner wrapper here — pages decide their own layout (full-bleed
+      hero on home, sidebar layout on listing, centered column on detail).
+      A blanket `mx-auto max-w-6xl` would force every page to fight it.
+    */}
+    <main>
       <slot />
     </main>
     <Footer />

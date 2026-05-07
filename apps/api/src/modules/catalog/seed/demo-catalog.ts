@@ -7,6 +7,23 @@
  * storefront and admin without having to handcraft a product through
  * the API.
  *
+ * ----------------------------------------------------------------------
+ * Demo images
+ *
+ * Each product carries a single `imageUrl` sourced from Unsplash under
+ * the Unsplash License (https://unsplash.com/license). Photographers
+ * are credited per-product in the `imageAttribution` field so the
+ * source remains discoverable as the seed evolves. The storefront
+ * does not surface attribution today; the field is intended for the
+ * upcoming admin "media library" view and for honest credit when a
+ * theme adopts the demo data.
+ *
+ * URLs go through the `images.unsplash.com` CDN with a fixed `w=1200`
+ * + `q=80` so the storefront receives a predictable size regardless
+ * of the photographer's original. Alt text is in Bahasa Indonesia
+ * to match the catalog's primary locale.
+ * ----------------------------------------------------------------------
+ *
  * Money rules (per ADR-0007):
  *   - All prices are IDR, stored as `bigint` whole rupiah on
  *     `product_variants.price_amount`.
@@ -104,6 +121,15 @@ interface SeedProduct {
   slug: string;
   title: string;
   description: string;
+  /** Unsplash CDN URL or other long-lived image URL. */
+  imageUrl: string;
+  /** Bahasa Indonesia alt text describing the photo. */
+  imageAlt: string;
+  /**
+   * Free-form credit. Not surfaced in the storefront yet but kept with
+   * the data so the source of every image stays traceable.
+   */
+  imageAttribution: string;
   /** Slugs into `CATEGORIES` — resolved to ids during seeding. */
   categorySlugs: readonly string[];
   variants: readonly SeedVariant[];
@@ -115,6 +141,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Kopi Arabika Gayo 200g",
     description:
       "Single-origin arabica from the Gayo highlands of Aceh. Bright acidity with notes of cocoa and citrus. Roasted to order.",
+    // Close-up of dark-roast coffee beans — photographer Mike Kenneally.
+    imageUrl:
+      "https://images.unsplash.com/photo-1442550528053-c431ecb55509?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Biji kopi arabika sangrai medium tampak dekat",
+    imageAttribution: "Mike Kenneally on Unsplash",
     categorySlugs: ["kopi"],
     variants: [
       { sku: "KOPI-GAYO-200", title: null, priceAmount: 95_000n },
@@ -125,6 +156,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Kopi Kintamani Bali 200g",
     description:
       "Washed arabica from the Kintamani highlands. Citrus-forward cup with a clean finish. Choose whole bean for maximum freshness.",
+    // Coffee beans poured from a scoop — photographer Nathan Dumlao.
+    imageUrl:
+      "https://images.unsplash.com/photo-1559525839-d9acfd03e0ae?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Biji kopi arabika Kintamani dituang dari sendok takar",
+    imageAttribution: "Nathan Dumlao on Unsplash",
     categorySlugs: ["kopi"],
     variants: [
       { sku: "KOPI-KINTA-200-WB", title: "Whole bean", priceAmount: 110_000n },
@@ -136,6 +172,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Batik Tulis Pekalongan",
     description:
       "Hand-drawn batik tulis from Pekalongan, north-coast pattern. Each piece is one-of-a-kind. 100% cotton, soft drape.",
+    // Indonesian batik fabric pattern detail — photographer Camille Bismonte.
+    imageUrl:
+      "https://images.unsplash.com/photo-1606293459339-aa5d34a7b0e1?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Detail kain batik tulis dengan motif pesisir Pekalongan",
+    imageAttribution: "Camille Bismonte on Unsplash",
     categorySlugs: ["batik", "fashion"],
     variants: [
       { sku: "BATIK-PEKA-M", title: "Size M", priceAmount: 850_000n },
@@ -148,6 +189,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Keranjang Rotan Besar",
     description:
       "Large rattan basket woven by artisans in Cirebon. Sturdy, lightweight, perfect for laundry or storage.",
+    // Woven rattan basket on a neutral surface — photographer Anna Stampfli.
+    imageUrl:
+      "https://images.unsplash.com/photo-1595408076683-5d0c643b8a02?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Keranjang anyaman rotan berukuran besar",
+    imageAttribution: "Anna Stampfli on Unsplash",
     categorySlugs: ["kerajinan"],
     variants: [
       { sku: "ROTAN-BSR-001", title: null, priceAmount: 175_000n },
@@ -158,6 +204,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Gerabah Kasongan Set",
     description:
       "Three-piece earthenware set from Kasongan, Yogyakarta. Hand-thrown and fired in a traditional kiln.",
+    // Hand-thrown earthenware vessels — photographer Earl Wilcox.
+    imageUrl:
+      "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Set gerabah tanah liat hasil pembakaran tradisional Kasongan",
+    imageAttribution: "Earl Wilcox on Unsplash",
     categorySlugs: ["kerajinan"],
     variants: [
       { sku: "GERAB-KASO-SET3", title: null, priceAmount: 220_000n },
@@ -168,6 +219,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Keripik Tempe Malang 250g",
     description:
       "Crispy tempeh chips from Malang. Two flavors: original (savory) and pedas (spicy). 250g resealable pouch.",
+    // Crispy chips in a bowl — photographer Louis Hansel.
+    imageUrl:
+      "https://images.unsplash.com/photo-1599490659213-e2b9527bd087?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Keripik tempe tipis dalam mangkuk",
+    imageAttribution: "Louis Hansel on Unsplash",
     categorySlugs: ["kuliner"],
     variants: [
       { sku: "KRIP-TEMPE-MLG-ORI", title: "Original", priceAmount: 28_000n },
@@ -251,6 +307,8 @@ export async function seedDemoCatalog(
       description: seedProduct.description,
       status: "active",
       defaultCurrency: CURRENCY,
+      imageUrl: seedProduct.imageUrl,
+      imageAlt: seedProduct.imageAlt,
     };
     const insertedProduct = await db
       .insert(products)

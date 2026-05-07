@@ -5,7 +5,8 @@ import ProductGrid from "@/islands/ProductGrid.tsx";
 import { resolveApiUrl } from "@/lib/api";
 import { createTranslator, localePath } from "@/lib/i18n";
 
-const t = createTranslator("en");
+const locale = "en" as const;
+const t = createTranslator(locale);
 const url = Astro.url;
 const search = url.searchParams.get("q") ?? undefined;
 const category = url.searchParams.get("category") || undefined;
@@ -25,39 +26,79 @@ const maxPrice = maxRaw && /^\d+$/.test(maxRaw) ? maxRaw : undefined;
 
 const title = `${t("products.list.title")} — mt-commerce`;
 const apiUrl = resolveApiUrl();
-const detailHrefBase = localePath("en", "/products");
+const detailHrefBase = localePath(locale, "/products");
+
+const activeFilters = {
+  category,
+  search,
+  minPrice: minRaw ?? undefined,
+  maxPrice: maxRaw ?? undefined,
+  sort: sortRaw ?? undefined,
+};
 ---
 
 <BaseLayout title={title} description={t("products.list.title")}>
-  <h1 class="mb-4 text-xl font-semibold md:text-2xl">{t("products.list.title")}</h1>
+  <div class="mx-auto max-w-[1280px] px-4 py-10 md:px-8 md:py-16">
+    <header class="mb-10 md:mb-16">
+      <h1 class="t-h1 text-fg">{t("products.list.title")}</h1>
+    </header>
 
-  <Filters
-    active={{
-      category,
-      search,
-      minPrice: minRaw ?? undefined,
-      maxPrice: maxRaw ?? undefined,
-      sort: sortRaw ?? undefined,
-    }}
-  />
+    <div class="mb-6 flex items-center justify-between md:hidden">
+      <button
+        type="button"
+        class="t-caption uppercase tracking-wide text-fg"
+        onclick="document.getElementById('mobile-filters')?.showModal()"
+      >
+        {t("products.list.filter_button")} &rarr;
+      </button>
+    </div>
 
-  <div class="mt-6">
-    <ProductGrid
-      client:load
-      apiUrl={apiUrl}
-      locale="en-US"
-      detailHrefBase={detailHrefBase}
-      emptyLabel={t("products.list.empty")}
-      loadingLabel={t("products.list.loading")}
-      errorLabel={t("products.list.error")}
-      query={{
-        ...(category ? { categorySlug: category } : {}),
-        ...(search ? { search } : {}),
-        ...(minPrice ? { minPriceAmount: minPrice } : {}),
-        ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
-        page,
-        sort,
-      }}
-    />
+    <div class="grid grid-cols-1 gap-12 md:grid-cols-[240px_1fr] md:gap-16">
+      <aside class="hidden md:block">
+        <Filters active={activeFilters} />
+      </aside>
+
+      <div>
+        <ProductGrid
+          client:load
+          apiUrl={apiUrl}
+          locale="en-US"
+          detailHrefBase={detailHrefBase}
+          emptyLabel={t("products.list.empty")}
+          errorLabel={t("products.list.error")}
+          skeletonLabel={t("products.list.skeleton_aria")}
+          query={{
+            ...(category ? { categorySlug: category } : {}),
+            ...(search ? { search } : {}),
+            ...(minPrice ? { minPriceAmount: minPrice } : {}),
+            ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
+            page,
+            sort,
+          }}
+          skeletonCount={12}
+        />
+      </div>
+    </div>
   </div>
+
+  <dialog
+    id="mobile-filters"
+    class="m-0 max-h-screen w-screen max-w-full bg-cream p-0 backdrop:bg-fg/50 md:hidden"
+  >
+    <div class="flex items-center justify-between border-b border-line bg-cream px-4 py-4">
+      <span class="t-caption uppercase tracking-wide text-muted">
+        {t("products.list.filter_button")}
+      </span>
+      <button
+        type="button"
+        class="t-caption uppercase tracking-wide text-fg"
+        onclick="document.getElementById('mobile-filters')?.close()"
+      >
+        {t("products.list.filter_close")}
+      </button>
+    </div>
+    <div class="overflow-y-auto px-4 py-6">
+      <Filters active={activeFilters} inline />
+    </div>
+  </dialog>
 </BaseLayout>

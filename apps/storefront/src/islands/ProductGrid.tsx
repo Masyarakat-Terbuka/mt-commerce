@@ -2,25 +2,26 @@
  * ProductGrid — client island.
  *
  * Why this is a React island instead of an Astro server-render: the
- * storefront builds with `output: "static"` and the API is not necessarily
- * running at build time. To keep `bun run build` deterministic and offline-
- * friendly, the static page renders a "Memuat produk…" placeholder and this
- * island fetches real data from the API once it mounts in the browser.
+ * storefront builds with `output: "static"` and the API is not
+ * necessarily running at build time. To keep `bun run build`
+ * deterministic and offline-friendly, the static page renders a grid
+ * skeleton and this island fetches real data from the API once it
+ * mounts in the browser.
  *
- * Design notes:
+ * Visual notes:
  *
- *   - `PUBLIC_API_URL` is inlined by Vite at build time. The same env var is
- *     read by the build-time SDK calls in `lib/api.ts`, so server and client
- *     stay aligned.
+ *   - The card markup mirrors `components/ProductCard.astro` because
+ *     Astro components cannot render inside React islands. Both stay
+ *     in sync via the shared utility classes (`t-body`, `price-figure`,
+ *     `border-line`, etc.) defined in `styles/global.css`.
  *
- *   - The card markup mirrors `components/ProductCard.astro`. Astro
- *     components cannot render inside React islands, so a small duplication
- *     is unavoidable. Both stay in sync via the shared Tailwind classes;
- *     when the cart island lands and centralizes more UI, this can collapse
- *     into a single React `<Card>` reused from both Astro and React sides.
+ *   - Loading state is a 4-column skeleton grid (2 columns on mobile)
+ *     that matches the live grid template — no layout shift when data
+ *     arrives. Each cell is the same 1:1 aspect placeholder + two
+ *     stubby title/price bars.
  *
- *   - The grid skeleton matches the static placeholder's grid template so
- *     there is no layout shift when data arrives.
+ *   - Error and empty states are calm single paragraphs in line with
+ *     the catalog's overall copywriting tone.
  */
 import { useEffect, useState } from "react";
 import { format as formatMoney } from "@mt-commerce/core/money";
@@ -47,11 +48,17 @@ export type ProductGridProps = {
    */
   detailHrefBase: string;
   emptyLabel: string;
-  loadingLabel: string;
   errorLabel: string;
+  /** Localized aria-label for the loading skeleton. */
+  skeletonLabel: string;
   query?: ProductGridQuery;
   /** When set, slices the result to at most this many cards (home featured). */
   limit?: number;
+  /**
+   * Skeleton cell count to render while loading. Matches the eventual
+   * card count so there's no layout shift. Defaults to `pageSize` or 8.
+   */
+  skeletonCount?: number;
 };
 
 type LoadState =
@@ -68,19 +75,19 @@ function lowestPrice(p: SdkProduct): { amount: bigint; currency: string } | null
   return lowest;
 }
 
-function placeholderImage(title: string): string {
-  return `https://placehold.co/800x800/png?text=${encodeURIComponent(title.slice(0, 24))}`;
-}
+const GRID_CLASSES =
+  "grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-3 md:gap-x-6 md:gap-y-12 lg:grid-cols-4 lg:gap-x-8";
 
 export default function ProductGrid({
   apiUrl,
   locale,
   detailHrefBase,
   emptyLabel,
-  loadingLabel,
   errorLabel,
+  skeletonLabel,
   query,
   limit,
+  skeletonCount,
 }: ProductGridProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
@@ -127,68 +134,83 @@ export default function ProductGrid({
   ]);
 
   if (state.status === "loading") {
+    const cells = Math.max(2, skeletonCount ?? limit ?? query?.pageSize ?? 8);
     return (
-      <p
+      <div
         role="status"
         aria-live="polite"
-        className="rounded border border-neutral-200 bg-neutral-50 p-6 text-center text-sm text-neutral-600"
+        aria-label={skeletonLabel}
+        className={GRID_CLASSES}
       >
-        {loadingLabel}
-      </p>
+        {Array.from({ length: cells }).map((_, idx) => (
+          <div key={idx}>
+            <div className="aspect-square w-full skeleton border border-line"></div>
+            <div className="mt-3 space-y-2">
+              <div className="h-3 w-3/4 skeleton"></div>
+              <div className="h-3 w-1/3 skeleton"></div>
+            </div>
+          </div>
+        ))}
+      </div>
     );
   }
 
   if (state.status === "error") {
     return (
-      <p
-        role="alert"
-        className="rounded border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700"
-      >
-        {errorLabel}
-      </p>
+      <div role="alert" className="py-12 text-center">
+        <p className="t-body text-fg">{errorLabel}</p>
+      </div>
     );
   }
 
   if (state.products.length === 0) {
     return (
-      <p className="rounded border border-neutral-200 bg-neutral-50 p-6 text-center text-sm text-neutral-600">
-        {emptyLabel}
-      </p>
+      <div className="py-12 text-center">
+        <p className="t-body text-muted">{emptyLabel}</p>
+      </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-      {state.products.map((p) => {
+    <div className={GRID_CLASSES}>
+      {state.products.map((p, idx) => {
         const price = lowestPrice(p);
         const compareAt = p.variants[0]?.compareAtPrice ?? null;
+        // The first row is above the fold on every viewport — eager-load
+        // the first four images so the LCP is not deferred. Lazy after.
+        const loading = idx < 4 ? "eager" : "lazy";
+        const altText = p.imageAlt ?? p.title;
         return (
-          <a
-            key={p.id}
-            href={`${detailHrefBase}/${p.slug}`}
-            className="group block rounded-lg border border-neutral-200 bg-white transition-colors hover:border-neutral-400"
-          >
-            <div className="aspect-square overflow-hidden rounded-t-lg bg-neutral-100">
-              <img
-                src={placeholderImage(p.title)}
-                alt={p.title}
-                loading="lazy"
-                decoding="async"
-                className="h-full w-full object-cover"
-              />
+          <a key={p.id} href={`${detailHrefBase}/${p.slug}`} className="group block">
+            <div className="aspect-square w-full overflow-hidden border border-line bg-paper transition-colors duration-150 group-hover:border-line-strong">
+              {p.imageUrl ? (
+                <img
+                  src={p.imageUrl}
+                  alt={altText}
+                  loading={loading}
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-cream">
+                  <span className="t-caption uppercase tracking-wide text-faint">
+                    {p.title}
+                  </span>
+                </div>
+              )}
             </div>
-            <div className="space-y-1 p-3">
-              <h3 className="line-clamp-2 text-sm font-medium text-neutral-900">
+            <div className="mt-3 space-y-1">
+              <h3 className="t-body line-clamp-1 font-medium text-fg transition-colors duration-150 group-hover:text-accent">
                 {p.title}
               </h3>
-              <div className="flex items-baseline gap-2 text-sm">
+              <div className="flex items-baseline gap-2 t-body">
                 {price && (
-                  <span className="price-figure text-neutral-900">
+                  <span className="price-figure text-fg">
                     {formatMoney(price, { locale })}
                   </span>
                 )}
                 {compareAt && (
-                  <span className="price-figure text-neutral-500 line-through">
+                  <span className="price-figure text-faint line-through">
                     {formatMoney(compareAt, { locale })}
                   </span>
                 )}

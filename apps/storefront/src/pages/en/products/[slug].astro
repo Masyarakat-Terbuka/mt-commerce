@@ -2,7 +2,7 @@
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProductDetail from "@/islands/ProductDetail.tsx";
 import { getProductBySlug, listProducts, resolveApiUrl } from "@/lib/api";
-import { createTranslator } from "@/lib/i18n";
+import { createTranslator, localePath } from "@/lib/i18n";
 
 export async function getStaticPaths() {
   const result = await listProducts({ pageSize: 100, sort: "newest" });
@@ -18,7 +18,7 @@ const product = await getProductBySlug(slug);
 
 const pageTitle = product ? product.title[locale] : slug;
 const description = product ? product.description[locale] : "";
-const ogImage = product?.imageUrl;
+const ogImage = product?.hasImage ? product.imageUrl : undefined;
 
 const jsonLd = product
   ? {
@@ -26,7 +26,7 @@ const jsonLd = product
       "@type": "Product",
       name: pageTitle,
       description,
-      image: product.imageUrl,
+      ...(product.hasImage ? { image: product.imageUrl } : {}),
       sku: product.id,
       offers: {
         "@type": "Offer",
@@ -40,6 +40,7 @@ const jsonLd = product
   : null;
 
 const apiUrl = resolveApiUrl();
+const detailHrefBase = localePath(locale, "/products");
 ---
 
 <BaseLayout
@@ -59,6 +60,9 @@ const apiUrl = resolveApiUrl();
     compareAtLabel={t("products.detail.compare_at")}
     addToCartLabel={t("products.detail.add_to_cart")}
     outOfStockLabel={t("products.detail.out_of_stock")}
+    breadcrumbHomeLabel={t("products.detail.breadcrumbs.home")}
+    relatedTitle={t("products.detail.related_title")}
+    detailHrefBase={detailHrefBase}
   />
 
   {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}

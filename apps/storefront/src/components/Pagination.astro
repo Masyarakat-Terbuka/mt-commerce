@@ -1,4 +1,14 @@
 ---
+/**
+ * Pagination — text-only.
+ *
+ * Renders as `← Sebelumnya · 1 2 3 · Selanjutnya →`. No buttons-with-borders;
+ * the calm direction calls for typographic restraint here too. The active
+ * page is the only one rendered with full-strength foreground; siblings stay
+ * muted, and disabled prev/next fade further.
+ */
+import { createTranslator, resolveLocale, type Locale } from "@/lib/i18n";
+
 export interface Props {
   page: number;
   totalPages: number;
@@ -11,6 +21,8 @@ export interface Props {
 }
 
 const { page, totalPages, baseUrl } = Astro.props;
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
 
 function buildHref(p: number): string {
   const sep = baseUrl.includes("?") ? "&" : "?";
@@ -24,44 +36,48 @@ const hasNext = page < totalPages;
 
 {
   totalPages > 1 && (
-    <nav class="mt-8 flex items-center justify-center gap-1 text-sm" aria-label="Pagination">
+    <nav class="mt-12 flex items-center justify-center gap-3 t-body" aria-label="Pagination">
       <a
         href={hasPrev ? buildHref(page - 1) : undefined}
         aria-disabled={!hasPrev}
         class:list={[
-          "rounded border px-3 py-1.5",
-          hasPrev
-            ? "border-neutral-300 hover:bg-neutral-100"
-            : "pointer-events-none border-neutral-200 text-neutral-400",
+          "transition-colors duration-150",
+          hasPrev ? "text-fg hover:text-accent" : "pointer-events-none text-faint",
         ]}
       >
-        &larr;
+        &larr; {t("products.list.pagination.prev")}
       </a>
-      {pages.map((p) => (
-        <a
-          href={buildHref(p)}
-          aria-current={p === page ? "page" : undefined}
-          class:list={[
-            "rounded border px-3 py-1.5",
-            p === page
-              ? "border-neutral-900 bg-neutral-900 text-white"
-              : "border-neutral-300 hover:bg-neutral-100",
-          ]}
-        >
-          {p}
-        </a>
-      ))}
+
+      <span class="text-faint" aria-hidden="true">·</span>
+
+      <ul class="flex items-center gap-3">
+        {pages.map((p) => (
+          <li>
+            <a
+              href={buildHref(p)}
+              aria-current={p === page ? "page" : undefined}
+              class:list={[
+                "price-figure transition-colors duration-150",
+                p === page ? "font-medium text-fg" : "text-muted hover:text-accent",
+              ]}
+            >
+              {p}
+            </a>
+          </li>
+        ))}
+      </ul>
+
+      <span class="text-faint" aria-hidden="true">·</span>
+
       <a
         href={hasNext ? buildHref(page + 1) : undefined}
         aria-disabled={!hasNext}
         class:list={[
-          "rounded border px-3 py-1.5",
-          hasNext
-            ? "border-neutral-300 hover:bg-neutral-100"
-            : "pointer-events-none border-neutral-200 text-neutral-400",
+          "transition-colors duration-150",
+          hasNext ? "text-fg hover:text-accent" : "pointer-events-none text-faint",
         ]}
       >
-        &rarr;
+        {t("products.list.pagination.next")} &rarr;
       </a>
     </nav>
   )

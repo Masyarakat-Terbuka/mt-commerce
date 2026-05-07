@@ -43,6 +43,14 @@ export interface WireProduct {
   description: string | null;
   status: ProductStatus;
   defaultCurrency: string;
+  /**
+   * Optional on the wire to keep the SDK forward-compatible with older API
+   * deployments (pre-`0006_product_images`). The client coalesces a missing
+   * value to `null` on the domain side; consumers always receive a defined
+   * `string | null`.
+   */
+  imageUrl?: string | null;
+  imageAlt?: string | null;
   categoryIds: string[];
   variants: WireVariant[];
   createdAt: string;
@@ -119,6 +127,14 @@ export interface Product {
   description: string | null;
   status: ProductStatus;
   defaultCurrency: string;
+  /**
+   * Primary product image URL, or null when the product has no image yet.
+   * The storefront falls back to a neutral placeholder so the layout is
+   * stable regardless.
+   */
+  imageUrl: string | null;
+  /** Alt text for `imageUrl`, or null when no image is set. */
+  imageAlt: string | null;
   categoryIds: string[];
   variants: Variant[];
   createdAt: Date;
@@ -195,6 +211,74 @@ export interface ListKecamatanQuery {
 
 export interface ListKelurahanQuery {
   kecamatanId: string;
+}
+
+// ----------------------------------------------------------------------------
+// Admin auth
+// ----------------------------------------------------------------------------
+
+export type Role = "owner" | "admin" | "staff" | "viewer";
+
+export interface WireAuthUser {
+  id: string;
+  email: string;
+  name: string;
+  emailVerified: boolean;
+  image: string | null;
+}
+
+export interface WireAuthMe {
+  user: WireAuthUser;
+  staff: {
+    authUserId: string;
+    role: Role;
+    displayName: string | null;
+  } | null;
+}
+
+export interface AuthMe {
+  user: WireAuthUser;
+  /**
+   * The staff role of the caller. `null` when the auth account exists but has
+   * no staff profile attached — they should not be allowed into the admin UI.
+   */
+  role: Role | null;
+  /** Convenience: prefer the staff display name, fall back to user.name. */
+  displayName: string;
+}
+
+export interface WireAuthSession {
+  id: string;
+  expiresAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface AuthSession {
+  id: string;
+  expiresAt: Date;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: Date;
+}
+
+export interface SignInInput {
+  email: string;
+  password: string;
+}
+
+// ----------------------------------------------------------------------------
+// Admin products list
+// ----------------------------------------------------------------------------
+
+export interface AdminListProductsQuery {
+  status?: ProductStatus;
+  categoryId?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+  sort?: ProductSort;
 }
 
 // ----------------------------------------------------------------------------

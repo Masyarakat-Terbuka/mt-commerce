@@ -1,12 +1,54 @@
 @import "tailwindcss";
 
 /*
- * Storefront base styles.
+ * Storefront design tokens and base styles.
  *
- * Tailwind v4 uses a single `@import "tailwindcss"` entry point. Project-level
- * tweaks live below. Keep this file small — component-level styling belongs
- * in the components themselves.
+ * Aesthetic direction: Saturdays NYC × Muji. Photography is the visual
+ * heavyweight; type stays calm; the palette is warm-neutral with a single
+ * accent. No drop shadows, no gradients, no glow, no decorative icons.
+ *
+ * Tailwind v4 reads design tokens from `@theme inline` so the `bg-cream`,
+ * `text-fg`, `border-line`, `text-accent`, etc. utilities below are real
+ * generated classes, not arbitrary values. Adding a token here makes it
+ * usable as a Tailwind utility immediately.
+ *
+ * Accent color decision — terracotta over deep charcoal.
+ *
+ *   The catalog leans into Indonesian craft (kopi, batik, gerabah, rotan).
+ *   A warm terracotta (#B85742) reads as earthen, hand-fired, and unmistakably
+ *   Indonesian — closer to Saturdays NYC's color discipline than Muji's pure
+ *   greyscale. Charcoal would have been the safer, "Muji severe" pick, but
+ *   it would also have left the storefront indistinguishable from a hundred
+ *   minimalist fashion sites. Terracotta carries a small amount of cultural
+ *   weight without ornament, which is exactly what we want a single accent
+ *   to do.
+ *
+ *   The accent is used ONLY for: primary action buttons (Add to cart),
+ *   active state on selected variant chips, and the focus ring. Everything
+ *   else stays in the warm-neutral system.
  */
+@theme inline {
+  /* Base surfaces */
+  --color-cream: #faf7f2;
+  --color-paper: #ffffff;
+
+  /* Foreground / type */
+  --color-fg: #1a1a1a;
+  --color-muted: #6b6562;
+  --color-faint: #a8a29a;
+
+  /* Lines */
+  --color-line: #e8e2d9;
+  --color-line-strong: #1a1a1a;
+
+  /* Single accent — terracotta. Reasoning above. */
+  --color-accent: #b85742;
+  --color-accent-strong: #9c4634;
+
+  /* Status — used sparingly */
+  --color-danger: #a02d20;
+  --color-success: #2c6e3b;
+}
 
 @layer base {
   html {
@@ -14,25 +56,155 @@
     text-size-adjust: 100%;
   }
 
+  /*
+   * Geist Variable is loaded via the layout's <link>. We pick three
+   * deliberate weights (400 / 500 / 600); 700+ is intentionally
+   * disallowed to keep type calm.
+   */
   body {
     font-family:
-      ui-sans-serif,
-      system-ui,
-      -apple-system,
-      "Segoe UI",
-      Roboto,
-      "Helvetica Neue",
-      Arial,
-      sans-serif;
-    color: #111;
-    background: #fff;
+      "Geist", "Geist Variable", ui-sans-serif, system-ui, -apple-system,
+      "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--color-fg);
+    background: var(--color-cream);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Keyboard focus uses the single accent color, no glow. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Selection styling stays calm — accent at low opacity, not its full strength. */
+  ::selection {
+    background: rgba(184, 87, 66, 0.18);
+    color: var(--color-fg);
+  }
+}
+
+@layer components {
+  /*
+   * Typography utilities — the only four sizes the storefront should ever
+   * use. Defining them as classes (rather than per-page Tailwind clusters)
+   * keeps authors from drifting.
+   *
+   *   .t-display   36/40 mobile → 48/52 desktop, weight 600, tight tracking
+   *   .t-h1        24/28 mobile → 32/36 desktop, weight 600
+   *   .t-body      14/22 mobile → 15/24 desktop, weight 400
+   *   .t-caption   12/18,                          weight 500
+   */
+  .t-display {
+    font-size: 2.25rem; /* 36px */
+    line-height: 2.5rem; /* 40px */
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .t-h1 {
+    font-size: 1.5rem; /* 24px */
+    line-height: 1.75rem; /* 28px */
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .t-body {
+    font-size: 0.875rem; /* 14px */
+    line-height: 1.375rem; /* 22px */
+    font-weight: 400;
+  }
+
+  .t-caption {
+    font-size: 0.75rem; /* 12px */
+    line-height: 1.125rem; /* 18px */
+    font-weight: 500;
+  }
+
+  @media (min-width: 768px) {
+    .t-display {
+      font-size: 3rem; /* 48px */
+      line-height: 3.25rem; /* 52px */
+    }
+    .t-h1 {
+      font-size: 2rem; /* 32px */
+      line-height: 2.25rem; /* 36px */
+    }
+    .t-body {
+      font-size: 0.9375rem; /* 15px */
+      line-height: 1.5rem; /* 24px */
+    }
   }
 
   /*
-   * Rupiah amounts read more cleanly with tabular figures so column-aligned
-   * prices in product grids do not wobble between rows.
+   * Tabular numerals on every price. The classname doubles as a hook
+   * future themes can target without touching individual components.
    */
   .price-figure {
     font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * Primary action — the only button type that uses the accent color.
+   * Height is locked at 48px to match the spec for the detail page CTA;
+   * the size variants below adjust width/padding only.
+   */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 3rem; /* 48px */
+    padding: 0 1.25rem;
+    background: var(--color-accent);
+    color: var(--color-paper);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    transition:
+      background-color 150ms ease,
+      opacity 150ms ease;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-accent-strong);
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /*
+   * Secondary action — quiet neutral, used for Cancel/back/etc.
+   */
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 3rem;
+    padding: 0 1.25rem;
+    background: transparent;
+    color: var(--color-fg);
+    border: 1px solid var(--color-line);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    transition:
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    border-color: var(--color-line-strong);
+  }
+
+  /*
+   * Skeleton block — used for loading states. Matches the cream surface
+   * with a slightly darker placeholder rectangle and Tailwind's built-in
+   * `animate-pulse`. No new dependency.
+   */
+  .skeleton {
+    background: var(--color-line);
+    animation: pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.55;
+    }
   }
 }

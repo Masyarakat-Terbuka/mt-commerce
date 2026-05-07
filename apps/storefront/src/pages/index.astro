@@ -1,42 +1,122 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProductGrid from "@/islands/ProductGrid.tsx";
-import { resolveApiUrl } from "@/lib/api";
+import { listFeaturedProducts, listCategories, resolveApiUrl } from "@/lib/api";
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
 
-const title = `${t("home.hero.title")} — mt-commerce`;
-const description = t("home.hero.subtitle");
+const title = `${t("home.hero.headline")} — mt-commerce`;
+const description = t("home.hero.subhead");
 
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
+
+// Build-time fetch — gets us a hero image and the category strip without
+// waiting for client hydration. If the API is down we render the page
+// without the hero image; the featured grid still hydrates client-side.
+const featured = await listFeaturedProducts(4);
+const categories = await listCategories();
+
+// Pick the first featured product carrying a real image as the hero
+// background. Falls through to the cream surface if none is available.
+const heroImage = featured.find((p) => p.hasImage) ?? null;
 ---
 
 <BaseLayout title={title} description={description}>
-  <section class="py-8 md:py-12">
-    <h1 class="max-w-2xl text-2xl font-semibold text-neutral-900 md:text-4xl">
-      {t("home.hero.title")}
-    </h1>
-    <p class="mt-3 max-w-2xl text-base text-neutral-600 md:text-lg">
-      {t("home.hero.subtitle")}
-    </p>
+  {/* Hero — editorial, full-bleed photograph behind a calm headline. */}
+  <section
+    class="relative w-full overflow-hidden bg-cream"
+    aria-labelledby="home-hero"
+  >
+    <div class="relative aspect-[4/5] w-full md:aspect-auto md:h-[60vh] md:max-h-[680px]">
+      {
+        heroImage && (
+          <img
+            src={heroImage.imageUrl}
+            alt={heroImage.imageAlt[locale]}
+            loading="eager"
+            decoding="async"
+            class="absolute inset-0 h-full w-full object-cover"
+          />
+        )
+      }
+      {/*
+        A soft cream wash sits on top of the image so the headline stays
+        legible regardless of which photo wins the hero slot. Single-color,
+        no gradient — keeps the calm direction.
+      */}
+      <div class="absolute inset-0 bg-cream/60"></div>
+
+      <div class="relative mx-auto flex h-full max-w-[1280px] flex-col justify-end px-4 pb-10 md:px-8 md:pb-16">
+        <h1 id="home-hero" class="t-display max-w-[16ch] text-fg">
+          {t("home.hero.headline")}
+        </h1>
+        <p class="mt-4 max-w-[44ch] t-body text-fg">
+          {t("home.hero.subhead")}
+        </p>
+      </div>
+    </div>
   </section>
 
-  <section class="py-4">
-    <h2 class="mb-4 text-lg font-semibold text-neutral-900">{t("home.featured")}</h2>
-    <ProductGrid
-      client:load
-      apiUrl={apiUrl}
-      locale={intlLocale}
-      detailHrefBase={detailHrefBase}
-      emptyLabel={t("products.list.empty")}
-      loadingLabel={t("products.list.loading")}
-      errorLabel={t("products.list.error")}
-      query={{ pageSize: 4, sort: "newest" }}
-      limit={4}
-    />
+  {/* Featured grid */}
+  <section class="mx-auto max-w-[1280px] px-4 py-16 md:px-8 md:py-24">
+    <div class="flex items-baseline justify-between">
+      <h2 class="t-h1 text-fg">{t("home.featured.title")}</h2>
+      <a
+        href={localePath(locale, "/products")}
+        class="t-caption uppercase tracking-wide text-muted transition-colors duration-150 hover:text-accent"
+      >
+        {t("products.list.title")} &rarr;
+      </a>
+    </div>
+    <div class="mt-8">
+      <ProductGrid
+        client:load
+        apiUrl={apiUrl}
+        locale={intlLocale}
+        detailHrefBase={detailHrefBase}
+        emptyLabel={t("products.list.empty")}
+        errorLabel={t("products.list.error")}
+        skeletonLabel={t("products.list.skeleton_aria")}
+        query={{ pageSize: 4, sort: "newest" }}
+        limit={4}
+        skeletonCount={4}
+      />
+    </div>
   </section>
+
+  {/* Category strip — text only, separated by middots. */}
+  {
+    categories.length > 0 && (
+      <section class="border-t border-line">
+        <div class="mx-auto max-w-[1280px] px-4 py-10 md:px-8 md:py-12">
+          <h2 class="t-caption uppercase tracking-wide text-muted">
+            {t("home.categories.title")}
+          </h2>
+          <ul class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 t-body">
+            {
+              categories.map((c, idx) => (
+                <li class="flex items-center gap-x-2">
+                  <a
+                    href={`${localePath(locale, "/products")}?category=${c.slug}`}
+                    class="text-fg transition-colors duration-150 hover:text-accent"
+                  >
+                    {c.name[locale]}
+                  </a>
+                  {idx < categories.length - 1 && (
+                    <span class="text-faint" aria-hidden="true">
+                      ·
+                    </span>
+                  )}
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </section>
+    )
+  }
 </BaseLayout>

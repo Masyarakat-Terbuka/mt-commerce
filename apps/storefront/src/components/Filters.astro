@@ -1,4 +1,26 @@
 ---
+/**
+ * Filters — left rail on desktop, native `<dialog>` on mobile.
+ *
+ * The form posts back to the listing page with a plain GET so the
+ * filtered URL is shareable and the back button works. There is no
+ * client-side state — every interaction is a navigation.
+ *
+ * Markup is identical between desktop and mobile; only the wrapper
+ * differs. CSS handles the breakpoint switch:
+ *
+ *   - Desktop (md+): rendered inline in the page's left rail.
+ *   - Mobile: a `<dialog>` opened by a "Filter" button. The dialog
+ *     uses the `open` attribute via `dialog.showModal()` triggered
+ *     by inline JS that the listing page injects; we keep the
+ *     button/dialog pair entirely native to avoid a React island
+ *     just for a panel toggle.
+ *
+ * The radio inputs for sort/category use `name="sort"`/`name="category"`
+ * with each option's value, so on submit the URL carries the chosen
+ * value verbatim. An "All" option for category clears the filter
+ * (empty value).
+ */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 import { listCategories } from "@/lib/api";
 
@@ -10,95 +32,150 @@ export interface Props {
     maxPrice?: string;
     sort?: string;
   };
+  /**
+   * When true, render only the inline form fields (used inside the mobile
+   * `<dialog>`). When false (default), render the desktop sidebar wrapper
+   * with the form inside.
+   */
+  inline?: boolean;
 }
 
-const { active } = Astro.props;
+const { active, inline = false } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
 const categories = await listCategories();
 const formAction = localePath(locale, "/products");
+
+const sortOptions = [
+  { value: "newest", label: t("products.sort.newest") },
+  { value: "price_asc", label: t("products.sort.price_asc") },
+  { value: "price_desc", label: t("products.sort.price_desc") },
+] as const;
+
+const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes(active.sort)
+  ? active.sort
+  : "newest";
 ---
 
 <form
   method="get"
   action={formAction}
-  class="grid grid-cols-1 gap-3 rounded-lg border border-neutral-200 bg-white p-4 md:grid-cols-5"
+  class:list={[
+    "flex flex-col gap-8 t-body",
+    inline ? "" : "md:sticky md:top-20 md:self-start",
+  ]}
 >
-  <label class="flex flex-col gap-1 text-xs font-medium text-neutral-700">
-    {t("products.filters.search")}
+  {/* Search */}
+  <div>
+    <label class="t-caption block uppercase tracking-wide text-muted" for="filter-search">
+      {t("products.filters.search")}
+    </label>
     <input
+      id="filter-search"
       type="search"
       name="q"
       value={active.search ?? ""}
-      class="rounded border border-neutral-300 px-2 py-1.5 text-sm"
+      class="mt-2 w-full border-b border-line bg-transparent py-1.5 text-fg outline-none transition-colors duration-150 focus:border-accent"
     />
-  </label>
+  </div>
 
-  <label class="flex flex-col gap-1 text-xs font-medium text-neutral-700">
-    {t("products.filters.category")}
-    <select
-      name="category"
-      class="rounded border border-neutral-300 px-2 py-1.5 text-sm"
-    >
-      <option value="">—</option>
+  {/* Category — radio list */}
+  <fieldset>
+    <legend class="t-caption uppercase tracking-wide text-muted">
+      {t("products.filters.category")}
+    </legend>
+    <ul class="mt-3 space-y-2">
+      <li>
+        <label class="flex cursor-pointer items-center gap-2.5 text-fg">
+          <input
+            type="radio"
+            name="category"
+            value=""
+            checked={!active.category}
+            class="h-3.5 w-3.5 accent-accent"
+          />
+          <span>{t("products.filters.category_all")}</span>
+        </label>
+      </li>
       {
         categories.map((c) => (
-          <option value={c.slug} selected={active.category === c.slug}>
-            {c.name[locale]}
-          </option>
+          <li>
+            <label class="flex cursor-pointer items-center gap-2.5 text-fg">
+              <input
+                type="radio"
+                name="category"
+                value={c.slug}
+                checked={active.category === c.slug}
+                class="h-3.5 w-3.5 accent-accent"
+              />
+              <span>{c.name[locale]}</span>
+            </label>
+          </li>
         ))
       }
-    </select>
-  </label>
+    </ul>
+  </fieldset>
 
-  <label class="flex flex-col gap-1 text-xs font-medium text-neutral-700">
-    {t("products.filters.price")} (min)
-    <input
-      type="number"
-      name="min"
-      inputmode="numeric"
-      min="0"
-      value={active.minPrice ?? ""}
-      class="rounded border border-neutral-300 px-2 py-1.5 text-sm"
-    />
-  </label>
+  {/* Price range */}
+  <fieldset>
+    <legend class="t-caption uppercase tracking-wide text-muted">
+      {t("products.filters.price")}
+    </legend>
+    <div class="mt-3 flex items-center gap-3">
+      <label class="flex flex-1 flex-col">
+        <span class="sr-only">{t("products.filters.price_min")}</span>
+        <input
+          type="number"
+          name="min"
+          inputmode="numeric"
+          min="0"
+          placeholder={t("products.filters.price_min")}
+          value={active.minPrice ?? ""}
+          class="price-figure border-b border-line bg-transparent py-1.5 text-fg outline-none transition-colors duration-150 focus:border-accent"
+        />
+      </label>
+      <span class="text-faint" aria-hidden="true">—</span>
+      <label class="flex flex-1 flex-col">
+        <span class="sr-only">{t("products.filters.price_max")}</span>
+        <input
+          type="number"
+          name="max"
+          inputmode="numeric"
+          min="0"
+          placeholder={t("products.filters.price_max")}
+          value={active.maxPrice ?? ""}
+          class="price-figure border-b border-line bg-transparent py-1.5 text-fg outline-none transition-colors duration-150 focus:border-accent"
+        />
+      </label>
+    </div>
+  </fieldset>
 
-  <label class="flex flex-col gap-1 text-xs font-medium text-neutral-700">
-    {t("products.filters.price")} (max)
-    <input
-      type="number"
-      name="max"
-      inputmode="numeric"
-      min="0"
-      value={active.maxPrice ?? ""}
-      class="rounded border border-neutral-300 px-2 py-1.5 text-sm"
-    />
-  </label>
+  {/* Sort — radio list */}
+  <fieldset>
+    <legend class="t-caption uppercase tracking-wide text-muted">
+      {t("products.filters.sort")}
+    </legend>
+    <ul class="mt-3 space-y-2">
+      {
+        sortOptions.map((opt) => (
+          <li>
+            <label class="flex cursor-pointer items-center gap-2.5 text-fg">
+              <input
+                type="radio"
+                name="sort"
+                value={opt.value}
+                checked={activeSort === opt.value}
+                class="h-3.5 w-3.5 accent-accent"
+              />
+              <span>{opt.label}</span>
+            </label>
+          </li>
+        ))
+      }
+    </ul>
+  </fieldset>
 
-  <label class="flex flex-col gap-1 text-xs font-medium text-neutral-700">
-    Sort
-    <select
-      name="sort"
-      class="rounded border border-neutral-300 px-2 py-1.5 text-sm"
-    >
-      <option value="newest" selected={!active.sort || active.sort === "newest"}>
-        {t("products.sort.newest")}
-      </option>
-      <option value="price_asc" selected={active.sort === "price_asc"}>
-        {t("products.sort.price_asc")}
-      </option>
-      <option value="price_desc" selected={active.sort === "price_desc"}>
-        {t("products.sort.price_desc")}
-      </option>
-    </select>
-  </label>
-
-  <div class="md:col-span-5">
-    <button
-      type="submit"
-      class="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
-    >
-      {t("products.filters.search")}
-    </button>
-  </div>
+  <button type="submit" class="btn-primary w-full">
+    {t("products.filters.apply")}
+  </button>
 </form>

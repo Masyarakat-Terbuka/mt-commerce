@@ -1,14 +1,17 @@
 /**
  * AddToCartButton — interactive island.
  *
- * The Astro page passes the initial variant. `VariantSelector` (also an island)
- * may emit a `variant-change` CustomEvent on the document; this button picks
- * that up so the two islands stay in sync without a global store. When the
- * cart module lands this lifts to a shared client-side store (probably
- * `nanostores` or similar).
+ * Uses the `.btn-primary` utility from `global.css`, which is the only
+ * place the storefront renders the accent color on a filled surface.
  *
- * `onAdd` is a placeholder that just logs. The real implementation will call
- * the SDK (see ADR-0008).
+ * The Astro page passes the initial variant. `VariantSelector` (also an
+ * island) may emit a `variant-change` CustomEvent on the document; this
+ * button picks that up so the two islands stay in sync without a global
+ * store. When the cart module lands this lifts to a shared client-side
+ * store (probably `nanostores` or similar).
+ *
+ * `onAdd` is a placeholder that just logs. The real implementation will
+ * call the SDK (see ADR-0008).
  */
 import { useEffect, useState } from "react";
 
@@ -50,11 +53,7 @@ export default function AddToCartButton({
       type="button"
       onClick={onAdd}
       disabled={isSoldOut}
-      className={
-        isSoldOut
-          ? "w-full cursor-not-allowed rounded bg-neutral-200 px-4 py-2.5 text-sm font-medium text-neutral-500"
-          : "w-full rounded bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800"
-      }
+      className="btn-primary w-full"
     >
       {isSoldOut ? soldOutLabel : label}
     </button>

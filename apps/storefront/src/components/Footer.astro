@@ -1,19 +1,112 @@
 ---
+/**
+ * Footer — typographic, calm, no decoration.
+ *
+ * Two columns on mobile, four on desktop. Bottom row carries the
+ * copyright and a quiet language switcher mirroring the header. No
+ * social icons, no newsletter signup — both are deferred until they
+ * have something real to point at.
+ */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
 const year = new Date().getFullYear();
+
+// Mirror the header's locale-swap logic so the footer switcher stays in
+// sync with whichever path the visitor is on.
+const currentPath = Astro.url.pathname;
+const stripped = currentPath.replace(/^\/(en|id)(?=\/|$)/, "") || "/";
+const idHref = localePath("id", stripped);
+const enHref = localePath("en", stripped);
+
+const columns = [
+  {
+    title: t("footer.col.about.title"),
+    links: [
+      { label: t("footer.col.about.story"), href: localePath(locale, "/about") },
+      { label: t("footer.col.about.principles"), href: localePath(locale, "/about/principles") },
+      { label: t("footer.col.about.contact"), href: localePath(locale, "/contact") },
+    ],
+  },
+  {
+    title: t("footer.col.help.title"),
+    links: [
+      { label: t("footer.col.help.shipping"), href: localePath(locale, "/help/shipping") },
+      { label: t("footer.col.help.returns"), href: localePath(locale, "/help/returns") },
+      { label: t("footer.col.help.faq"), href: localePath(locale, "/help/faq") },
+    ],
+  },
+  {
+    title: t("footer.col.community.title"),
+    links: [
+      { label: t("footer.col.community.github"), href: "https://github.com" },
+      { label: t("footer.col.community.docs"), href: localePath(locale, "/docs") },
+      { label: t("footer.col.community.contributing"), href: localePath(locale, "/contributing") },
+    ],
+  },
+  {
+    title: t("footer.col.legal.title"),
+    links: [
+      { label: t("footer.col.legal.terms"), href: localePath(locale, "/legal/terms") },
+      { label: t("footer.col.legal.privacy"), href: localePath(locale, "/legal/privacy") },
+      { label: t("footer.col.legal.license"), href: localePath(locale, "/legal/license") },
+    ],
+  },
+];
 ---
 
-<footer class="mt-16 border-t border-neutral-200 bg-neutral-50">
-  <div
-    class="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-sm text-neutral-600 md:flex-row md:items-center md:justify-between"
-  >
-    <p>{year} {t("footer.copyright")}</p>
-    <ul class="flex gap-4">
-      <li><a class="hover:text-neutral-900" href={localePath(locale, "/about")}>{t("footer.about")}</a></li>
-      <li><a class="hover:text-neutral-900" href={localePath(locale, "/contact")}>{t("footer.contact")}</a></li>
-    </ul>
+<footer class="mt-24 border-t border-line bg-cream">
+  <div class="mx-auto max-w-[1280px] px-4 py-12 md:px-8 md:py-16">
+    <div class="grid grid-cols-2 gap-8 md:grid-cols-4 md:gap-12">
+      {
+        columns.map((col) => (
+          <div>
+            <h3 class="t-caption uppercase tracking-wide text-muted">{col.title}</h3>
+            <ul class="mt-4 space-y-2">
+              {col.links.map((link) => (
+                <li>
+                  <a
+                    class="t-body text-fg transition-colors duration-150 hover:text-accent"
+                    href={link.href}
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+
+    <div
+      class="mt-12 flex flex-col items-start gap-3 border-t border-line pt-6 md:mt-16 md:flex-row md:items-center md:justify-between"
+    >
+      <p class="t-caption text-muted">© {year} {t("footer.copyright")}</p>
+      <div class="flex items-center gap-1 t-caption uppercase tracking-wide">
+        <a
+          href={idHref}
+          aria-current={locale === "id" ? "true" : undefined}
+          class:list={[
+            "px-2 py-1 transition-colors duration-150",
+            locale === "id" ? "text-fg" : "text-muted hover:text-fg",
+          ]}
+        >
+          ID
+        </a>
+        <span class="text-faint" aria-hidden="true">·</span>
+        <a
+          href={enHref}
+          aria-current={locale === "en" ? "true" : undefined}
+          class:list={[
+            "px-2 py-1 transition-colors duration-150",
+            locale === "en" ? "text-fg" : "text-muted hover:text-fg",
+          ]}
+        >
+          EN
+        </a>
+      </div>
+    </div>
   </div>
 </footer>

@@ -93,6 +93,8 @@ function makeProduct(overrides: Partial<Product> = {}): Product {
     description: overrides.description ?? null,
     status: overrides.status ?? "active",
     defaultCurrency: overrides.defaultCurrency ?? "IDR",
+    imageUrl: overrides.imageUrl ?? null,
+    imageAlt: overrides.imageAlt ?? null,
     categoryIds: overrides.categoryIds ?? [],
     variants: overrides.variants ?? [makeVariant()],
     createdAt: overrides.createdAt ?? fixedDate,

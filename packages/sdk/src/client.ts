@@ -33,6 +33,9 @@
 import { fromJSON as moneyFromJSON } from "@mt-commerce/core/money";
 import { ApiError, isApiErrorEnvelope } from "./errors.js";
 import type {
+  AdminListProductsQuery,
+  AuthMe,
+  AuthSession,
   Category,
   City,
   District,
@@ -44,8 +47,11 @@ import type {
   Product,
   Province,
   RequestOptions,
+  SignInInput,
   Subdistrict,
   Variant,
+  WireAuthMe,
+  WireAuthSession,
   WireCategory,
   WireCity,
   WireDistrict,
@@ -99,6 +105,13 @@ function toProduct(w: WireProduct): Product {
     description: w.description,
     status: w.status,
     defaultCurrency: w.defaultCurrency,
+    // Coalesce wire-optional image fields to `null`. An older API that
+    // predates the `0006_product_images` migration omits these entirely;
+    // newer ones send `string | null` explicitly. The domain shape stays
+    // a strict `string | null` either way so callers do not branch on
+    // "missing vs explicitly null".
+    imageUrl: w.imageUrl ?? null,
+    imageAlt: w.imageAlt ?? null,
     categoryIds: w.categoryIds,
     variants: w.variants.map(toVariant),
     createdAt: new Date(w.createdAt),
@@ -223,14 +236,27 @@ interface RequestContext {
   fetchImpl: FetchLike;
   baseUrl: string;
   defaultTimeoutMs: number;
+  /**
+   * When true (admin client), every request rides with `credentials: "include"`
+   * so the Better Auth session cookie reaches the API across origins. Storefront
+   * traffic stays anonymous and skips this — the storefront talks to public
+   * read endpoints and never authenticates with a cookie in v0.1.
+   */
+  withCredentials: boolean;
+}
+
+interface RequestInternalOptions extends RequestOptions {
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  body?: unknown;
 }
 
 async function request<T>(
   ctx: RequestContext,
   path: string,
-  options: RequestOptions | undefined,
+  options: RequestInternalOptions | undefined,
 ): Promise<T> {
   const url = `${ctx.baseUrl}${path}`;
+  const method = options?.method ?? "GET";
   const timeoutMs = options?.timeoutMs ?? ctx.defaultTimeoutMs;
   const callerAlreadyAborted = options?.signal?.aborted === true;
   if (callerAlreadyAborted) {
@@ -243,11 +269,20 @@ async function request<T>(
 
   const { signal, cleanup, timedOut } = composeAbort(timeoutMs, options?.signal);
 
+  const headers: Record<string, string> = { accept: "application/json" };
+  let body: string | undefined;
+  if (options?.body !== undefined) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify(options.body);
+  }
+
   let response: Response;
   try {
     response = await ctx.fetchImpl(url, {
-      method: "GET",
-      headers: { accept: "application/json" },
+      method,
+      headers,
+      ...(body !== undefined ? { body } : {}),
+      ...(ctx.withCredentials ? { credentials: "include" as const } : {}),
       signal,
     });
   } catch (err) {
@@ -356,8 +391,41 @@ export interface StorefrontApi {
   regions: StorefrontRegionsApi;
 }
 
+// ---- Admin surface --------------------------------------------------------
+
+export interface AdminAuthSessionsApi {
+  list(options?: RequestOptions): Promise<AuthSession[]>;
+  revoke(sessionId: string, options?: RequestOptions): Promise<void>;
+}
+
+export interface AdminAuthApi {
+  me(options?: RequestOptions): Promise<AuthMe>;
+  signIn(input: SignInInput, options?: RequestOptions): Promise<AuthMe>;
+  signOut(options?: RequestOptions): Promise<void>;
+  sessions: AdminAuthSessionsApi;
+}
+
+export interface AdminProductsApi {
+  list(
+    query?: AdminListProductsQuery,
+    options?: RequestOptions,
+  ): Promise<Paginated<Product>>;
+  byId(id: string, options?: RequestOptions): Promise<Product>;
+}
+
+export interface AdminCategoriesApi {
+  list(options?: RequestOptions): Promise<Category[]>;
+}
+
+export interface AdminApi {
+  auth: AdminAuthApi;
+  products: AdminProductsApi;
+  categories: AdminCategoriesApi;
+}
+
 export interface MtCommerceClient {
   storefront: StorefrontApi;
+  admin: AdminApi;
 }
 
 export function createClient(options: ClientOptions): MtCommerceClient {
@@ -368,7 +436,12 @@ export function createClient(options: ClientOptions): MtCommerceClient {
     fetchImpl,
     baseUrl: trimTrailingSlash(options.baseUrl),
     defaultTimeoutMs: options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+    withCredentials: false,
   };
+  // Admin context piggybacks on the same base URL but flips the credentials
+  // flag so the session cookie travels on every call. Storefront traffic
+  // stays cookieless.
+  const adminCtx: RequestContext = { ...ctx, withCredentials: true };
 
   const storefront: StorefrontApi = {
     products: {
@@ -463,5 +536,130 @@ export function createClient(options: ClientOptions): MtCommerceClient {
     },
   };
 
-  return { storefront };
+  // -------------------------------------------------------------------------
+  // Admin surface
+  //
+  // Cookies travel on every request via `withCredentials: true`. The custom
+  // `/admin/v1/auth/me` endpoint returns both the auth user and the staff
+  // profile; we flatten that into a single `AuthMe` shape so consumers do
+  // not have to ifs `staff` themselves before deciding whether to render the
+  // shell.
+  //
+  // Sign-in and sign-out are owned by Better Auth at `/api/auth/*`. We post
+  // JSON to `/sign-in/email` and `/sign-out`, then immediately follow up
+  // with `me()` so the caller receives the role right away (the Better Auth
+  // response shape is internal to the framework; callers should trust the
+  // /me payload as the source of truth for role/displayName).
+  // -------------------------------------------------------------------------
+
+  const admin: AdminApi = {
+    auth: {
+      async me(requestOptions) {
+        const wire = await request<WireAuthMe>(
+          adminCtx,
+          "/admin/v1/auth/me",
+          requestOptions,
+        );
+        return {
+          user: wire.user,
+          role: wire.staff?.role ?? null,
+          displayName: wire.staff?.displayName ?? wire.user.name,
+        };
+      },
+      async signIn(input, requestOptions) {
+        await request<unknown>(adminCtx, "/api/auth/sign-in/email", {
+          ...(requestOptions ?? {}),
+          method: "POST",
+          body: input,
+        });
+        // Fetch the staff profile straight after sign-in. The Better Auth
+        // response does not carry our staff role; /me is authoritative.
+        const wire = await request<WireAuthMe>(
+          adminCtx,
+          "/admin/v1/auth/me",
+          requestOptions,
+        );
+        return {
+          user: wire.user,
+          role: wire.staff?.role ?? null,
+          displayName: wire.staff?.displayName ?? wire.user.name,
+        };
+      },
+      async signOut(requestOptions) {
+        await request<unknown>(adminCtx, "/api/auth/sign-out", {
+          ...(requestOptions ?? {}),
+          method: "POST",
+          // Better Auth accepts an empty JSON body; sending `{}` keeps the
+          // content-type negotiation predictable across runtimes.
+          body: {},
+        });
+      },
+      sessions: {
+        async list(requestOptions) {
+          const wire = await request<WireListEnvelope<WireAuthSession>>(
+            adminCtx,
+            "/admin/v1/auth/sessions",
+            requestOptions,
+          );
+          return wire.data.map((s) => ({
+            id: s.id,
+            expiresAt: new Date(s.expiresAt),
+            ipAddress: s.ipAddress,
+            userAgent: s.userAgent,
+            createdAt: new Date(s.createdAt),
+          }));
+        },
+        async revoke(sessionId, requestOptions) {
+          await request<unknown>(
+            adminCtx,
+            `/admin/v1/auth/sessions/${encodeURIComponent(sessionId)}`,
+            { ...(requestOptions ?? {}), method: "DELETE" },
+          );
+        },
+      },
+    },
+    products: {
+      async list(query, requestOptions) {
+        const qs = buildQuery({
+          status: query?.status,
+          categoryId: query?.categoryId,
+          search: query?.search,
+          page: query?.page,
+          pageSize: query?.pageSize,
+          sort: query?.sort,
+        });
+        const wire = await request<WirePaginated<WireProduct>>(
+          adminCtx,
+          `/admin/v1/products${qs}`,
+          requestOptions,
+        );
+        return {
+          data: wire.data.map(toProduct),
+          total: wire.total,
+          page: wire.page,
+          pageSize: wire.pageSize,
+        };
+      },
+      async byId(id, requestOptions) {
+        const wire = await request<WireProduct>(
+          adminCtx,
+          `/admin/v1/products/${encodeURIComponent(id)}`,
+          requestOptions,
+        );
+        return toProduct(wire);
+      },
+    },
+    categories: {
+      async list(requestOptions) {
+        const wire = await request<WireListEnvelope<WireCategory>>(
+          adminCtx,
+          "/admin/v1/categories",
+          requestOptions,
+        );
+        return wire.data.map(toCategory);
+      },
+    },
+  };
+
+  return { storefront, admin };
 }

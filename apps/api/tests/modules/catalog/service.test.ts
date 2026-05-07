@@ -58,6 +58,8 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         description: row.description ?? null,
         status: row.status ?? "draft",
         defaultCurrency: row.defaultCurrency,
+        imageUrl: row.imageUrl ?? null,
+        imageAlt: row.imageAlt ?? null,
         createdAt: now(),
         updatedAt: now(),
         deletedAt: null,

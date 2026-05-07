@@ -3,7 +3,9 @@
  * Renders a Money value as a localized currency string.
  *
  * Uses `format` from `@mt-commerce/core/money` so the formatting rules live
- * with the type, not in the storefront.
+ * with the type, not in the storefront. The `.price-figure` class enforces
+ * tabular numerals so column-aligned prices in product grids do not wobble
+ * between rows.
  */
 import { format as formatMoney, type Money } from "@mt-commerce/core/money";
 
@@ -20,7 +22,7 @@ const { money, locale = "id-ID", strike = false, class: className } = Astro.prop
 const formatted = formatMoney(money, { locale });
 const classes = [
   "price-figure",
-  strike ? "text-neutral-500 line-through" : "text-neutral-900",
+  strike ? "text-faint line-through" : "text-fg",
   className ?? "",
 ]
   .filter(Boolean)

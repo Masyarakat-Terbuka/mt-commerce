@@ -69,7 +69,18 @@ export type StoreProduct = {
   slug: string;
   title: { id: string; en: string };
   description: { id: string; en: string };
+  /**
+   * Always a non-empty string for `<img src>` purposes. Falls back to a
+   * neutral placeholder when the API returns no image, so downstream
+   * components do not need to branch.
+   */
   imageUrl: string;
+  /**
+   * `true` when the product carries a real CDN image URL; `false` when
+   * we have substituted a placeholder. Cards use this to render a
+   * subtler "no photo yet" surface instead of a blurry placeholder.
+   */
+  hasImage: boolean;
   imageAlt: { id: string; en: string };
   categorySlug: string;
   variants: StoreVariant[];
@@ -121,14 +132,13 @@ function computeBasePrice(product: SdkProduct): Money {
 }
 
 /**
- * Best-effort image URL — the API has no image field yet (see the catalog
- * module). We render a neutral placeholder until the field lands. This
- * keeps `<img src>` non-empty so the layout is stable.
+ * Empty 1x1 transparent placeholder used when a product has no image yet.
+ * Inline data URL so the storefront stays useful even when the placeholder
+ * CDN is unreachable. Cards detect this case via `hasImage: false` and
+ * render a clean cream surface instead of an empty pixel.
  */
-function placeholderImage(title: string): string {
-  const text = encodeURIComponent(title.slice(0, 24));
-  return `https://placehold.co/800x800/png?text=${text}`;
-}
+const TRANSPARENT_PLACEHOLDER =
+  "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201%201%22%2F%3E";
 
 function adaptProduct(product: SdkProduct): StoreProduct {
   const title = product.title;
@@ -142,13 +152,24 @@ function adaptProduct(product: SdkProduct): StoreProduct {
     // Treat everything as available; replace once the SDK exposes inventory.
     available: true,
   }));
+
+  // Image fields are nullable from the SDK. We surface a non-empty
+  // `imageUrl` (real or transparent placeholder) plus a `hasImage` flag
+  // so cards/detail pages can branch cleanly without re-checking nullity.
+  // Alt text falls back to the title — better than an empty `alt`, which
+  // would make the image invisible to screen readers.
+  const imageUrl = product.imageUrl ?? TRANSPARENT_PLACEHOLDER;
+  const hasImage = product.imageUrl !== null && product.imageUrl !== undefined;
+  const altRaw = product.imageAlt ?? title;
+
   return {
     id: product.id,
     slug: product.slug,
     title: { id: title, en: title },
     description: { id: description, en: description },
-    imageUrl: placeholderImage(title),
-    imageAlt: { id: title, en: title },
+    imageUrl,
+    hasImage,
+    imageAlt: { id: altRaw, en: altRaw },
     // The API exposes `categoryIds`; the storefront filters by slug. Use the
     // first category id as a slug-like identifier until the SDK joins the
     // category in the product payload. Empty string falls through to "no

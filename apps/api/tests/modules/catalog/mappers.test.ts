@@ -67,6 +67,8 @@ describe("toProduct", () => {
       description: "D",
       status: "active",
       defaultCurrency: "IDR",
+      imageUrl: null,
+      imageAlt: null,
       createdAt: fixedDate,
       updatedAt: fixedDate,
       deletedAt: null,

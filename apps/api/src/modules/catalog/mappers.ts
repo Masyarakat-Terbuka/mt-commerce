@@ -70,6 +70,8 @@ export function toProduct(
     description: row.description ?? null,
     status: row.status as ProductStatus,
     defaultCurrency: row.defaultCurrency,
+    imageUrl: row.imageUrl ?? null,
+    imageAlt: row.imageAlt ?? null,
     categoryIds,
     variants: variants.map((v) => toVariant(v)),
     createdAt: row.createdAt,

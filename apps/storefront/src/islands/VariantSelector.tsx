@@ -1,6 +1,10 @@
 /**
  * VariantSelector — interactive island.
  *
+ * Selected state uses the single accent color (terracotta border + bold
+ * label). Unselected chips stay in the warm-neutral palette. Disabled
+ * (sold-out) chips render with a strikethrough and stay unclickable.
+ *
  * When a variant is selected, this island:
  *   1. Updates its own displayed price using local React state.
  *   2. Dispatches a `variant-change` CustomEvent on the document so other
@@ -54,42 +58,57 @@ export default function VariantSelector({
     );
   }
 
+  // If there is only a single variant, hide the chips entirely — picking
+  // among one option is noise. The price still renders below.
+  const showChips = variants.length > 1;
+
   return (
-    <div className="space-y-3">
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">{heading}</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {variants.map((v) => {
-            const isSelected = v.id === selected.id;
-            return (
-              <button
-                key={v.id}
-                type="button"
-                onClick={() => onSelect(v)}
-                disabled={!v.available}
-                aria-pressed={isSelected}
-                className={
-                  !v.available
-                    ? "cursor-not-allowed rounded border border-neutral-200 px-3 py-1.5 text-sm text-neutral-400 line-through"
-                    : isSelected
-                      ? "rounded border border-neutral-900 bg-neutral-900 px-3 py-1.5 text-sm text-white"
-                      : "rounded border border-neutral-300 px-3 py-1.5 text-sm hover:border-neutral-500"
-                }
-              >
-                {v.name}
-              </button>
-            );
-          })}
+    <div className="space-y-4">
+      {showChips && (
+        <div>
+          <p className="t-caption uppercase tracking-wide text-muted">{heading}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {variants.map((v) => {
+              const isSelected = v.id === selected.id;
+              if (!v.available) {
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    disabled
+                    className="cursor-not-allowed border border-line px-4 py-2 t-body text-faint line-through"
+                  >
+                    {v.name}
+                  </button>
+                );
+              }
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => onSelect(v)}
+                  aria-pressed={isSelected}
+                  className={
+                    isSelected
+                      ? "border border-accent px-4 py-2 t-body font-medium text-fg transition-colors duration-150"
+                      : "border border-line px-4 py-2 t-body text-fg transition-colors duration-150 hover:border-line-strong"
+                  }
+                >
+                  {v.name}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex items-baseline gap-3">
-        <span className="price-figure text-xl font-semibold text-neutral-900">
+        <span className="price-figure t-h1 text-fg">
           {formatMoney(selected.price, { locale })}
         </span>
         {selected.compareAt && (
           <span
-            className="price-figure text-sm text-neutral-500 line-through"
+            className="price-figure t-body text-faint line-through"
             aria-label={compareAtLabel}
           >
             {formatMoney(selected.compareAt, { locale })}

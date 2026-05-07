@@ -100,6 +100,8 @@ export class CatalogServiceImpl implements CatalogService {
       description: input.description ?? null,
       status: input.status ?? "draft",
       defaultCurrency: input.defaultCurrency,
+      imageUrl: input.imageUrl ?? null,
+      imageAlt: input.imageAlt ?? null,
     });
 
     if (input.categoryIds && input.categoryIds.length > 0) {
@@ -231,6 +233,8 @@ export class CatalogServiceImpl implements CatalogService {
       ...(patch.defaultCurrency !== undefined
         ? { defaultCurrency: patch.defaultCurrency }
         : {}),
+      ...(patch.imageUrl !== undefined ? { imageUrl: patch.imageUrl } : {}),
+      ...(patch.imageAlt !== undefined ? { imageAlt: patch.imageAlt } : {}),
     });
     if (!updated) {
       throw new NotFoundError("Product not found.", { productId });

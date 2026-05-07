@@ -25,6 +25,22 @@ export const products = pgTable("products", {
   description: text("description"),
   status: productStatus("status").notNull().default("draft"),
   defaultCurrency: text("default_currency").notNull(),
+  /**
+   * Primary product image URL. Nullable while images are managed externally
+   * (Unsplash/CDN URLs in seeds, eventually a media-upload pipeline). The
+   * storefront falls back to a neutral placeholder when null. A separate
+   * `product_images` table is intentionally deferred: most v0.1 catalogs
+   * carry one hero photo per product, and a single nullable column keeps
+   * mappers, wire shapes, and the SDK simple. The follow-up upload module
+   * will introduce the multi-image table and migrate this column then.
+   */
+  imageUrl: text("image_url"),
+  /**
+   * Alt text for `image_url`. Stored as a single string for parity with
+   * `description`; localization of alt text follows whenever the rest of
+   * the catalog grows translation columns.
+   */
+  imageAlt: text("image_alt"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

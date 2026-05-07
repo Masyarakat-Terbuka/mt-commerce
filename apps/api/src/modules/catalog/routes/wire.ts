@@ -27,6 +27,10 @@ export interface WireProduct {
   description: string | null;
   status: ProductStatus;
   defaultCurrency: string;
+  /** Primary product image URL or null. */
+  imageUrl: string | null;
+  /** Alt text for `imageUrl`, or null. */
+  imageAlt: string | null;
   categoryIds: string[];
   variants: WireVariant[];
   createdAt: string;
@@ -88,6 +92,8 @@ export function toWireProduct(product: Product): WireProduct {
     description: product.description,
     status: product.status,
     defaultCurrency: product.defaultCurrency,
+    imageUrl: product.imageUrl,
+    imageAlt: product.imageAlt,
     categoryIds: product.categoryIds,
     variants: product.variants.map((v) => toWireVariant(v)),
     createdAt: product.createdAt.toISOString(),
