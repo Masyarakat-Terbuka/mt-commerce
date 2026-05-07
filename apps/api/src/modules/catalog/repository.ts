@@ -13,7 +13,7 @@
  * Every method accepts an optional `tx` so callers can run multi-statement
  * work in a single transaction. The default uses the module-level `db`.
  */
-import { and, asc, desc, eq, ilike, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as defaultDb } from "../../db/client.js";
 import {
@@ -32,6 +32,7 @@ import {
   type ProductVariantRow,
 } from "../../db/schema/index.js";
 import type * as schema from "../../db/schema/index.js";
+import { DEFAULT_LOCALE, type KnownLocale } from "./i18n.js";
 import type { ProductSort, ProductStatus } from "./types.js";
 
 /**
@@ -62,6 +63,32 @@ export interface ProductListFilters {
   page: number;
   pageSize: number;
   sort: ProductSort;
+  /**
+   * Locale used for any translated-field predicate (search ILIKE on title).
+   * Defaults to `DEFAULT_LOCALE` ("id"). The repository never resolves the
+   * full translation blob — that's the mapper's job — but search must know
+   * which locale's title to ILIKE against.
+   */
+  locale?: KnownLocale;
+}
+
+/**
+ * Build a JSONB ->> expression for a translated text field. Postgres
+ * `translations->>'<locale>'` returns the locale blob as text — but we want
+ * a *field* inside that blob, so we chain `->` (JSON) then `->>` (text):
+ *
+ *     translations -> 'id' ->> 'title'
+ *
+ * The locale and field names are bound as parameters via the sql template,
+ * not interpolated as raw SQL — so there is no injection surface even if
+ * a future caller passes user input.
+ */
+function translatedField(
+  column: import("drizzle-orm/pg-core").AnyPgColumn,
+  locale: KnownLocale,
+  field: string,
+): SQL<string | null> {
+  return sql<string | null>`${column} -> ${locale} ->> ${field}`;
 }
 
 export interface ProductListResult {
@@ -121,11 +148,24 @@ export function createCatalogRepository(db: Db = defaultDb) {
         conditions.push(eq(products.status, filters.status));
       }
       if (filters.search) {
-        // ILIKE on title is sufficient for v0.1; full-text search lands later.
-        // Escape `%`, `_`, and `\` so the user-supplied term cannot smuggle
-        // wildcards into the pattern.
+        // ILIKE on the resolved-locale title in the JSONB column. Per ADR-0010
+        // we do not search across locales for v0.1 — the user is searching in
+        // their viewing locale, which is what they see on screen.
+        //
+        // We escape `%`, `_`, and `\` so the user-supplied term cannot smuggle
+        // wildcards into the pattern. The JSONB extraction uses parameters
+        // for both the locale key and the field name (no string concat into
+        // SQL), so even though the locale comes from a typed enum today, the
+        // expression remains safe if a future caller passes user input.
+        //
+        // TODO (v0.2): a `tsvector` generated column or a partial GIN over
+        // `translations` would let us search across locales without a per-row
+        // table scan. Recorded in ADR-0010 ("Negative consequences").
         const safe = escapeLikePattern(filters.search);
-        conditions.push(ilike(products.title, `%${safe}%`));
+        const locale = filters.locale ?? DEFAULT_LOCALE;
+        conditions.push(
+          sql`lower(${translatedField(products.translations, locale, "title")}) LIKE lower(${`%${safe}%`})`,
+        );
       }
       if (filters.categoryId) {
         const productIds = db
@@ -315,7 +355,14 @@ export function createCatalogRepository(db: Db = defaultDb) {
     },
 
     async listCategories(): Promise<CategoryRow[]> {
-      return db.select().from(categories).orderBy(asc(categories.name));
+      // TODO (v0.2): order by the resolved-locale name. The translated field
+      // sits inside JSONB, so a deterministic alphabetical order requires a
+      // JSONB-aware expression (`translations -> '<locale>' ->> 'name'`) and
+      // ideally a generated column or expression index — neither is in scope
+      // for v0.1. For now we order by `slug`, which is a stable URL-safe
+      // ASCII string available across locales and indexed via the unique
+      // constraint, so the result is deterministic and cheap.
+      return db.select().from(categories).orderBy(asc(categories.slug));
     },
 
     async updateCategory(

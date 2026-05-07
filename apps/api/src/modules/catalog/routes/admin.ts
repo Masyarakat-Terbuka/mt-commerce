@@ -22,6 +22,9 @@
  *   - Domain types are converted to wire shapes by `toWireProduct`,
  *     `toWireVariant`, etc., which keep `bigint` amounts as
  *     `MoneyJSON` (string amounts) per ADR-0007.
+ *   - Read paths accept `?locale=` so the admin can preview each locale
+ *     without flipping a global UI setting; it follows the same resolution
+ *     order as the storefront (query → Accept-Language → DEFAULT_LOCALE).
  */
 import { Hono } from "hono";
 import type { ZodTypeAny, z } from "zod";
@@ -49,6 +52,7 @@ import {
   updateVariantSchema,
 } from "../types.js";
 import type { CatalogService } from "../service.js";
+import { localeFromRequest } from "./locale.js";
 
 /**
  * Read JSON from a request, returning `undefined` for empty bodies and
@@ -96,7 +100,8 @@ export function buildCatalogAdminRoutes(
       listProductsQuerySchema,
       Object.fromEntries(new URL(c.req.url).searchParams),
     );
-    const result = await service.listProducts(query);
+    const locale = localeFromRequest(c);
+    const result = await service.listProducts({ ...query, locale });
     return c.json({
       data: result.data.map((p) => toWireProduct(p)),
       total: result.total,
@@ -108,12 +113,14 @@ export function buildCatalogAdminRoutes(
   router.post("/products", async (c) => {
     const raw = await readJsonBody(c.req.raw);
     const input = parseOrThrow(createProductSchema, raw);
-    const product = await service.createProduct(input);
+    const locale = localeFromRequest(c);
+    const product = await service.createProduct(input, locale);
     return c.json(toWireProduct(product), 201);
   });
 
   router.get("/products/:id", async (c) => {
-    const product = await service.getProductById(c.req.param("id"));
+    const locale = localeFromRequest(c);
+    const product = await service.getProductById(c.req.param("id"), locale);
     if (!product) throw new NotFoundError("Product not found.");
     return c.json(toWireProduct(product));
   });
@@ -121,7 +128,8 @@ export function buildCatalogAdminRoutes(
   router.patch("/products/:id", async (c) => {
     const raw = await readJsonBody(c.req.raw);
     const patch = parseOrThrow(updateProductSchema, raw);
-    const product = await service.updateProduct(c.req.param("id"), patch);
+    const locale = localeFromRequest(c);
+    const product = await service.updateProduct(c.req.param("id"), patch, locale);
     return c.json(toWireProduct(product));
   });
 
@@ -137,14 +145,16 @@ export function buildCatalogAdminRoutes(
   router.post("/products/:id/variants", async (c) => {
     const raw = await readJsonBody(c.req.raw);
     const input = parseOrThrow(createVariantSchema, raw);
-    const variant = await service.createVariant(c.req.param("id"), input);
+    const locale = localeFromRequest(c);
+    const variant = await service.createVariant(c.req.param("id"), input, locale);
     return c.json(toWireVariant(variant), 201);
   });
 
   router.patch("/variants/:id", async (c) => {
     const raw = await readJsonBody(c.req.raw);
     const patch = parseOrThrow(updateVariantSchema, raw);
-    const variant = await service.updateVariant(c.req.param("id"), patch);
+    const locale = localeFromRequest(c);
+    const variant = await service.updateVariant(c.req.param("id"), patch, locale);
     return c.json(toWireVariant(variant));
   });
 
@@ -158,21 +168,24 @@ export function buildCatalogAdminRoutes(
   // -------------------------------------------------------------------
 
   router.get("/categories", async (c) => {
-    const categories = await service.listCategories();
+    const locale = localeFromRequest(c);
+    const categories = await service.listCategories(locale);
     return c.json({ data: categories.map((cat) => toWireCategory(cat)) });
   });
 
   router.post("/categories", async (c) => {
     const raw = await readJsonBody(c.req.raw);
     const input = parseOrThrow(createCategorySchema, raw);
-    const category = await service.createCategory(input);
+    const locale = localeFromRequest(c);
+    const category = await service.createCategory(input, locale);
     return c.json(toWireCategory(category), 201);
   });
 
   router.patch("/categories/:id", async (c) => {
     const raw = await readJsonBody(c.req.raw);
     const patch = parseOrThrow(updateCategorySchema, raw);
-    const category = await service.updateCategory(c.req.param("id"), patch);
+    const locale = localeFromRequest(c);
+    const category = await service.updateCategory(c.req.param("id"), patch, locale);
     return c.json(toWireCategory(category));
   });
 

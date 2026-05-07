@@ -3,6 +3,7 @@
  * point here. Each module adds a re-export when it ships its tables.
  */
 export * from "./health.js";
+export * from "./translations.js";
 export * from "./categories.js";
 export * from "./products.js";
 export * from "./product_variants.js";

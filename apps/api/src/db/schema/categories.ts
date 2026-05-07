@@ -4,20 +4,36 @@
  * category. Shoppers reach categories through the `slug`, which must be
  * URL-safe and unique.
  *
+ * Localized display names (`name`) live in the `translations` JSONB column
+ * per ADR-0010. The slug stays a single value because it is part of the
+ * URL space and not a localized string.
+ *
  * Hard delete is permitted (see service layer). Categories are not financial
  * data and do not need an audit trail.
  */
 import {
+  jsonb,
   pgTable,
   text,
   timestamp,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import type { Translations } from "./translations.js";
+
+export type CategoryTranslationField = "name";
+export type CategoryTranslations = Translations<CategoryTranslationField>;
 
 export const categories = pgTable("categories", {
   id: text("id").primaryKey(),
   slug: text("slug").notNull().unique(),
-  name: text("name").notNull(),
+  /**
+   * Localized category names keyed by locale. See ADR-0010 for the shape
+   * and the resolver contract.
+   */
+  translations: jsonb("translations")
+    .$type<CategoryTranslations>()
+    .notNull()
+    .default({}),
   // Self-reference: a category may belong to a parent category. We type the
   // reference via `AnyPgColumn` because the table itself is not yet typed at
   // the point Drizzle inspects the column callback.

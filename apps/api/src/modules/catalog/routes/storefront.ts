@@ -12,6 +12,10 @@
  *     keeps the response simple and avoids a recursive payload that bloats
  *     for deeply nested categories. The storefront SDK will render a tree
  *     when needed.
+ *   - Locale resolution: every read pulls the locale from
+ *     `localeFromRequest(c)` (`?locale=` query → `Accept-Language` header →
+ *     `DEFAULT_LOCALE`) and forwards it to the service so the response
+ *     carries translated `title`/`description`/`name` strings per ADR-0010.
  */
 import { Hono } from "hono";
 import type { ZodTypeAny, z } from "zod";
@@ -28,6 +32,7 @@ import {
 } from "./wire.js";
 import { listProductsQuerySchema } from "../types.js";
 import type { CatalogService } from "../service.js";
+import { localeFromRequest } from "./locale.js";
 
 function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
   const result = schema.safeParse(raw);
@@ -54,7 +59,12 @@ export function buildCatalogStorefrontRoutes(
     // before handing to the service so a client-set `status=draft` is
     // ignored rather than silently honored.
     const safeQuery = { ...query, status: undefined };
-    const result = await service.listProducts({ ...safeQuery, activeOnly: true });
+    const locale = localeFromRequest(c);
+    const result = await service.listProducts({
+      ...safeQuery,
+      activeOnly: true,
+      locale,
+    });
     return c.json({
       data: result.data.map((p) => toWireProduct(p)),
       total: result.total,
@@ -64,8 +74,10 @@ export function buildCatalogStorefrontRoutes(
   });
 
   router.get("/products/:slug", async (c) => {
+    const locale = localeFromRequest(c);
     const product = await service.getProductBySlug(c.req.param("slug"), {
       activeOnly: true,
+      locale,
     });
     if (!product) throw new NotFoundError("Product not found.");
     return c.json(toWireProduct(product));
@@ -74,7 +86,8 @@ export function buildCatalogStorefrontRoutes(
   router.get("/categories", async (c) => {
     // Flat list with parent_id; the client builds the tree. See the file
     // comment for the rationale.
-    const categories = await service.listCategories();
+    const locale = localeFromRequest(c);
+    const categories = await service.listCategories(locale);
     const data: WireCategory[] = categories.map((cat) => toWireCategory(cat));
     return c.json({ data });
   });

@@ -50,6 +50,13 @@
       "when": 1747094400000,
       "tag": "0006_product_images",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1747180800000,
+      "tag": "0007_product_translations",
+      "breakpoints": true
     }
   ]
 }

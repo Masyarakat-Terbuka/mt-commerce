@@ -295,7 +295,7 @@ describe("admin routes /admin/v1/products", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           slug: "unknown-currency",
-          title: "Unknown Currency",
+          translations: { id: { title: "Unknown Currency" } },
           defaultCurrency: "XXX",
         }),
       }),

@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { CatalogServiceImpl } from "../../../src/modules/catalog/service.js";
+import { DEFAULT_LOCALE } from "../../../src/modules/catalog/i18n.js";
 import type {
   CategoryRow,
   InventoryLevelRow,
@@ -54,8 +55,7 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
       const product: ProductRow = {
         id: row.id,
         slug: row.slug,
-        title: row.title,
-        description: row.description ?? null,
+        translations: row.translations ?? {},
         status: row.status ?? "draft",
         defaultCurrency: row.defaultCurrency,
         imageUrl: row.imageUrl ?? null,
@@ -83,13 +83,20 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         rows = rows.filter((p) => p.status === filters.status);
       }
       if (filters.search) {
-        // Faithful in-memory port of repository.escapeLikePattern + ilike:
-        // an `_` or `%` in the *search term* matches itself only (not as a
-        // wildcard). The fake performs literal substring containment after
-        // escaping is conceptually applied — equivalent because we never
-        // interpret pattern metacharacters in the search term.
+        // Faithful in-memory port of repository.escapeLikePattern + the
+        // JSONB-aware ILIKE: a `%` or `_` in the *search term* matches itself
+        // only. The real repository pulls the title from
+        // `translations -> '<locale>' ->> 'title'`; we mirror that here so
+        // the fake honors the locale filter.
         const needle = filters.search.toLowerCase();
-        rows = rows.filter((p) => p.title.toLowerCase().includes(needle));
+        const locale = filters.locale ?? DEFAULT_LOCALE;
+        rows = rows.filter((p) => {
+          const title =
+            p.translations[locale]?.title ??
+            p.translations[DEFAULT_LOCALE]?.title ??
+            "";
+          return title.toLowerCase().includes(needle);
+        });
       }
       if (filters.categoryId) {
         rows = rows.filter((p) =>
@@ -171,8 +178,9 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
       const updated: ProductRow = {
         ...existing,
         ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
-        ...(patch.title !== undefined ? { title: patch.title } : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.translations !== undefined
+          ? { translations: patch.translations }
+          : {}),
         ...(patch.status !== undefined ? { status: patch.status } : {}),
         ...(patch.defaultCurrency !== undefined ? { defaultCurrency: patch.defaultCurrency } : {}),
         updatedAt: now(),
@@ -190,7 +198,7 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         id: row.id,
         productId: row.productId,
         sku: row.sku,
-        title: row.title ?? null,
+        translations: row.translations ?? {},
         priceAmount: row.priceAmount,
         priceCurrency: row.priceCurrency,
         compareAtAmount: row.compareAtAmount ?? null,
@@ -216,7 +224,9 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
       const updated: ProductVariantRow = {
         ...existing,
         ...(patch.sku !== undefined ? { sku: patch.sku } : {}),
-        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.translations !== undefined
+          ? { translations: patch.translations }
+          : {}),
         ...(patch.priceAmount !== undefined ? { priceAmount: patch.priceAmount } : {}),
         ...(patch.priceCurrency !== undefined ? { priceCurrency: patch.priceCurrency } : {}),
         ...(patch.compareAtAmount !== undefined ? { compareAtAmount: patch.compareAtAmount } : {}),
@@ -234,7 +244,7 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
       const c: CategoryRow = {
         id: row.id,
         slug: row.slug,
-        name: row.name,
+        translations: row.translations ?? {},
         parentId: row.parentId ?? null,
         createdAt: now(),
         updatedAt: now(),
@@ -254,7 +264,9 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
       const updated: CategoryRow = {
         ...existing,
         ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.translations !== undefined
+          ? { translations: patch.translations }
+          : {}),
         ...(patch.parentId !== undefined ? { parentId: patch.parentId } : {}),
         updatedAt: now(),
       };
@@ -330,7 +342,7 @@ describe("CatalogService.createProduct", () => {
     const { service } = buildService();
     const product = await service.createProduct({
       slug: "kemeja-batik",
-      title: "Kemeja Batik",
+      translations: { id: { title: "Kemeja Batik" } },
       defaultCurrency: "IDR",
     });
     expect(product.id).toMatch(/^prod_/);
@@ -349,13 +361,13 @@ describe("CatalogService.createProduct", () => {
     const { service } = buildService();
     await service.createProduct({
       slug: "duplicate",
-      title: "First",
+      translations: { id: { title: "First" } },
       defaultCurrency: "IDR",
     });
     await expect(
       service.createProduct({
         slug: "duplicate",
-        title: "Second",
+        translations: { id: { title: "Second" } },
         defaultCurrency: "IDR",
       }),
     ).rejects.toMatchObject({ code: "conflict" });
@@ -368,7 +380,7 @@ describe("CatalogService.listProducts pagination", () => {
     for (let i = 0; i < 25; i++) {
       await service.createProduct({
         slug: `p-${i.toString().padStart(2, "0")}`,
-        title: `Product ${i}`,
+        translations: { id: { title: `Product ${i}` } },
         status: "active",
         defaultCurrency: "IDR",
       });
@@ -409,7 +421,7 @@ describe("CatalogService.softDeleteProduct", () => {
     const { service } = buildService();
     const product = await service.createProduct({
       slug: "soft-target",
-      title: "Soft target",
+      translations: { id: { title: "Soft target" } },
       status: "active",
       defaultCurrency: "IDR",
     });
@@ -429,7 +441,7 @@ describe("CatalogService.getProductBySlug activeOnly", () => {
     const { service } = buildService();
     const product = await service.createProduct({
       slug: "old-listing",
-      title: "Old listing",
+      translations: { id: { title: "Old listing" } },
       status: "archived",
       defaultCurrency: "IDR",
     });
@@ -448,7 +460,7 @@ describe("CatalogService.adjustInventory", () => {
     const { service, store } = buildService();
     const product = await service.createProduct({
       slug: "inv-test",
-      title: "Inv test",
+      translations: { id: { title: "Inv test" } },
       defaultCurrency: "IDR",
     });
     const variant = await service.createVariant(product.id, {
@@ -492,7 +504,7 @@ describe("CatalogService.createVariant currency rule", () => {
     const { service } = buildService();
     const product = await service.createProduct({
       slug: "default-currency",
-      title: "Default",
+      translations: { id: { title: "Default" } },
       defaultCurrency: "IDR",
     });
     const variant = await service.createVariant(product.id, {
@@ -506,7 +518,7 @@ describe("CatalogService.createVariant currency rule", () => {
     const { service } = buildService();
     const product = await service.createProduct({
       slug: "mismatch",
-      title: "Mismatch",
+      translations: { id: { title: "Mismatch" } },
       defaultCurrency: "IDR",
     });
     await expect(
@@ -529,7 +541,7 @@ describe("CatalogService.listProducts price filter visibility", () => {
     // Active product with a variant in the band.
     const visible = await service.createProduct({
       slug: "visible-prod",
-      title: "Visible product",
+      translations: { id: { title: "Visible product" } },
       status: "active",
       defaultCurrency: "IDR",
     });
@@ -541,7 +553,7 @@ describe("CatalogService.listProducts price filter visibility", () => {
     // even though its variant matches the filter.
     const hidden = await service.createProduct({
       slug: "archived-prod",
-      title: "Archived product",
+      translations: { id: { title: "Archived product" } },
       status: "archived",
       defaultCurrency: "IDR",
     });
@@ -569,21 +581,21 @@ describe("CatalogService.listProducts price sort", () => {
     const { service } = buildService();
     const a = await service.createProduct({
       slug: "p-a",
-      title: "A",
+      translations: { id: { title: "A" } },
       status: "active",
       defaultCurrency: "IDR",
     });
     await service.createVariant(a.id, { sku: "A-1", priceAmount: 100n });
     const b = await service.createProduct({
       slug: "p-b",
-      title: "B",
+      translations: { id: { title: "B" } },
       status: "active",
       defaultCurrency: "IDR",
     });
     await service.createVariant(b.id, { sku: "B-1", priceAmount: 50n });
     const c = await service.createProduct({
       slug: "p-c",
-      title: "C",
+      translations: { id: { title: "C" } },
       status: "active",
       defaultCurrency: "IDR",
     });
@@ -619,7 +631,7 @@ describe("CatalogService.updateProduct currency consistency", () => {
     const { service } = buildService();
     const product = await service.createProduct({
       slug: "ccy-mismatch",
-      title: "Currency mismatch",
+      translations: { id: { title: "Currency mismatch" } },
       defaultCurrency: "IDR",
     });
     await service.createVariant(product.id, {
@@ -638,7 +650,7 @@ describe("CatalogService.updateProduct currency consistency", () => {
     const { service } = buildService();
     const product = await service.createProduct({
       slug: "ccy-empty",
-      title: "No variants",
+      translations: { id: { title: "No variants" } },
       defaultCurrency: "IDR",
     });
     const updated = await service.updateProduct(product.id, {
@@ -653,19 +665,19 @@ describe("CatalogService.listProducts search escaping", () => {
     const { service } = buildService();
     const a = await service.createProduct({
       slug: "coffee-100",
-      title: "Coffee 100% Arabica",
+      translations: { id: { title: "Coffee 100% Arabica" } },
       status: "active",
       defaultCurrency: "IDR",
     });
     const b = await service.createProduct({
       slug: "coffee-robusta",
-      title: "Coffee Robusta",
+      translations: { id: { title: "Coffee Robusta" } },
       status: "active",
       defaultCurrency: "IDR",
     });
     const c = await service.createProduct({
       slug: "tea",
-      title: "Tea Beverage",
+      translations: { id: { title: "Tea Beverage" } },
       status: "active",
       defaultCurrency: "IDR",
     });

@@ -1,8 +1,12 @@
 /**
- * Drizzle row → domain type mapping. The interesting case is the price
- * column pair (`price_amount` + `price_currency`) collapsing into a single
- * `Money` value with bigint precision intact, which is the contract callers
- * outside the module rely on.
+ * Drizzle row → domain type mapping. Two interesting collapses are covered
+ * here:
+ *
+ *   1. The price column pair (`price_amount` + `price_currency`) collapses
+ *      into a single `Money` value with bigint precision intact.
+ *   2. The locale-keyed `translations` JSONB column flattens to plain
+ *      `title`/`description`/`name` strings, applying the fallback chain
+ *      documented in `i18n.ts` and ADR-0010.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -26,7 +30,7 @@ describe("toVariant", () => {
       id: "var_01",
       productId: "prod_01",
       sku: "SKU-1",
-      title: "Default",
+      translations: { id: { title: "Default" } },
       priceAmount: 9_007_199_254_740_993n, // > Number.MAX_SAFE_INTEGER
       priceCurrency: "IDR",
       compareAtAmount: 10_000_000_000n,
@@ -46,7 +50,7 @@ describe("toVariant", () => {
       id: "var_02",
       productId: "prod_02",
       sku: "SKU-2",
-      title: null,
+      translations: {},
       priceAmount: 100n,
       priceCurrency: "USD",
       compareAtAmount: null,
@@ -56,6 +60,22 @@ describe("toVariant", () => {
     };
     expect(toVariant(row).compareAtPrice).toBeNull();
   });
+
+  it("returns null title for the default-variant case (empty translations)", () => {
+    const row: ProductVariantRow = {
+      id: "var_03",
+      productId: "prod_03",
+      sku: "SKU-3",
+      translations: {},
+      priceAmount: 100n,
+      priceCurrency: "IDR",
+      compareAtAmount: null,
+      createdAt: fixedDate,
+      updatedAt: fixedDate,
+      deletedAt: null,
+    };
+    expect(toVariant(row).title).toBeNull();
+  });
 });
 
 describe("toProduct", () => {
@@ -63,8 +83,7 @@ describe("toProduct", () => {
     const productRow: ProductRow = {
       id: "prod_x",
       slug: "x",
-      title: "X",
-      description: "D",
+      translations: { id: { title: "X", description: "D" } },
       status: "active",
       defaultCurrency: "IDR",
       imageUrl: null,
@@ -78,7 +97,7 @@ describe("toProduct", () => {
         id: "var_x1",
         productId: "prod_x",
         sku: "X1",
-        title: null,
+        translations: {},
         priceAmount: 1n,
         priceCurrency: "IDR",
         compareAtAmount: null,
@@ -88,6 +107,8 @@ describe("toProduct", () => {
       },
     ];
     const product = toProduct(productRow, variantRows, ["cat_a", "cat_b"]);
+    expect(product.title).toBe("X");
+    expect(product.description).toBe("D");
     expect(product.variants).toHaveLength(1);
     expect(product.categoryIds).toEqual(["cat_a", "cat_b"]);
     expect(product.status).toBe("active");
@@ -99,12 +120,13 @@ describe("toCategory", () => {
     const row: CategoryRow = {
       id: "cat_root",
       slug: "root",
-      name: "Root",
+      translations: { id: { name: "Root" } },
       parentId: null,
       createdAt: fixedDate,
       updatedAt: fixedDate,
     };
     expect(toCategory(row).parentId).toBeNull();
+    expect(toCategory(row).name).toBe("Root");
   });
 });
 
@@ -122,5 +144,101 @@ describe("toInventoryLevel", () => {
     expect(level.locationId).toBeNull();
     expect(level.available).toBe(5);
     expect(level.reserved).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Locale resolution — the core promise of ADR-0010.
+// ---------------------------------------------------------------------------
+
+describe("translations locale resolution", () => {
+  function buildProductRow(
+    translations: ProductRow["translations"],
+  ): ProductRow {
+    return {
+      id: "prod_loc",
+      slug: "loc",
+      translations,
+      status: "active",
+      defaultCurrency: "IDR",
+      imageUrl: null,
+      imageAlt: null,
+      createdAt: fixedDate,
+      updatedAt: fixedDate,
+      deletedAt: null,
+    };
+  }
+
+  it("toProductDTO(row, 'en') resolves English when present", () => {
+    const row = buildProductRow({
+      id: { title: "Kopi Gayo", description: "Kopi arabika dari Aceh." },
+      en: { title: "Gayo Coffee", description: "Arabica from Aceh." },
+    });
+    const product = toProduct(row, [], [], "en");
+    expect(product.title).toBe("Gayo Coffee");
+    expect(product.description).toBe("Arabica from Aceh.");
+  });
+
+  it("toProductDTO(row, 'fr') falls back to default 'id' when locale missing", () => {
+    const row = buildProductRow({
+      id: { title: "Kopi Gayo", description: "Kopi arabika dari Aceh." },
+      en: { title: "Gayo Coffee", description: "Arabica from Aceh." },
+    });
+    const product = toProduct(row, [], [], "fr");
+    expect(product.title).toBe("Kopi Gayo");
+    expect(product.description).toBe("Kopi arabika dari Aceh.");
+  });
+
+  it("toProductDTO(row, 'en') falls back gracefully when only 'id' is present", () => {
+    const row = buildProductRow({
+      id: { title: "Kopi Gayo", description: "Kopi arabika dari Aceh." },
+    });
+    const product = toProduct(row, [], [], "en");
+    // Per the resolver's chain: requested → default → first available.
+    // Default is `id`, so the en request gets the id strings.
+    expect(product.title).toBe("Kopi Gayo");
+    expect(product.description).toBe("Kopi arabika dari Aceh.");
+  });
+
+  it("description returns null when no locale carries the field", () => {
+    const row = buildProductRow({
+      id: { title: "Title only" },
+    });
+    const product = toProduct(row, [], [], "id");
+    expect(product.title).toBe("Title only");
+    expect(product.description).toBeNull();
+  });
+
+  it("toCategoryDTO resolves the requested locale", () => {
+    const row: CategoryRow = {
+      id: "cat_1",
+      slug: "kopi",
+      translations: { id: { name: "Kopi" }, en: { name: "Coffee" } },
+      parentId: null,
+      createdAt: fixedDate,
+      updatedAt: fixedDate,
+    };
+    expect(toCategory(row, "id").name).toBe("Kopi");
+    expect(toCategory(row, "en").name).toBe("Coffee");
+    // Unknown locale falls back to default.
+    expect(toCategory(row, "fr").name).toBe("Kopi");
+  });
+
+  it("toVariantDTO resolves a translated title and falls back across locales", () => {
+    const row: ProductVariantRow = {
+      id: "var_loc",
+      productId: "prod_loc",
+      sku: "LOC-1",
+      translations: { id: { title: "Bubuk" }, en: { title: "Ground" } },
+      priceAmount: 100n,
+      priceCurrency: "IDR",
+      compareAtAmount: null,
+      createdAt: fixedDate,
+      updatedAt: fixedDate,
+      deletedAt: null,
+    };
+    expect(toVariant(row, "en").title).toBe("Ground");
+    expect(toVariant(row, "id").title).toBe("Bubuk");
+    expect(toVariant(row, "fr").title).toBe("Bubuk");
   });
 });

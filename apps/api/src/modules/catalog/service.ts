@@ -9,6 +9,10 @@
  *   - cross-row composition (a Product needs its variants and categories)
  *   - validation that requires a lookup (slug uniqueness, variant currency
  *     against product default, soft-delete state for storefront reads)
+ *   - locale resolution at the read boundary (per ADR-0010): every read
+ *     accepts an optional `locale?: string`; the mapper flattens the JSONB
+ *     `translations` column to plain `title`/`description`/`name` strings
+ *     for that locale.
  *   - domain errors (NotFoundError, ConflictError, ValidationError) — never
  *     leaks Drizzle or Postgres errors through to callers
  *
@@ -26,9 +30,11 @@ import {
   type CatalogRepository,
 } from "./repository.js";
 import { toCategory, toInventoryLevel, toProduct, toVariant } from "./mappers.js";
+import { DEFAULT_LOCALE } from "./i18n.js";
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
+  type CategoryTranslations,
   type Category,
   type CreateCategoryInput,
   type CreateProductInput,
@@ -37,16 +43,18 @@ import {
   type ListProductsQuery,
   type Paginated,
   type Product,
+  type ProductTranslations,
   type UpdateCategoryInput,
   type UpdateProductInput,
   type UpdateVariantInput,
   type Variant,
+  type VariantTranslations,
 } from "./types.js";
 
 export interface CatalogService {
   // Products
-  createProduct(input: CreateProductInput): Promise<Product>;
-  getProductById(id: string): Promise<Product | null>;
+  createProduct(input: CreateProductInput, locale?: string): Promise<Product>;
+  getProductById(id: string, locale?: string): Promise<Product | null>;
   /**
    * Look up by slug. `options.activeOnly` restricts to products with status
    * `active` and `deleted_at IS NULL`, which is what the storefront wants.
@@ -54,23 +62,42 @@ export interface CatalogService {
    */
   getProductBySlug(
     slug: string,
-    options?: { activeOnly?: boolean },
+    options?: { activeOnly?: boolean; locale?: string },
   ): Promise<Product | null>;
   listProducts(
-    query: ListProductsQuery & { activeOnly?: boolean },
+    query: ListProductsQuery & { activeOnly?: boolean; locale?: string },
   ): Promise<Paginated<Product>>;
-  updateProduct(id: string, patch: UpdateProductInput): Promise<Product>;
+  updateProduct(
+    id: string,
+    patch: UpdateProductInput,
+    locale?: string,
+  ): Promise<Product>;
   softDeleteProduct(id: string): Promise<void>;
 
   // Variants
-  createVariant(productId: string, input: CreateVariantInput): Promise<Variant>;
-  updateVariant(id: string, patch: UpdateVariantInput): Promise<Variant>;
+  createVariant(
+    productId: string,
+    input: CreateVariantInput,
+    locale?: string,
+  ): Promise<Variant>;
+  updateVariant(
+    id: string,
+    patch: UpdateVariantInput,
+    locale?: string,
+  ): Promise<Variant>;
   softDeleteVariant(id: string): Promise<void>;
 
   // Categories
-  listCategories(): Promise<Category[]>;
-  createCategory(input: CreateCategoryInput): Promise<Category>;
-  updateCategory(id: string, patch: UpdateCategoryInput): Promise<Category>;
+  listCategories(locale?: string): Promise<Category[]>;
+  createCategory(
+    input: CreateCategoryInput,
+    locale?: string,
+  ): Promise<Category>;
+  updateCategory(
+    id: string,
+    patch: UpdateCategoryInput,
+    locale?: string,
+  ): Promise<Category>;
   deleteCategory(id: string): Promise<void>;
 
   // Inventory
@@ -85,7 +112,10 @@ export class CatalogServiceImpl implements CatalogService {
   // Products
   // -------------------------------------------------------------------
 
-  async createProduct(input: CreateProductInput): Promise<Product> {
+  async createProduct(
+    input: CreateProductInput,
+    locale: string = DEFAULT_LOCALE,
+  ): Promise<Product> {
     if (await this.repo.getProductBySlug(input.slug)) {
       throw new ConflictError("A product with this slug already exists.", {
         slug: input.slug,
@@ -96,8 +126,7 @@ export class CatalogServiceImpl implements CatalogService {
     const row = await this.repo.insertProduct({
       id: productId,
       slug: input.slug,
-      title: input.title,
-      description: input.description ?? null,
+      translations: input.translations as ProductTranslations,
       status: input.status ?? "draft",
       defaultCurrency: input.defaultCurrency,
       imageUrl: input.imageUrl ?? null,
@@ -108,18 +137,21 @@ export class CatalogServiceImpl implements CatalogService {
       await this.repo.setProductCategories(productId, input.categoryIds);
     }
 
-    return toProduct(row, [], input.categoryIds ?? []);
+    return toProduct(row, [], input.categoryIds ?? [], locale);
   }
 
-  async getProductById(productId: string): Promise<Product | null> {
+  async getProductById(
+    productId: string,
+    locale: string = DEFAULT_LOCALE,
+  ): Promise<Product | null> {
     const row = await this.repo.getProductById(productId);
     if (!row) return null;
-    return this.composeProduct(row);
+    return this.composeProduct(row, locale);
   }
 
   async getProductBySlug(
     slug: string,
-    options?: { activeOnly?: boolean },
+    options?: { activeOnly?: boolean; locale?: string },
   ): Promise<Product | null> {
     const row = await this.repo.getProductBySlug(slug);
     if (!row) return null;
@@ -127,14 +159,15 @@ export class CatalogServiceImpl implements CatalogService {
       // Storefront context: hide drafts, archived, and soft-deleted products.
       if (row.status !== "active" || row.deletedAt !== null) return null;
     }
-    return this.composeProduct(row);
+    return this.composeProduct(row, options?.locale ?? DEFAULT_LOCALE);
   }
 
   async listProducts(
-    query: ListProductsQuery & { activeOnly?: boolean },
+    query: ListProductsQuery & { activeOnly?: boolean; locale?: string },
   ): Promise<Paginated<Product>> {
     const page = clampPage(query.page);
     const pageSize = clampPageSize(query.pageSize);
+    const locale = query.locale ?? DEFAULT_LOCALE;
 
     const { rows, total } = await this.repo.listProducts({
       ...(query.activeOnly ? { status: "active", excludeDeleted: true } : {
@@ -152,6 +185,10 @@ export class CatalogServiceImpl implements CatalogService {
       page,
       pageSize,
       sort: query.sort,
+      // The repository's search ILIKE runs against the resolved-locale title;
+      // forward the locale so a search in `?locale=en` matches English titles
+      // rather than the default's.
+      locale: locale === "en" ? "en" : "id",
     });
 
     const productIds = rows.map((row) => row.id);
@@ -166,6 +203,7 @@ export class CatalogServiceImpl implements CatalogService {
         row,
         variantsByProduct.get(row.id) ?? [],
         categoryMap.get(row.id) ?? [],
+        locale,
       ),
     );
 
@@ -175,6 +213,7 @@ export class CatalogServiceImpl implements CatalogService {
   async updateProduct(
     productId: string,
     patch: UpdateProductInput,
+    locale: string = DEFAULT_LOCALE,
   ): Promise<Product> {
     const existing = await this.repo.getProductById(productId);
     if (!existing) {
@@ -223,11 +262,23 @@ export class CatalogServiceImpl implements CatalogService {
       }
     }
 
+    // Translation patches are a per-locale merge: keep prior locales the
+    // caller did not touch, replace each locale they did. The "patch a
+    // single field within a locale" case (e.g. "fix only the en title") is
+    // handled by the caller sending the full locale blob — the resolver
+    // semantics make a partial write inside one locale ambiguous.
+    const mergedTranslations: ProductTranslations | undefined =
+      patch.translations !== undefined
+        ? mergeTranslations<"title" | "description">(
+            existing.translations,
+            patch.translations as ProductTranslations,
+          )
+        : undefined;
+
     const updated = await this.repo.updateProduct(productId, {
       ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
-      ...(patch.title !== undefined ? { title: patch.title } : {}),
-      ...(patch.description !== undefined
-        ? { description: patch.description }
+      ...(mergedTranslations !== undefined
+        ? { translations: mergedTranslations }
         : {}),
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.defaultCurrency !== undefined
@@ -244,7 +295,7 @@ export class CatalogServiceImpl implements CatalogService {
       await this.repo.setProductCategories(productId, patch.categoryIds);
     }
 
-    return this.composeProduct(updated);
+    return this.composeProduct(updated, locale);
   }
 
   async softDeleteProduct(productId: string): Promise<void> {
@@ -262,6 +313,7 @@ export class CatalogServiceImpl implements CatalogService {
   async createVariant(
     productId: string,
     input: CreateVariantInput,
+    locale: string = DEFAULT_LOCALE,
   ): Promise<Variant> {
     const product = await this.repo.getProductById(productId);
     if (!product) {
@@ -285,7 +337,7 @@ export class CatalogServiceImpl implements CatalogService {
       id: variantId,
       productId,
       sku: input.sku,
-      title: input.title ?? null,
+      translations: (input.translations ?? {}) as VariantTranslations,
       priceAmount: input.priceAmount,
       priceCurrency: variantCurrency,
       ...(input.compareAtAmount !== undefined
@@ -303,12 +355,13 @@ export class CatalogServiceImpl implements CatalogService {
       reserved: 0,
     });
 
-    return toVariant(row);
+    return toVariant(row, locale);
   }
 
   async updateVariant(
     variantId: string,
     patch: UpdateVariantInput,
+    locale: string = DEFAULT_LOCALE,
   ): Promise<Variant> {
     const existing = await this.repo.getVariantById(variantId);
     if (!existing) {
@@ -334,9 +387,19 @@ export class CatalogServiceImpl implements CatalogService {
       }
     }
 
+    const mergedTranslations: VariantTranslations | undefined =
+      patch.translations !== undefined
+        ? mergeTranslations<"title">(
+            existing.translations,
+            patch.translations as VariantTranslations,
+          )
+        : undefined;
+
     const updated = await this.repo.updateVariant(variantId, {
       ...(patch.sku !== undefined ? { sku: patch.sku } : {}),
-      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(mergedTranslations !== undefined
+        ? { translations: mergedTranslations }
+        : {}),
       ...(patch.priceAmount !== undefined
         ? { priceAmount: patch.priceAmount }
         : {}),
@@ -350,7 +413,7 @@ export class CatalogServiceImpl implements CatalogService {
     if (!updated) {
       throw new NotFoundError("Variant not found.", { variantId });
     }
-    return toVariant(updated);
+    return toVariant(updated, locale);
   }
 
   async softDeleteVariant(variantId: string): Promise<void> {
@@ -365,12 +428,15 @@ export class CatalogServiceImpl implements CatalogService {
   // Categories
   // -------------------------------------------------------------------
 
-  async listCategories(): Promise<Category[]> {
+  async listCategories(locale: string = DEFAULT_LOCALE): Promise<Category[]> {
     const rows = await this.repo.listCategories();
-    return rows.map((row) => toCategory(row));
+    return rows.map((row) => toCategory(row, locale));
   }
 
-  async createCategory(input: CreateCategoryInput): Promise<Category> {
+  async createCategory(
+    input: CreateCategoryInput,
+    locale: string = DEFAULT_LOCALE,
+  ): Promise<Category> {
     if (input.parentId) {
       const parent = await this.repo.getCategoryById(input.parentId);
       if (!parent) {
@@ -383,15 +449,16 @@ export class CatalogServiceImpl implements CatalogService {
     const row = await this.repo.insertCategory({
       id: categoryId,
       slug: input.slug,
-      name: input.name,
+      translations: input.translations as CategoryTranslations,
       parentId: input.parentId ?? null,
     });
-    return toCategory(row);
+    return toCategory(row, locale);
   }
 
   async updateCategory(
     categoryId: string,
     patch: UpdateCategoryInput,
+    locale: string = DEFAULT_LOCALE,
   ): Promise<Category> {
     const existing = await this.repo.getCategoryById(categoryId);
     if (!existing) {
@@ -400,15 +467,24 @@ export class CatalogServiceImpl implements CatalogService {
     if (patch.parentId === categoryId) {
       throw new ValidationError("A category cannot be its own parent.");
     }
+    const mergedTranslations: CategoryTranslations | undefined =
+      patch.translations !== undefined
+        ? mergeTranslations<"name">(
+            existing.translations,
+            patch.translations as CategoryTranslations,
+          )
+        : undefined;
     const updated = await this.repo.updateCategory(categoryId, {
       ...(patch.slug !== undefined ? { slug: patch.slug } : {}),
-      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(mergedTranslations !== undefined
+        ? { translations: mergedTranslations }
+        : {}),
       ...(patch.parentId !== undefined ? { parentId: patch.parentId } : {}),
     });
     if (!updated) {
       throw new NotFoundError("Category not found.", { categoryId });
     }
-    return toCategory(updated);
+    return toCategory(updated, locale);
   }
 
   async deleteCategory(categoryId: string): Promise<void> {
@@ -486,12 +562,15 @@ export class CatalogServiceImpl implements CatalogService {
   // Internals
   // -------------------------------------------------------------------
 
-  private async composeProduct(row: ProductRowLike): Promise<Product> {
+  private async composeProduct(
+    row: ProductRowLike,
+    locale: string,
+  ): Promise<Product> {
     const [variants, categoryMap] = await Promise.all([
       this.repo.listVariantsForProducts([row.id]),
       this.repo.listCategoryIdsForProducts([row.id]),
     ]);
-    return toProduct(row, variants, categoryMap.get(row.id) ?? []);
+    return toProduct(row, variants, categoryMap.get(row.id) ?? [], locale);
   }
 }
 
@@ -507,6 +586,29 @@ function clampPageSize(size: number | undefined): number {
   if (!size || size < 1) return DEFAULT_PAGE_SIZE;
   if (size > MAX_PAGE_SIZE) return MAX_PAGE_SIZE;
   return Math.floor(size);
+}
+
+/**
+ * Per-locale merge for translation patches. The patch replaces each locale
+ * blob the caller sent and leaves untouched locales alone — the unit of
+ * change is "the locale," not "the field within the locale."
+ *
+ * Picking the per-locale grain (not per-field) keeps the resolver semantics
+ * intact: a locale present in the JSONB always carries a complete-enough
+ * blob to display, so a partial-field write cannot leave a half-translated
+ * locale that confuses the fallback chain.
+ */
+function mergeTranslations<F extends string>(
+  existing: Record<string, Partial<Record<F, string>>> | null | undefined,
+  patch: Record<string, Partial<Record<F, string>>>,
+): Record<string, Partial<Record<F, string>>> {
+  const merged: Record<string, Partial<Record<F, string>>> = {
+    ...(existing ?? {}),
+  };
+  for (const [locale, blob] of Object.entries(patch)) {
+    merged[locale] = blob;
+  }
+  return merged;
 }
 
 /**

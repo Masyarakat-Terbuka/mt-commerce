@@ -64,11 +64,14 @@ import {
   productCategories,
   productVariants,
   products,
+  type CategoryTranslations,
   type NewCategoryRow,
   type NewInventoryLevelRow,
   type NewProductCategoryRow,
   type NewProductRow,
   type NewProductVariantRow,
+  type ProductTranslations,
+  type VariantTranslations,
 } from "../../../db/schema/index.js";
 import type * as schema from "../../../db/schema/index.js";
 
@@ -98,29 +101,60 @@ const CURRENCY = "IDR";
 
 interface SeedCategory {
   slug: string;
-  name: string;
+  /**
+   * Translations keyed by locale per ADR-0010. The `id` (Bahasa Indonesia)
+   * locale is required and `en` is provided so a freshly-seeded catalog
+   * reads naturally in either locale.
+   */
+  translations: CategoryTranslations;
 }
 
 const CATEGORIES: readonly SeedCategory[] = Object.freeze([
-  { slug: "kopi", name: "Kopi" },
-  { slug: "batik", name: "Batik" },
-  { slug: "kerajinan", name: "Kerajinan" },
-  { slug: "kuliner", name: "Kuliner" },
-  { slug: "fashion", name: "Fashion" },
+  {
+    slug: "kopi",
+    translations: { id: { name: "Kopi" }, en: { name: "Coffee" } },
+  },
+  {
+    slug: "batik",
+    // "Batik" is a proper noun — UNESCO-recognised craft name — and stays
+    // identical across both locales.
+    translations: { id: { name: "Batik" }, en: { name: "Batik" } },
+  },
+  {
+    slug: "kerajinan",
+    translations: { id: { name: "Kerajinan" }, en: { name: "Handicrafts" } },
+  },
+  {
+    slug: "kuliner",
+    translations: { id: { name: "Kuliner" }, en: { name: "Food" } },
+  },
+  {
+    slug: "fashion",
+    // "Fashion" is the same loanword in both locales — Indonesian uses the
+    // English term directly.
+    translations: { id: { name: "Fashion" }, en: { name: "Fashion" } },
+  },
 ]);
 
 interface SeedVariant {
   sku: string;
-  /** Null for default/single-variant products. */
-  title: string | null;
+  /**
+   * Per-locale variant labels. An empty object marks the "default variant"
+   * of a single-variant product; the storefront falls back to the parent
+   * product's title for those.
+   */
+  translations: VariantTranslations;
   /** Whole-rupiah price as a bigint per ADR-0007. */
   priceAmount: bigint;
 }
 
 interface SeedProduct {
   slug: string;
-  title: string;
-  description: string;
+  /**
+   * Per-locale product strings (`title`, `description`). Both `id` and `en`
+   * are provided for the demo so QA can preview the full bilingual surface.
+   */
+  translations: ProductTranslations;
   /** Unsplash CDN URL or other long-lived image URL. */
   imageUrl: string;
   /** Bahasa Indonesia alt text describing the photo. */
@@ -138,9 +172,18 @@ interface SeedProduct {
 const PRODUCTS: readonly SeedProduct[] = Object.freeze([
   {
     slug: "kopi-arabika-gayo-200g",
-    title: "Kopi Arabika Gayo 200g",
-    description:
-      "Single-origin arabica from the Gayo highlands of Aceh. Bright acidity with notes of cocoa and citrus. Roasted to order.",
+    translations: {
+      id: {
+        title: "Kopi Arabika Gayo 200g",
+        description:
+          "Kopi arabika single-origin dari dataran tinggi Gayo, Aceh. Asam cerah dengan aroma cokelat dan jeruk. Disangrai sesuai pesanan.",
+      },
+      en: {
+        title: "Gayo Arabica Coffee 200g",
+        description:
+          "Single-origin arabica from the Gayo highlands of Aceh. Bright acidity with notes of cocoa and citrus. Roasted to order.",
+      },
+    },
     // Close-up of dark-roast coffee beans — photographer Mike Kenneally.
     imageUrl:
       "https://images.unsplash.com/photo-1442550528053-c431ecb55509?w=1200&q=80&auto=format&fit=crop",
@@ -148,14 +191,23 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     imageAttribution: "Mike Kenneally on Unsplash",
     categorySlugs: ["kopi"],
     variants: [
-      { sku: "KOPI-GAYO-200", title: null, priceAmount: 95_000n },
+      { sku: "KOPI-GAYO-200", translations: {}, priceAmount: 95_000n },
     ],
   },
   {
     slug: "kopi-kintamani-bali-200g",
-    title: "Kopi Kintamani Bali 200g",
-    description:
-      "Washed arabica from the Kintamani highlands. Citrus-forward cup with a clean finish. Choose whole bean for maximum freshness.",
+    translations: {
+      id: {
+        title: "Kopi Kintamani Bali 200g",
+        description:
+          "Kopi arabika proses washed dari dataran tinggi Kintamani. Cita rasa jeruk yang dominan dengan akhir bersih. Pilih biji utuh untuk kesegaran maksimal.",
+      },
+      en: {
+        title: "Kintamani Bali Coffee 200g",
+        description:
+          "Washed arabica from the Kintamani highlands. Citrus-forward cup with a clean finish. Choose whole bean for maximum freshness.",
+      },
+    },
     // Roasted coffee beans, top-down — photographer Mike Kenneally.
     imageUrl:
       "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?w=1200&q=80&auto=format&fit=crop",
@@ -163,15 +215,32 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     imageAttribution: "Mike Kenneally on Unsplash",
     categorySlugs: ["kopi"],
     variants: [
-      { sku: "KOPI-KINTA-200-WB", title: "Whole bean", priceAmount: 110_000n },
-      { sku: "KOPI-KINTA-200-GR", title: "Ground", priceAmount: 110_000n },
+      {
+        sku: "KOPI-KINTA-200-WB",
+        translations: { id: { title: "Biji utuh" }, en: { title: "Whole bean" } },
+        priceAmount: 110_000n,
+      },
+      {
+        sku: "KOPI-KINTA-200-GR",
+        translations: { id: { title: "Bubuk" }, en: { title: "Ground" } },
+        priceAmount: 110_000n,
+      },
     ],
   },
   {
     slug: "batik-tulis-pekalongan-l",
-    title: "Batik Tulis Pekalongan",
-    description:
-      "Hand-drawn batik tulis from Pekalongan, north-coast pattern. Each piece is one-of-a-kind. 100% cotton, soft drape.",
+    translations: {
+      id: {
+        title: "Batik Tulis Pekalongan",
+        description:
+          "Batik tulis dari Pekalongan dengan motif pesisir utara. Setiap helai dibuat satu per satu, sehingga unik. 100% katun, jatuh lembut di kulit.",
+      },
+      en: {
+        title: "Pekalongan Hand-Drawn Batik",
+        description:
+          "Hand-drawn batik tulis from Pekalongan, north-coast pattern. Each piece is one-of-a-kind. 100% cotton, soft drape.",
+      },
+    },
     // Patterned textile close-up. The previous Unsplash photo
     // (`1528459801416-a9241982d05a`) was failing in production — the
     // replacement is a stable, well-indexed pattern photograph.
@@ -181,16 +250,39 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     imageAttribution: "Unsplash",
     categorySlugs: ["batik", "fashion"],
     variants: [
-      { sku: "BATIK-PEKA-M", title: "Size M", priceAmount: 850_000n },
-      { sku: "BATIK-PEKA-L", title: "Size L", priceAmount: 850_000n },
-      { sku: "BATIK-PEKA-XL", title: "Size XL", priceAmount: 850_000n },
+      // Size labels stay as-is across locales — they are SI-style sizing
+      // that reads identically in Bahasa and English.
+      {
+        sku: "BATIK-PEKA-M",
+        translations: { id: { title: "Size M" }, en: { title: "Size M" } },
+        priceAmount: 850_000n,
+      },
+      {
+        sku: "BATIK-PEKA-L",
+        translations: { id: { title: "Size L" }, en: { title: "Size L" } },
+        priceAmount: 850_000n,
+      },
+      {
+        sku: "BATIK-PEKA-XL",
+        translations: { id: { title: "Size XL" }, en: { title: "Size XL" } },
+        priceAmount: 850_000n,
+      },
     ],
   },
   {
     slug: "keranjang-rotan-besar",
-    title: "Keranjang Rotan Besar",
-    description:
-      "Large rattan basket woven by artisans in Cirebon. Sturdy, lightweight, perfect for laundry or storage.",
+    translations: {
+      id: {
+        title: "Keranjang Rotan Besar",
+        description:
+          "Keranjang rotan ukuran besar yang ditenun oleh perajin di Cirebon. Kokoh, ringan, cocok untuk cucian maupun penyimpanan.",
+      },
+      en: {
+        title: "Large Rattan Basket",
+        description:
+          "Large rattan basket woven by artisans in Cirebon. Sturdy, lightweight, perfect for laundry or storage.",
+      },
+    },
     // Woven rattan basket — photographer Sarah Brown.
     imageUrl:
       "https://images.unsplash.com/photo-1610701596007-11502861dcfa?w=1200&q=80&auto=format&fit=crop",
@@ -198,14 +290,23 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     imageAttribution: "Sarah Brown on Unsplash",
     categorySlugs: ["kerajinan"],
     variants: [
-      { sku: "ROTAN-BSR-001", title: null, priceAmount: 175_000n },
+      { sku: "ROTAN-BSR-001", translations: {}, priceAmount: 175_000n },
     ],
   },
   {
     slug: "gerabah-kasongan-set",
-    title: "Gerabah Kasongan Set",
-    description:
-      "Three-piece earthenware set from Kasongan, Yogyakarta. Hand-thrown and fired in a traditional kiln.",
+    translations: {
+      id: {
+        title: "Set Gerabah Kasongan",
+        description:
+          "Set tiga gerabah dari Kasongan, Yogyakarta. Dibentuk dengan tangan dan dibakar di tungku tradisional.",
+      },
+      en: {
+        title: "Kasongan Earthenware Set",
+        description:
+          "Three-piece earthenware set from Kasongan, Yogyakarta. Hand-thrown and fired in a traditional kiln.",
+      },
+    },
     // Hand-thrown earthenware vessels — photographer Earl Wilcox.
     imageUrl:
       "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9?w=1200&q=80&auto=format&fit=crop",
@@ -213,14 +314,23 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     imageAttribution: "Earl Wilcox on Unsplash",
     categorySlugs: ["kerajinan"],
     variants: [
-      { sku: "GERAB-KASO-SET3", title: null, priceAmount: 220_000n },
+      { sku: "GERAB-KASO-SET3", translations: {}, priceAmount: 220_000n },
     ],
   },
   {
     slug: "keripik-tempe-malang-250g",
-    title: "Keripik Tempe Malang 250g",
-    description:
-      "Crispy tempeh chips from Malang. Two flavors: original (savory) and pedas (spicy). 250g resealable pouch.",
+    translations: {
+      id: {
+        title: "Keripik Tempe Malang 250g",
+        description:
+          "Keripik tempe khas Malang yang renyah. Tersedia dua varian: original (gurih) dan pedas. Kemasan resealable 250g.",
+      },
+      en: {
+        title: "Malang Tempeh Chips 250g",
+        description:
+          "Crispy tempeh chips from Malang. Two flavors: original (savory) and spicy. 250g resealable pouch.",
+      },
+    },
     // Indonesian-style fried chips — photographer Louis Hansel.
     imageUrl:
       "https://images.unsplash.com/photo-1604908554049-1f9d9b4c3b81?w=1200&q=80&auto=format&fit=crop",
@@ -228,8 +338,16 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     imageAttribution: "Louis Hansel on Unsplash",
     categorySlugs: ["kuliner"],
     variants: [
-      { sku: "KRIP-TEMPE-MLG-ORI", title: "Original", priceAmount: 28_000n },
-      { sku: "KRIP-TEMPE-MLG-PED", title: "Pedas", priceAmount: 28_000n },
+      {
+        sku: "KRIP-TEMPE-MLG-ORI",
+        translations: { id: { title: "Original" }, en: { title: "Original" } },
+        priceAmount: 28_000n,
+      },
+      {
+        sku: "KRIP-TEMPE-MLG-PED",
+        translations: { id: { title: "Pedas" }, en: { title: "Spicy" } },
+        priceAmount: 28_000n,
+      },
     ],
   },
 ]);
@@ -264,7 +382,7 @@ export async function seedDemoCatalog(
   const categoryRows: NewCategoryRow[] = CATEGORIES.map((c) => ({
     id: id("cat"),
     slug: c.slug,
-    name: c.name,
+    translations: c.translations,
     parentId: null,
   }));
 
@@ -305,8 +423,7 @@ export async function seedDemoCatalog(
     const productRow: NewProductRow = {
       id: id("prod"),
       slug: seedProduct.slug,
-      title: seedProduct.title,
-      description: seedProduct.description,
+      translations: seedProduct.translations,
       status: "active",
       defaultCurrency: CURRENCY,
       imageUrl: seedProduct.imageUrl,
@@ -344,7 +461,7 @@ export async function seedDemoCatalog(
         id: id("var"),
         productId,
         sku: seedVariant.sku,
-        title: seedVariant.title,
+        translations: seedVariant.translations,
         priceAmount: seedVariant.priceAmount,
         priceCurrency: CURRENCY,
         compareAtAmount: null,
