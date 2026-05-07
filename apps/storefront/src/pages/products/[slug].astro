@@ -1,0 +1,96 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import VariantSelector from "@/islands/VariantSelector.tsx";
+import AddToCartButton from "@/islands/AddToCartButton.tsx";
+import { getProductBySlug } from "@/lib/api";
+import { MOCK_PRODUCTS } from "@/lib/mock-products";
+import { createTranslator, resolveLocale, type Locale } from "@/lib/i18n";
+
+export function getStaticPaths() {
+  return MOCK_PRODUCTS.map((p) => ({ params: { slug: p.slug } }));
+}
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
+
+const { slug } = Astro.params as { slug: string };
+const product = getProductBySlug(slug);
+
+if (!product) {
+  return Astro.redirect("/404");
+}
+
+const title = product.title[locale];
+const description = product.description[locale];
+const firstVariant = product.variants[0]!;
+
+// Variant options serialized for the React island. Money survives because
+// `bigint` is preserved through Astro's island prop serialization.
+const variantOptions = product.variants.map((v) => ({
+  id: v.id,
+  name: v.name[locale],
+  price: v.price,
+  compareAt: v.compareAt,
+  available: v.available,
+}));
+
+// JSON-LD product structured data. Search engines and link previews read this
+// without needing JS. We use the lowest variant price for `offers.price` and
+// list the IDR currency unit (whole rupiah) as a string.
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  name: title,
+  description,
+  image: product.imageUrl,
+  sku: product.id,
+  offers: {
+    "@type": "Offer",
+    price: product.basePrice.amount.toString(),
+    priceCurrency: product.basePrice.currency,
+    availability: product.variants.some((v) => v.available)
+      ? "https://schema.org/InStock"
+      : "https://schema.org/OutOfStock",
+  },
+};
+---
+
+<BaseLayout title={`${title} — mt-commerce`} description={description} ogImage={product.imageUrl}>
+  <article class="grid grid-cols-1 gap-6 md:grid-cols-2">
+    <div class="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-100">
+      <img
+        src={product.imageUrl}
+        alt={product.imageAlt[locale]}
+        loading="eager"
+        decoding="async"
+        class="h-full w-full object-cover"
+      />
+    </div>
+
+    <div class="space-y-5">
+      <header>
+        <h1 class="text-2xl font-semibold text-neutral-900 md:text-3xl">{title}</h1>
+        <p class="mt-2 text-sm text-neutral-600 md:text-base">{description}</p>
+      </header>
+
+      <VariantSelector
+        client:load
+        variants={variantOptions}
+        locale={intlLocale}
+        heading={t("products.detail.variants")}
+        compareAtLabel={t("products.detail.compare_at")}
+      />
+
+      <AddToCartButton
+        client:load
+        variantId={firstVariant.id}
+        label={t("products.detail.add_to_cart")}
+        soldOutLabel={t("products.detail.out_of_stock")}
+        soldOut={!firstVariant.available}
+      />
+    </div>
+  </article>
+
+  <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+</BaseLayout>

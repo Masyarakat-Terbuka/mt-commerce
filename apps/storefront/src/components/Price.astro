@@ -1,0 +1,30 @@
+---
+/**
+ * Renders a Money value as a localized currency string.
+ *
+ * Uses `format` from `@mt-commerce/core/money` so the formatting rules live
+ * with the type, not in the storefront.
+ */
+import { format as formatMoney, type Money } from "@mt-commerce/core/money";
+
+export interface Props {
+  money: Money;
+  /** BCP 47 locale; defaults to id-ID. */
+  locale?: string;
+  /** When true, renders with line-through styling (used for compare-at). */
+  strike?: boolean;
+  class?: string;
+}
+
+const { money, locale = "id-ID", strike = false, class: className } = Astro.props;
+const formatted = formatMoney(money, { locale });
+const classes = [
+  "price-figure",
+  strike ? "text-neutral-500 line-through" : "text-neutral-900",
+  className ?? "",
+]
+  .filter(Boolean)
+  .join(" ");
+---
+
+<span class={classes} data-currency={money.currency}>{formatted}</span>

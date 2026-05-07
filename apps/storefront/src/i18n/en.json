@@ -1,0 +1,32 @@
+{
+  "nav.home": "Home",
+  "nav.products": "Products",
+  "nav.cart": "Cart",
+
+  "home.hero.title": "Start selling online with your own store.",
+  "home.hero.subtitle": "A lightweight storefront that loads on any connection, with local payments and shipping.",
+  "home.featured": "Featured products",
+
+  "products.list.title": "All products",
+  "products.list.empty": "No products match your selection.",
+  "products.filters.category": "Category",
+  "products.filters.price": "Price range",
+  "products.filters.search": "Search products",
+  "products.sort.newest": "Newest",
+  "products.sort.price_asc": "Lowest price",
+  "products.sort.price_desc": "Highest price",
+
+  "products.detail.add_to_cart": "Add to cart",
+  "products.detail.out_of_stock": "Out of stock",
+  "products.detail.variants": "Options",
+  "products.detail.compare_at": "Previous price",
+
+  "cart.title": "Your cart",
+  "cart.empty": "Your cart is empty.",
+  "cart.subtotal": "Subtotal",
+  "cart.checkout": "Continue to checkout",
+
+  "footer.copyright": "mt-commerce. Open source.",
+  "footer.about": "About",
+  "footer.contact": "Contact"
+}

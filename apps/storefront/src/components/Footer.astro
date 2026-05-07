@@ -1,0 +1,19 @@
+---
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+const year = new Date().getFullYear();
+---
+
+<footer class="mt-16 border-t border-neutral-200 bg-neutral-50">
+  <div
+    class="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-sm text-neutral-600 md:flex-row md:items-center md:justify-between"
+  >
+    <p>{year} {t("footer.copyright")}</p>
+    <ul class="flex gap-4">
+      <li><a class="hover:text-neutral-900" href={localePath(locale, "/about")}>{t("footer.about")}</a></li>
+      <li><a class="hover:text-neutral-900" href={localePath(locale, "/contact")}>{t("footer.contact")}</a></li>
+    </ul>
+  </div>
+</footer>

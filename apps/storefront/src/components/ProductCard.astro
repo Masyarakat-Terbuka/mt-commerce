@@ -1,0 +1,41 @@
+---
+import Price from "./Price.astro";
+import { resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import type { Product } from "@/lib/mock-products";
+
+export interface Props {
+  product: Product;
+}
+
+const { product } = Astro.props;
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const title = product.title[locale];
+const alt = product.imageAlt[locale];
+
+// Compare-at is sourced from the first variant; it is not a product-level
+// concept in this scaffold. Adjust when the SDK exposes a per-product price.
+const firstVariant = product.variants[0];
+const compareAt = firstVariant?.compareAt;
+---
+
+<a
+  href={localePath(locale, `/products/${product.slug}`)}
+  class="group block rounded-lg border border-neutral-200 bg-white transition-colors hover:border-neutral-400"
+>
+  <div class="aspect-square overflow-hidden rounded-t-lg bg-neutral-100">
+    <img
+      src={product.imageUrl}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      class="h-full w-full object-cover"
+    />
+  </div>
+  <div class="space-y-1 p-3">
+    <h3 class="line-clamp-2 text-sm font-medium text-neutral-900">{title}</h3>
+    <div class="flex items-baseline gap-2 text-sm">
+      <Price money={product.basePrice} />
+      {compareAt && <Price money={compareAt} strike />}
+    </div>
+  </div>
+</a>

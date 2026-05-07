@@ -1,0 +1,68 @@
+---
+export interface Props {
+  page: number;
+  totalPages: number;
+  /**
+   * Base URL the page numbers append to. Should already include any active
+   * filters as query string except `page`. The component appends `?page=N`
+   * (or `&page=N` if the URL already has a query string).
+   */
+  baseUrl: string;
+}
+
+const { page, totalPages, baseUrl } = Astro.props;
+
+function buildHref(p: number): string {
+  const sep = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${sep}page=${p}`;
+}
+
+const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+const hasPrev = page > 1;
+const hasNext = page < totalPages;
+---
+
+{
+  totalPages > 1 && (
+    <nav class="mt-8 flex items-center justify-center gap-1 text-sm" aria-label="Pagination">
+      <a
+        href={hasPrev ? buildHref(page - 1) : undefined}
+        aria-disabled={!hasPrev}
+        class:list={[
+          "rounded border px-3 py-1.5",
+          hasPrev
+            ? "border-neutral-300 hover:bg-neutral-100"
+            : "pointer-events-none border-neutral-200 text-neutral-400",
+        ]}
+      >
+        &larr;
+      </a>
+      {pages.map((p) => (
+        <a
+          href={buildHref(p)}
+          aria-current={p === page ? "page" : undefined}
+          class:list={[
+            "rounded border px-3 py-1.5",
+            p === page
+              ? "border-neutral-900 bg-neutral-900 text-white"
+              : "border-neutral-300 hover:bg-neutral-100",
+          ]}
+        >
+          {p}
+        </a>
+      ))}
+      <a
+        href={hasNext ? buildHref(page + 1) : undefined}
+        aria-disabled={!hasNext}
+        class:list={[
+          "rounded border px-3 py-1.5",
+          hasNext
+            ? "border-neutral-300 hover:bg-neutral-100"
+            : "pointer-events-none border-neutral-200 text-neutral-400",
+        ]}
+      >
+        &rarr;
+      </a>
+    </nav>
+  )
+}

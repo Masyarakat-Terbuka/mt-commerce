@@ -1,0 +1,32 @@
+---
+// English entry. The shared content lives in `lib`/`components`; only the
+// route shell differs by locale. Astro's i18n routing sets `Astro.currentLocale`
+// to "en" for any page under `/en/`.
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ProductCard from "@/components/ProductCard.astro";
+import { listFeaturedProducts } from "@/lib/api";
+import { createTranslator } from "@/lib/i18n";
+
+const t = createTranslator("en");
+const featured = listFeaturedProducts(4);
+const title = `${t("home.hero.title")} — mt-commerce`;
+const description = t("home.hero.subtitle");
+---
+
+<BaseLayout title={title} description={description}>
+  <section class="py-8 md:py-12">
+    <h1 class="max-w-2xl text-2xl font-semibold text-neutral-900 md:text-4xl">
+      {t("home.hero.title")}
+    </h1>
+    <p class="mt-3 max-w-2xl text-base text-neutral-600 md:text-lg">
+      {t("home.hero.subtitle")}
+    </p>
+  </section>
+
+  <section class="py-4">
+    <h2 class="mb-4 text-lg font-semibold text-neutral-900">{t("home.featured")}</h2>
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+      {featured.map((p) => <ProductCard product={p} />)}
+    </div>
+  </section>
+</BaseLayout>

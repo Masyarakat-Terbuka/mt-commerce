@@ -1,0 +1,32 @@
+{
+  "nav.home": "Beranda",
+  "nav.products": "Produk",
+  "nav.cart": "Keranjang",
+
+  "home.hero.title": "Mulai jualan online dengan toko Anda sendiri.",
+  "home.hero.subtitle": "Toko digital yang ringan dibuka di jaringan apa pun, dengan pembayaran dan pengiriman lokal.",
+  "home.featured": "Produk pilihan",
+
+  "products.list.title": "Semua produk",
+  "products.list.empty": "Belum ada produk yang cocok dengan pilihan Anda.",
+  "products.filters.category": "Kategori",
+  "products.filters.price": "Rentang harga",
+  "products.filters.search": "Cari produk",
+  "products.sort.newest": "Terbaru",
+  "products.sort.price_asc": "Harga terendah",
+  "products.sort.price_desc": "Harga tertinggi",
+
+  "products.detail.add_to_cart": "Tambah ke keranjang",
+  "products.detail.out_of_stock": "Stok habis",
+  "products.detail.variants": "Pilihan",
+  "products.detail.compare_at": "Harga sebelumnya",
+
+  "cart.title": "Keranjang Anda",
+  "cart.empty": "Keranjang masih kosong.",
+  "cart.subtotal": "Subtotal",
+  "cart.checkout": "Lanjut ke pembayaran",
+
+  "footer.copyright": "mt-commerce. Sumber terbuka.",
+  "footer.about": "Tentang",
+  "footer.contact": "Kontak"
+}

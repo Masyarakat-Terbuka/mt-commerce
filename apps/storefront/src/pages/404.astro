@@ -1,0 +1,26 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { resolveLocale, localePath, type Locale } from "@/lib/i18n";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const heading = locale === "en" ? "Page not found" : "Halaman tidak ditemukan";
+const body =
+  locale === "en"
+    ? "The page you were looking for is not here."
+    : "Halaman yang Anda cari tidak tersedia.";
+const home = locale === "en" ? "Back to home" : "Kembali ke beranda";
+---
+
+<BaseLayout title={`${heading} — mt-commerce`} description={body}>
+  <section class="py-12 text-center">
+    <p class="text-sm text-neutral-500">404</p>
+    <h1 class="mt-2 text-2xl font-semibold text-neutral-900">{heading}</h1>
+    <p class="mt-2 text-neutral-600">{body}</p>
+    <a
+      href={localePath(locale, "/")}
+      class="mt-6 inline-block rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+    >
+      {home}
+    </a>
+  </section>
+</BaseLayout>
