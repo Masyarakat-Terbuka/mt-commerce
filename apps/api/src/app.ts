@@ -21,7 +21,7 @@
  * Hono's `c.json()` can serialize money (`bigint`) values per ADR-0007. The
  * helper is idempotent.
  */
-import { Hono } from "hono";
+import { OpenAPIHono } from "@hono/zod-openapi";
 import { requestId } from "./middleware/request-id.js";
 import { requestLogger } from "./middleware/logger.js";
 import { corsMiddleware } from "./middleware/cors.js";
@@ -33,10 +33,15 @@ import { installBigIntJsonSerializer } from "./lib/json.js";
 import { getAuth } from "./modules/auth/index.js";
 import type { AppBindings } from "./lib/types.js";
 
-export function createApp(): Hono<AppBindings> {
+// The main app is an OpenAPIHono so that any nested OpenAPIHono router
+// (currently `buildHealthRoutes`; per-module routers migrate next) appears
+// in the OpenAPI document at /openapi.json. Plain Hono routers still mount
+// fine — they just don't show up in the doc, which is what we want during
+// the incremental migration.
+export function createApp(): OpenAPIHono<AppBindings> {
   installBigIntJsonSerializer();
 
-  const app = new Hono<AppBindings>();
+  const app = new OpenAPIHono<AppBindings>();
 
   app.use("*", requestId());
   app.use("*", requestLogger());

@@ -14,7 +14,7 @@
  *
  * Module routers come from each module's public `index.ts` only — see ADR-0005.
  */
-import { Hono } from "hono";
+import { OpenAPIHono } from "@hono/zod-openapi";
 import { buildHealthRoutes } from "./health.js";
 import { buildV1Routes } from "./v1/index.js";
 import { adminRoutes as catalogAdminRoutes, storefrontRoutes as catalogStorefrontRoutes } from "../modules/catalog/index.js";
@@ -24,8 +24,10 @@ import { adminRoutes as cartAdminRoutes, storefrontRoutes as cartStorefrontRoute
 import { adminRoutes as checkoutAdminRoutes, storefrontRoutes as checkoutStorefrontRoutes } from "../modules/checkout/index.js";
 import type { AppBindings } from "../lib/types.js";
 
-export function buildRoutes(): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
+// OpenAPIHono so nested OpenAPIHono routers (currently `buildHealthRoutes`)
+// propagate into the OpenAPI doc when this is mounted on the main app.
+export function buildRoutes(): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>();
   router.route("/", buildHealthRoutes());
   router.route("/v1", buildV1Routes());
 
