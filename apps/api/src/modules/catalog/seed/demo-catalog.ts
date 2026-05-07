@@ -156,11 +156,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Kopi Kintamani Bali 200g",
     description:
       "Washed arabica from the Kintamani highlands. Citrus-forward cup with a clean finish. Choose whole bean for maximum freshness.",
-    // Coffee beans poured from a scoop — photographer Nathan Dumlao.
+    // Roasted coffee beans, top-down — photographer Mike Kenneally.
     imageUrl:
-      "https://images.unsplash.com/photo-1559525839-d9acfd03e0ae?w=1200&q=80&auto=format&fit=crop",
-    imageAlt: "Biji kopi arabika Kintamani dituang dari sendok takar",
-    imageAttribution: "Nathan Dumlao on Unsplash",
+      "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Biji kopi sangrai dari sudut atas",
+    imageAttribution: "Mike Kenneally on Unsplash",
     categorySlugs: ["kopi"],
     variants: [
       { sku: "KOPI-KINTA-200-WB", title: "Whole bean", priceAmount: 110_000n },
@@ -172,11 +172,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Batik Tulis Pekalongan",
     description:
       "Hand-drawn batik tulis from Pekalongan, north-coast pattern. Each piece is one-of-a-kind. 100% cotton, soft drape.",
-    // Indonesian batik fabric pattern detail — photographer Camille Bismonte.
+    // Folded textile / patterned fabric stack — photographer Annie Spratt.
     imageUrl:
-      "https://images.unsplash.com/photo-1606293459339-aa5d34a7b0e1?w=1200&q=80&auto=format&fit=crop",
-    imageAlt: "Detail kain batik tulis dengan motif pesisir Pekalongan",
-    imageAttribution: "Camille Bismonte on Unsplash",
+      "https://images.unsplash.com/photo-1528459801416-a9241982d05a?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Tumpukan kain bermotif terlipat",
+    imageAttribution: "Annie Spratt on Unsplash",
     categorySlugs: ["batik", "fashion"],
     variants: [
       { sku: "BATIK-PEKA-M", title: "Size M", priceAmount: 850_000n },
@@ -189,11 +189,11 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Keranjang Rotan Besar",
     description:
       "Large rattan basket woven by artisans in Cirebon. Sturdy, lightweight, perfect for laundry or storage.",
-    // Woven rattan basket on a neutral surface — photographer Anna Stampfli.
+    // Woven rattan basket — photographer Sarah Brown.
     imageUrl:
-      "https://images.unsplash.com/photo-1595408076683-5d0c643b8a02?w=1200&q=80&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1610701596007-11502861dcfa?w=1200&q=80&auto=format&fit=crop",
     imageAlt: "Keranjang anyaman rotan berukuran besar",
-    imageAttribution: "Anna Stampfli on Unsplash",
+    imageAttribution: "Sarah Brown on Unsplash",
     categorySlugs: ["kerajinan"],
     variants: [
       { sku: "ROTAN-BSR-001", title: null, priceAmount: 175_000n },
@@ -219,10 +219,10 @@ const PRODUCTS: readonly SeedProduct[] = Object.freeze([
     title: "Keripik Tempe Malang 250g",
     description:
       "Crispy tempeh chips from Malang. Two flavors: original (savory) and pedas (spicy). 250g resealable pouch.",
-    // Crispy chips in a bowl — photographer Louis Hansel.
+    // Indonesian-style fried chips — photographer Louis Hansel.
     imageUrl:
-      "https://images.unsplash.com/photo-1599490659213-e2b9527bd087?w=1200&q=80&auto=format&fit=crop",
-    imageAlt: "Keripik tempe tipis dalam mangkuk",
+      "https://images.unsplash.com/photo-1604908554049-1f9d9b4c3b81?w=1200&q=80&auto=format&fit=crop",
+    imageAlt: "Camilan keripik renyah di atas piring",
     imageAttribution: "Louis Hansel on Unsplash",
     categorySlugs: ["kuliner"],
     variants: [

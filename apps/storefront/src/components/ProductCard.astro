@@ -15,7 +15,7 @@
  * gray box, so even an unphotographed product fits the aesthetic.
  */
 import Price from "./Price.astro";
-import { resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 import type { StoreProduct } from "@/lib/api";
 
 export interface Props {
@@ -29,6 +29,7 @@ export interface Props {
 
 const { product, loading = "lazy" } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
 const title = product.title[locale];
 const alt = product.imageAlt[locale];
 
@@ -55,14 +56,15 @@ const compareAt = firstVariant?.compareAt;
           class="h-full w-full object-cover"
         />
       ) : (
-        <div class="flex h-full w-full items-center justify-center bg-cream">
-          <span class="t-caption uppercase tracking-wide text-faint">{title}</span>
+        <div class="flex h-full w-full flex-col items-center justify-center gap-1 bg-cream px-4 text-center">
+          <span class="t-body line-clamp-2 font-medium text-fg">{title}</span>
+          <span class="t-caption text-faint">{t("products.card.photo_coming_soon")}</span>
         </div>
       )
     }
   </div>
   <div class="mt-3 space-y-1">
-    <h3 class="t-body line-clamp-1 font-medium text-fg transition-colors duration-150 group-hover:text-accent">
+    <h3 class="t-body line-clamp-1 text-fg transition-colors duration-150 group-hover:text-accent">
       {title}
     </h3>
     <div class="flex items-baseline gap-2 t-body">

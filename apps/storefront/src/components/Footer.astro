@@ -62,7 +62,7 @@ const columns = [
       {
         columns.map((col) => (
           <div>
-            <h3 class="t-caption uppercase tracking-wide text-muted">{col.title}</h3>
+            <h3 class="t-caption text-muted">{col.title}</h3>
             <ul class="mt-4 space-y-2">
               {col.links.map((link) => (
                 <li>
@@ -84,16 +84,16 @@ const columns = [
       class="mt-12 flex flex-col items-start gap-3 border-t border-line pt-6 md:mt-16 md:flex-row md:items-center md:justify-between"
     >
       <p class="t-caption text-muted">© {year} {t("footer.copyright")}</p>
-      <div class="flex items-center gap-1 t-caption uppercase tracking-wide">
+      <div class="flex items-center gap-1 t-caption">
         <a
           href={idHref}
           aria-current={locale === "id" ? "true" : undefined}
           class:list={[
             "px-2 py-1 transition-colors duration-150",
-            locale === "id" ? "text-fg" : "text-muted hover:text-fg",
+            locale === "id" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
-          ID
+          id
         </a>
         <span class="text-faint" aria-hidden="true">·</span>
         <a
@@ -101,10 +101,10 @@ const columns = [
           aria-current={locale === "en" ? "true" : undefined}
           class:list={[
             "px-2 py-1 transition-colors duration-150",
-            locale === "en" ? "text-fg" : "text-muted hover:text-fg",
+            locale === "en" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
-          EN
+          en
         </a>
       </div>
     </div>

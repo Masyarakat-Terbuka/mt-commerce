@@ -20,9 +20,18 @@
  * with each option's value, so on submit the URL carries the chosen
  * value verbatim. An "All" option for category clears the filter
  * (empty value).
+ *
+ * Auto-submit behavior (progressive enhancement):
+ *
+ *   With JS enabled, changing a radio submits the form immediately;
+ *   typing in price min/max debounces 600ms then submits. The
+ *   "Terapkan" button stays in the DOM as the no-JS fallback and
+ *   is hidden by the inline script once listeners are attached.
+ *   Pressing Enter in any input triggers the form's native submit
+ *   path, not a parallel one.
  */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
-import { listCategories } from "@/lib/api";
+import { listCategories, listProducts } from "@/lib/api";
 
 export interface Props {
   active: {
@@ -46,6 +55,29 @@ const t = createTranslator(locale);
 const categories = await listCategories();
 const formAction = localePath(locale, "/products");
 
+/**
+ * Pre-compute per-category counts in one SDK call. The catalog at v0.1 is
+ * small (<100 products), and the listing page already issues a parallel
+ * call to render the grid, so the cost here is negligible compared to N+1
+ * per-category queries.
+ *
+ * If the call fails the rail still renders — `counts` stays empty and the
+ * parenthetical numbers are simply omitted.
+ */
+let totalCount = 0;
+const countsBySlug = new Map<string, number>();
+try {
+  const all = await listProducts({ pageSize: 100 });
+  totalCount = all.total;
+  for (const p of all.items) {
+    const slug = p.categorySlug;
+    if (!slug) continue;
+    countsBySlug.set(slug, (countsBySlug.get(slug) ?? 0) + 1);
+  }
+} catch {
+  // Stay silent — empty counts map is the graceful degrade path.
+}
+
 const sortOptions = [
   { value: "newest", label: t("products.sort.newest") },
   { value: "price_asc", label: t("products.sort.price_asc") },
@@ -60,6 +92,7 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
 <form
   method="get"
   action={formAction}
+  data-filters-form
   class:list={[
     "flex flex-col gap-8 t-body",
     inline ? "" : "md:sticky md:top-20 md:self-start",
@@ -67,7 +100,7 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
 >
   {/* Search */}
   <div>
-    <label class="t-caption block uppercase tracking-wide text-muted" for="filter-search">
+    <label class="t-caption block tracking-wide text-muted" for="filter-search">
       {t("products.filters.search")}
     </label>
     <input
@@ -75,13 +108,15 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
       type="search"
       name="q"
       value={active.search ?? ""}
+      placeholder={t("products.filters.search_placeholder")}
+      aria-label={t("products.filters.search")}
       class="mt-2 w-full border-b border-line bg-transparent py-1.5 text-fg outline-none transition-colors duration-150 focus:border-accent"
     />
   </div>
 
   {/* Category — radio list */}
   <fieldset>
-    <legend class="t-caption uppercase tracking-wide text-muted">
+    <legend class="t-caption tracking-wide text-muted">
       {t("products.filters.category")}
     </legend>
     <ul class="mt-3 space-y-2">
@@ -94,31 +129,40 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
             checked={!active.category}
             class="h-3.5 w-3.5 accent-accent"
           />
-          <span>{t("products.filters.category_all")}</span>
+          <span>
+            {t("products.filters.category_all")}
+            {totalCount > 0 && <span class="text-faint"> ({totalCount})</span>}
+          </span>
         </label>
       </li>
       {
-        categories.map((c) => (
-          <li>
-            <label class="flex cursor-pointer items-center gap-2.5 text-fg">
-              <input
-                type="radio"
-                name="category"
-                value={c.slug}
-                checked={active.category === c.slug}
-                class="h-3.5 w-3.5 accent-accent"
-              />
-              <span>{c.name[locale]}</span>
-            </label>
-          </li>
-        ))
+        categories.map((c) => {
+          const count = countsBySlug.get(c.slug);
+          return (
+            <li>
+              <label class="flex cursor-pointer items-center gap-2.5 text-fg">
+                <input
+                  type="radio"
+                  name="category"
+                  value={c.slug}
+                  checked={active.category === c.slug}
+                  class="h-3.5 w-3.5 accent-accent"
+                />
+                <span>
+                  {c.name[locale]}
+                  {typeof count === "number" && <span class="text-faint"> ({count})</span>}
+                </span>
+              </label>
+            </li>
+          );
+        })
       }
     </ul>
   </fieldset>
 
   {/* Price range */}
   <fieldset>
-    <legend class="t-caption uppercase tracking-wide text-muted">
+    <legend class="t-caption tracking-wide text-muted">
       {t("products.filters.price")}
     </legend>
     <div class="mt-3 flex items-center gap-3">
@@ -152,7 +196,7 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
 
   {/* Sort — radio list */}
   <fieldset>
-    <legend class="t-caption uppercase tracking-wide text-muted">
+    <legend class="t-caption tracking-wide text-muted">
       {t("products.filters.sort")}
     </legend>
     <ul class="mt-3 space-y-2">
@@ -175,7 +219,81 @@ const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes
     </ul>
   </fieldset>
 
-  <button type="submit" class="btn-primary w-full">
+  {/*
+    No-JS fallback. The script below hides this once auto-submit listeners
+    are attached, so JS users only see the rail respond to interaction.
+  */}
+  <button type="submit" data-filters-apply class="btn-primary w-full">
     {t("products.filters.apply")}
   </button>
 </form>
+
+<script>
+  /**
+   * Auto-submit wiring for filter forms.
+   *
+   * Multiple instances may exist on the same page (the desktop sidebar
+   * and the mobile dialog), so we attach to every `[data-filters-form]`.
+   * Each form gets its own debounce timer keyed off the element itself.
+   */
+  const DEBOUNCE_MS = 600;
+
+  function wire(form: HTMLFormElement) {
+    let priceTimer: number | undefined;
+
+    const submit = () => {
+      // Use requestSubmit when available so the form's submit event fires
+      // (matches a real button click); fall back to submit() for older
+      // browsers that lack it.
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+      } else {
+        form.submit();
+      }
+    };
+
+    form.addEventListener("change", (e) => {
+      const target = e.target as HTMLInputElement | HTMLSelectElement | null;
+      if (!target) return;
+      const tag = target.tagName;
+      const type = (target as HTMLInputElement).type;
+      // Radio + select changes submit immediately. Text/number/search
+      // inputs are handled by the debounced `input` listener below.
+      if (tag === "SELECT" || type === "radio" || type === "checkbox") {
+        submit();
+      }
+    });
+
+    form.addEventListener("input", (e) => {
+      const target = e.target as HTMLInputElement | null;
+      if (!target) return;
+      const type = target.type;
+      if (type !== "number" && type !== "search" && type !== "text") return;
+      if (priceTimer !== undefined) {
+        window.clearTimeout(priceTimer);
+      }
+      priceTimer = window.setTimeout(submit, DEBOUNCE_MS);
+    });
+
+    // Enter inside an input fires the form's native submit; cancel any
+    // pending debounce so we don't fire a second submit afterward.
+    form.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key !== "Enter") return;
+      if (priceTimer !== undefined) {
+        window.clearTimeout(priceTimer);
+        priceTimer = undefined;
+      }
+      // Let the browser handle the submit naturally.
+    });
+
+    // Hide the explicit Apply button — its only role is no-JS fallback.
+    const applyBtn = form.querySelector<HTMLButtonElement>("[data-filters-apply]");
+    if (applyBtn) {
+      applyBtn.hidden = true;
+    }
+  }
+
+  document
+    .querySelectorAll<HTMLFormElement>("form[data-filters-form]")
+    .forEach(wire);
+</script>

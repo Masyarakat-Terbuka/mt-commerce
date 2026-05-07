@@ -23,7 +23,7 @@
  *   - Error and empty states are calm single paragraphs in line with
  *     the catalog's overall copywriting tone.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format as formatMoney } from "@mt-commerce/core/money";
 import { createClient, type Product as SdkProduct } from "@mt-commerce/sdk";
 
@@ -59,6 +59,22 @@ export type ProductGridProps = {
    * card count so there's no layout shift. Defaults to `pageSize` or 8.
    */
   skeletonCount?: number;
+  /**
+   * When true, renders a "Showing N products" caption above the grid.
+   * Off by default so the home page's featured grid stays unadorned;
+   * the listing page sets it to true.
+   */
+  showCount?: boolean;
+  /**
+   * Template for the count caption with a `{count}` token, e.g.
+   * "Menampilkan {count} produk". Required when `showCount` is true.
+   */
+  showingCountTemplate?: string;
+  /**
+   * Localized caption shown beneath the product title when an image
+   * URL is missing or fails to load (e.g. "Foto segera hadir").
+   */
+  photoComingSoonLabel?: string;
 };
 
 type LoadState =
@@ -88,8 +104,28 @@ export default function ProductGrid({
   query,
   limit,
   skeletonCount,
+  showCount = false,
+  showingCountTemplate,
+  photoComingSoonLabel = "",
 }: ProductGridProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  // Track image URLs that fail to load so we can fall back to the
+  // typographic placeholder. A broken Unsplash URL or hotlink-block
+  // would otherwise show a torn-image icon.
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(() => new Set());
+
+  // Auto-balance: with ≤6 products the desktop grid drops from 4 to 3
+  // columns so the last row doesn't leave orphaned cards on the right.
+  // Mobile (2) and tablet (3) layouts are unaffected.
+  const productCount = state.status === "ready" ? state.products.length : 0;
+  const compact = state.status === "ready" && productCount <= 6;
+  const gridClasses = useMemo(
+    () =>
+      compact
+        ? "grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-3 md:gap-x-6 md:gap-y-12"
+        : GRID_CLASSES,
+    [compact],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -171,9 +207,21 @@ export default function ProductGrid({
     );
   }
 
+  // Visible-count caption. Reflects what's rendered (post-`limit` slice),
+  // not the API's unfiltered total — that's what users see on the page.
+  const visibleCount = state.products.length;
+  const countLabel =
+    showCount && showingCountTemplate
+      ? showingCountTemplate.replace("{count}", String(visibleCount))
+      : null;
+
   return (
-    <div className={GRID_CLASSES}>
-      {state.products.map((p, idx) => {
+    <>
+      {countLabel && (
+        <p className="t-caption mb-3 text-faint">{countLabel}</p>
+      )}
+      <div className={gridClasses}>
+        {state.products.map((p, idx) => {
         const price = lowestPrice(p);
         const compareAt = p.variants[0]?.compareAtPrice ?? null;
         // The first row is above the fold on every viewport — eager-load
@@ -183,24 +231,35 @@ export default function ProductGrid({
         return (
           <a key={p.id} href={`${detailHrefBase}/${p.slug}`} className="group block">
             <div className="aspect-square w-full overflow-hidden border border-line bg-paper transition-colors duration-150 group-hover:border-line-strong">
-              {p.imageUrl ? (
+              {p.imageUrl && !brokenImages.has(p.id) ? (
                 <img
                   src={p.imageUrl}
                   alt={altText}
                   loading={loading}
                   decoding="async"
+                  onError={() => {
+                    setBrokenImages((prev) => {
+                      if (prev.has(p.id)) return prev;
+                      const next = new Set(prev);
+                      next.add(p.id);
+                      return next;
+                    });
+                  }}
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="flex h-full w-full items-center justify-center bg-cream">
-                  <span className="t-caption uppercase tracking-wide text-faint">
+                <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-cream p-4">
+                  <span className="t-body text-center font-medium text-fg">
                     {p.title}
+                  </span>
+                  <span className="t-caption text-center text-faint">
+                    {photoComingSoonLabel}
                   </span>
                 </div>
               )}
             </div>
             <div className="mt-3 space-y-1">
-              <h3 className="t-body line-clamp-1 font-medium text-fg transition-colors duration-150 group-hover:text-accent">
+              <h3 className="t-body line-clamp-1 text-fg transition-colors duration-150 group-hover:text-accent">
                 {p.title}
               </h3>
               <div className="flex items-baseline gap-2 t-body">
@@ -219,6 +278,7 @@ export default function ProductGrid({
           </a>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }

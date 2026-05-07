@@ -15,6 +15,8 @@
   "home.featured.title": "Pilihan terbaru",
   "home.categories.title": "Kategori",
 
+  "products.card.photo_coming_soon": "Foto segera hadir",
+
   "products.list.title": "Semua produk",
   "products.list.empty": "Belum ada produk yang cocok dengan pencarian Anda.",
   "products.list.loading": "Memuat produk…",
@@ -25,6 +27,7 @@
   "products.list.applied_filters": "Filter aktif",
   "products.list.clear_filters": "Hapus filter",
   "products.list.skeleton_aria": "Memuat daftar produk",
+  "products.list.showing_count": "Menampilkan {count} produk",
   "products.list.pagination.prev": "Sebelumnya",
   "products.list.pagination.next": "Selanjutnya",
   "products.detail.loading": "Memuat produk…",
@@ -37,6 +40,7 @@
   "products.filters.price_min": "Minimum",
   "products.filters.price_max": "Maksimum",
   "products.filters.search": "Cari",
+  "products.filters.search_placeholder": "Cari produk…",
   "products.filters.sort": "Urutkan",
   "products.filters.apply": "Terapkan",
   "products.sort.newest": "Terbaru",

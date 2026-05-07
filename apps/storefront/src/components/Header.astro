@@ -116,7 +116,7 @@ const enHref = localePath("en", stripped);
           class="absolute right-0 top-full z-30 mt-px flex w-[min(380px,calc(100vw-2rem))] items-center gap-2 border border-line bg-paper p-3"
           role="search"
         >
-          <label class="t-caption uppercase tracking-wide text-muted" for="header-search">
+          <label class="t-caption text-muted" for="header-search">
             {t("nav.search")}
           </label>
           <input
@@ -126,7 +126,7 @@ const enHref = localePath("en", stripped);
             autocomplete="off"
             class="flex-1 border-b border-line bg-transparent py-1 t-body text-fg outline-none transition-colors duration-150 focus:border-accent"
           />
-          <button type="submit" class="t-caption uppercase tracking-wide text-fg hover:text-accent">
+          <button type="submit" class="t-caption text-fg hover:text-accent">
             &rarr;
           </button>
         </form>
@@ -156,16 +156,16 @@ const enHref = localePath("en", stripped);
         <span class="hidden md:inline">{t("nav.cart")}</span>
       </a>
 
-      <div class="hidden items-center gap-0.5 t-caption uppercase tracking-wide md:flex">
+      <div class="hidden items-center gap-0.5 t-caption tracking-tight md:flex">
         <a
           href={idHref}
           aria-current={locale === "id" ? "true" : undefined}
           class:list={[
             "px-2 py-1 transition-colors duration-150",
-            locale === "id" ? "text-fg" : "text-muted hover:text-fg",
+            locale === "id" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
-          ID
+          id
         </a>
         <span class="text-faint" aria-hidden="true">·</span>
         <a
@@ -173,16 +173,16 @@ const enHref = localePath("en", stripped);
           aria-current={locale === "en" ? "true" : undefined}
           class:list={[
             "px-2 py-1 transition-colors duration-150",
-            locale === "en" ? "text-fg" : "text-muted hover:text-fg",
+            locale === "en" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
-          EN
+          en
         </a>
       </div>
 
       <a
         href={accountHref}
-        class="hidden h-9 items-center px-2 t-caption uppercase tracking-wide text-fg transition-colors duration-150 hover:text-accent md:flex"
+        class="hidden h-9 items-center px-2 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
       >
         {t("nav.account")}
       </a>

@@ -1,0 +1,185 @@
+# Label set for the mt-commerce repository.
+#
+# This file is the source of truth for GitHub labels. To apply it, run:
+#
+#   bunx github-label-sync \
+#     --access-token "$GITHUB_TOKEN" \
+#     --labels .github/labels.yml \
+#     masyarakat-terbuka/mt-commerce
+#
+# Conventions:
+#   - "type:"   — what kind of work this is (bug, feature, task, docs, chore, security)
+#   - "status:" — where it sits in the workflow (needs-triage, ready, in-progress, blocked, needs-review)
+#   - "area:"   — which part of the system it touches (api, admin, storefront, plus per-module areas)
+#   - "effort:" — rough size (small, medium, large)
+#   - Special signals stay flat: "good first issue", "help wanted", "discussion needed", "bahasa-pending"
+
+# ---- Type ------------------------------------------------------------------
+
+- name: "type: bug"
+  color: "d73a4a"
+  description: "Something is not working as expected"
+
+- name: "type: feature"
+  color: "a2eeef"
+  description: "A new feature or enhancement"
+
+- name: "type: task"
+  color: "c5def5"
+  description: "Planned piece of work"
+
+- name: "type: docs"
+  color: "0075ca"
+  description: "Documentation, in Bahasa or English"
+
+- name: "type: chore"
+  color: "fef2c0"
+  description: "Build, CI, tooling, dependency, or repo housekeeping"
+
+- name: "type: security"
+  color: "b60205"
+  description: "Security concern — also see SECURITY.md for private disclosure"
+
+# ---- Status ----------------------------------------------------------------
+
+- name: "status: needs-triage"
+  color: "ededed"
+  description: "Awaiting first review by a maintainer"
+
+- name: "status: ready"
+  color: "0e8a16"
+  description: "Scoped, agreed, ready for someone to pick up"
+
+- name: "status: in-progress"
+  color: "fbca04"
+  description: "Someone is actively working on this"
+
+- name: "status: blocked"
+  color: "e99695"
+  description: "Cannot move forward until something else lands"
+
+- name: "status: needs-review"
+  color: "5319e7"
+  description: "Implementation done, awaiting review"
+
+# ---- Area: top-level apps and packages -------------------------------------
+
+- name: "area: api"
+  color: "1d76db"
+  description: "apps/api — the Hono backend"
+
+- name: "area: admin"
+  color: "1d76db"
+  description: "apps/admin — the React admin"
+
+- name: "area: storefront"
+  color: "1d76db"
+  description: "apps/storefront — the Astro storefront"
+
+- name: "area: sdk"
+  color: "1d76db"
+  description: "packages/sdk — the TypeScript client"
+
+- name: "area: core"
+  color: "1d76db"
+  description: "packages/core — shared types and utilities"
+
+- name: "area: plugins"
+  color: "1d76db"
+  description: "Plugin system or first-party plugins"
+
+# ---- Area: per-module (matches apps/api/src/modules/ layout) ---------------
+
+- name: "area: catalog"
+  color: "bfd4f2"
+  description: "Products, variants, categories, inventory"
+
+- name: "area: cart"
+  color: "bfd4f2"
+  description: "Cart and cart items"
+
+- name: "area: checkout"
+  color: "bfd4f2"
+  description: "Checkout state machine"
+
+- name: "area: order"
+  color: "bfd4f2"
+  description: "Orders, fulfillment, returns"
+
+- name: "area: payment"
+  color: "bfd4f2"
+  description: "Payments, providers, refunds"
+
+- name: "area: shipping"
+  color: "bfd4f2"
+  description: "Shipping providers, rates, fulfillments"
+
+- name: "area: tax"
+  color: "bfd4f2"
+  description: "Tax calculation, PPN"
+
+- name: "area: notification"
+  color: "bfd4f2"
+  description: "Email, WhatsApp, SMS adapters"
+
+- name: "area: customer"
+  color: "bfd4f2"
+  description: "Customers, addresses, Indonesian regions"
+
+- name: "area: auth"
+  color: "bfd4f2"
+  description: "Authentication, authorization, API keys"
+
+- name: "area: webhook"
+  color: "bfd4f2"
+  description: "Outgoing webhooks"
+
+# ---- Area: cross-cutting ---------------------------------------------------
+
+- name: "area: docs"
+  color: "0075ca"
+  description: "Project documentation"
+
+- name: "area: deploy"
+  color: "5319e7"
+  description: "Dockerfiles, deployment guides, infrastructure"
+
+- name: "area: ci"
+  color: "5319e7"
+  description: "GitHub Actions, lint, test, release pipeline"
+
+- name: "area: i18n"
+  color: "5319e7"
+  description: "Bahasa Indonesia and English translations"
+
+# ---- Effort ----------------------------------------------------------------
+
+- name: "effort: small"
+  color: "c2e0c6"
+  description: "A few hours or less"
+
+- name: "effort: medium"
+  color: "fbca04"
+  description: "A day or two of focused work"
+
+- name: "effort: large"
+  color: "d93f0b"
+  description: "Multiple days; consider breaking down"
+
+# ---- Contribution signals --------------------------------------------------
+
+- name: "good first issue"
+  color: "7057ff"
+  description: "A safe, well-scoped issue for first-time contributors"
+
+- name: "help wanted"
+  color: "008672"
+  description: "Maintainers welcome outside contributors on this"
+
+- name: "discussion needed"
+  color: "d4c5f9"
+  description: "Open a Discussion before opening a PR"
+
+- name: "bahasa-pending"
+  color: "f9d0c4"
+  description: "Documentation needs a Bahasa Indonesia version"

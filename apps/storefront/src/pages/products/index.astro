@@ -74,6 +74,7 @@ const activeFilters = {
           emptyLabel={t("products.list.empty")}
           errorLabel={t("products.list.error")}
           skeletonLabel={t("products.list.skeleton_aria")}
+          photoComingSoonLabel={t("products.card.photo_coming_soon")}
           query={{
             ...(category ? { categorySlug: category } : {}),
             ...(search ? { search } : {}),
@@ -83,6 +84,8 @@ const activeFilters = {
             sort,
           }}
           skeletonCount={12}
+          showCount
+          showingCountTemplate={t("products.list.showing_count")}
         />
       </div>
     </div>

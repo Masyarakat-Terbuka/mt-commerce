@@ -15,6 +15,8 @@
   "home.featured.title": "New arrivals",
   "home.categories.title": "Categories",
 
+  "products.card.photo_coming_soon": "Photo coming soon",
+
   "products.list.title": "All products",
   "products.list.empty": "No products match your search.",
   "products.list.loading": "Loading products…",
@@ -25,6 +27,7 @@
   "products.list.applied_filters": "Active filters",
   "products.list.clear_filters": "Clear filters",
   "products.list.skeleton_aria": "Loading product list",
+  "products.list.showing_count": "Showing {count} products",
   "products.list.pagination.prev": "Previous",
   "products.list.pagination.next": "Next",
   "products.detail.loading": "Loading product…",
@@ -37,6 +40,7 @@
   "products.filters.price_min": "Minimum",
   "products.filters.price_max": "Maximum",
   "products.filters.search": "Search",
+  "products.filters.search_placeholder": "Search products…",
   "products.filters.sort": "Sort",
   "products.filters.apply": "Apply",
   "products.sort.newest": "Newest",

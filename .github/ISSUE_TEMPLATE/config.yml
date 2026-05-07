@@ -1,0 +1,13 @@
+# Issue chooser configuration. Surfaces Discussions and Security as
+# alternatives to filing an issue when those are the right channels.
+
+blank_issues_enabled: false
+
+contact_links:
+  - name: Pertanyaan / Question (GitHub Discussions)
+    url: https://github.com/masyarakat-terbuka/mt-commerce/discussions
+    about: For questions, ideas, and design discussions before opening an issue. Bahasa Indonesia and English are both welcome.
+
+  - name: Security vulnerability
+    url: https://github.com/masyarakat-terbuka/mt-commerce/security/policy
+    about: Please do not file security issues publicly. See SECURITY.md for the responsible disclosure process.

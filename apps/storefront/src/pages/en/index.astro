@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProductGrid from "@/islands/ProductGrid.tsx";
-import { listFeaturedProducts, listCategories, resolveApiUrl } from "@/lib/api";
+import { listCategories, resolveApiUrl } from "@/lib/api";
 import { createTranslator, localePath } from "@/lib/i18n";
 
 const locale = "en" as const;
@@ -13,44 +13,28 @@ const description = t("home.hero.subhead");
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath("en", "/products");
 
-const featured = await listFeaturedProducts(4);
 const categories = await listCategories();
-const heroImage = featured.find((p) => p.hasImage) ?? null;
 ---
 
 <BaseLayout title={title} description={description}>
-  <section class="relative w-full overflow-hidden bg-cream" aria-labelledby="home-hero">
-    <div class="relative aspect-[4/5] w-full md:aspect-auto md:h-[60vh] md:max-h-[680px]">
-      {
-        heroImage && (
-          <img
-            src={heroImage.imageUrl}
-            alt={heroImage.imageAlt[locale]}
-            loading="eager"
-            decoding="async"
-            class="absolute inset-0 h-full w-full object-cover"
-          />
-        )
-      }
-      <div class="absolute inset-0 bg-cream/60"></div>
-
-      <div class="relative mx-auto flex h-full max-w-[1280px] flex-col justify-end px-4 pb-10 md:px-8 md:pb-16">
-        <h1 id="home-hero" class="t-display max-w-[16ch] text-fg">
-          {t("home.hero.headline")}
-        </h1>
-        <p class="mt-4 max-w-[44ch] t-body text-fg">
-          {t("home.hero.subhead")}
-        </p>
-      </div>
+  {/* Hero mirrors the id/ home page — typography only, no image wash. */}
+  <section class="bg-cream" aria-labelledby="home-hero">
+    <div class="mx-auto max-w-[1280px] px-4 py-24 md:px-8 md:py-32">
+      <h1 id="home-hero" class="t-display max-w-[18ch] text-fg">
+        {t("home.hero.headline")}
+      </h1>
+      <p class="mt-5 max-w-[52ch] t-body text-muted">
+        {t("home.hero.subhead")}
+      </p>
     </div>
   </section>
 
-  <section class="mx-auto max-w-[1280px] px-4 py-16 md:px-8 md:py-24">
+  <section class="mx-auto max-w-[1280px] border-t border-line px-4 py-16 md:px-8 md:py-24">
     <div class="flex items-baseline justify-between">
       <h2 class="t-h1 text-fg">{t("home.featured.title")}</h2>
       <a
         href={localePath(locale, "/products")}
-        class="t-caption uppercase tracking-wide text-muted transition-colors duration-150 hover:text-accent"
+        class="t-body text-muted transition-colors duration-150 hover:text-accent"
       >
         {t("products.list.title")} &rarr;
       </a>
@@ -64,6 +48,7 @@ const heroImage = featured.find((p) => p.hasImage) ?? null;
         emptyLabel={t("products.list.empty")}
         errorLabel={t("products.list.error")}
         skeletonLabel={t("products.list.skeleton_aria")}
+          photoComingSoonLabel={t("products.card.photo_coming_soon")}
         query={{ pageSize: 4, sort: "newest" }}
         limit={4}
         skeletonCount={4}
@@ -75,7 +60,7 @@ const heroImage = featured.find((p) => p.hasImage) ?? null;
     categories.length > 0 && (
       <section class="border-t border-line">
         <div class="mx-auto max-w-[1280px] px-4 py-10 md:px-8 md:py-12">
-          <h2 class="t-caption uppercase tracking-wide text-muted">
+          <h2 class="t-caption text-muted">
             {t("home.categories.title")}
           </h2>
           <ul class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 t-body">
