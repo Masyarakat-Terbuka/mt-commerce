@@ -1,0 +1,259 @@
+/**
+ * Catalog routes — smoke tests over Hono's `app.request()`. The router is
+ * built with a fake `CatalogService` (the public injection point on
+ * `buildCatalogAdminRoutes`/`buildCatalogStorefrontRoutes`), keeping the
+ * test focused on:
+ *
+ *   1. The standard JSON envelope (success + error)
+ *   2. Money serialization per ADR-0007 (string amount, ISO 4217 currency)
+ *   3. Pagination shape `{ data, total, page, pageSize }`
+ *   4. Storefront active-only filter rejecting drafts
+ */
+import { describe, expect, it } from "vitest";
+import { Hono } from "hono";
+import { buildCatalogAdminRoutes } from "../../../src/modules/catalog/routes/admin.js";
+import { buildCatalogStorefrontRoutes } from "../../../src/modules/catalog/routes/storefront.js";
+import { errorHandler } from "../../../src/middleware/error-handler.js";
+import { installBigIntJsonSerializer } from "../../../src/lib/json.js";
+import type {
+  Category,
+  CatalogService,
+  InventoryLevel,
+  Paginated,
+  Product,
+  Variant,
+} from "../../../src/modules/catalog/index.js";
+import type { AppBindings } from "../../../src/lib/types.js";
+
+// Ensure the global BigInt serializer is installed exactly once for these
+// tests; in production `app.ts` does this on first call.
+installBigIntJsonSerializer();
+
+const fixedDate = new Date("2026-05-07T12:00:00.000Z");
+
+function makeProduct(overrides: Partial<Product> = {}): Product {
+  return {
+    id: overrides.id ?? "prod_test",
+    slug: overrides.slug ?? "test",
+    title: overrides.title ?? "Test Product",
+    description: overrides.description ?? null,
+    status: overrides.status ?? "active",
+    defaultCurrency: overrides.defaultCurrency ?? "IDR",
+    categoryIds: overrides.categoryIds ?? [],
+    variants: overrides.variants ?? [makeVariant()],
+    createdAt: overrides.createdAt ?? fixedDate,
+    updatedAt: overrides.updatedAt ?? fixedDate,
+    deletedAt: overrides.deletedAt ?? null,
+  };
+}
+
+function makeVariant(overrides: Partial<Variant> = {}): Variant {
+  return {
+    id: overrides.id ?? "var_test",
+    productId: overrides.productId ?? "prod_test",
+    sku: overrides.sku ?? "SKU-1",
+    title: overrides.title ?? null,
+    price: overrides.price ?? { amount: 250_000n, currency: "IDR" },
+    compareAtPrice: overrides.compareAtPrice ?? null,
+    createdAt: overrides.createdAt ?? fixedDate,
+    updatedAt: overrides.updatedAt ?? fixedDate,
+    deletedAt: overrides.deletedAt ?? null,
+  };
+}
+
+interface FakeServiceState {
+  productsBySlug: Map<string, Product>;
+  productsById: Map<string, Product>;
+}
+
+function createFakeService(state: FakeServiceState): CatalogService {
+  const fail = (): never => {
+    throw new Error("not implemented in smoke test");
+  };
+  return {
+    async createProduct(): Promise<Product> {
+      return fail();
+    },
+    async getProductById(id) {
+      return state.productsById.get(id) ?? null;
+    },
+    async getProductBySlug(slug, options) {
+      const found = state.productsBySlug.get(slug) ?? null;
+      if (!found) return null;
+      if (options?.activeOnly) {
+        if (found.status !== "active" || found.deletedAt !== null) return null;
+      }
+      return found;
+    },
+    async listProducts(query): Promise<Paginated<Product>> {
+      let items = [...state.productsById.values()];
+      if (query.activeOnly) {
+        items = items.filter(
+          (p) => p.status === "active" && p.deletedAt === null,
+        );
+      }
+      const page = query.page ?? 1;
+      const pageSize = query.pageSize ?? 20;
+      const start = (page - 1) * pageSize;
+      return {
+        data: items.slice(start, start + pageSize),
+        total: items.length,
+        page,
+        pageSize,
+      };
+    },
+    async updateProduct(): Promise<Product> {
+      return fail();
+    },
+    async softDeleteProduct(): Promise<void> {
+      return;
+    },
+    async createVariant(): Promise<Variant> {
+      return fail();
+    },
+    async updateVariant(): Promise<Variant> {
+      return fail();
+    },
+    async softDeleteVariant(): Promise<void> {
+      return;
+    },
+    async listCategories(): Promise<Category[]> {
+      return [];
+    },
+    async createCategory(): Promise<Category> {
+      return fail();
+    },
+    async updateCategory(): Promise<Category> {
+      return fail();
+    },
+    async deleteCategory(): Promise<void> {
+      return;
+    },
+    async getInventory(): Promise<InventoryLevel | null> {
+      return null;
+    },
+    async adjustInventory(): Promise<InventoryLevel> {
+      return fail();
+    },
+  };
+}
+
+function buildAdminApp(service: CatalogService): Hono<AppBindings> {
+  const app = new Hono<AppBindings>();
+  app.route("/admin/v1", buildCatalogAdminRoutes(service));
+  app.onError(errorHandler);
+  return app;
+}
+
+function buildStorefrontApp(service: CatalogService): Hono<AppBindings> {
+  const app = new Hono<AppBindings>();
+  app.route("/storefront/v1", buildCatalogStorefrontRoutes(service));
+  app.onError(errorHandler);
+  return app;
+}
+
+describe("admin routes /admin/v1/products", () => {
+  it("serializes Money as a string amount + currency", async () => {
+    const product = makeProduct({
+      slug: "kemeja-batik",
+      variants: [
+        makeVariant({
+          price: { amount: 1_500_000n, currency: "IDR" },
+          compareAtPrice: { amount: 2_000_000n, currency: "IDR" },
+        }),
+      ],
+    });
+    const state: FakeServiceState = {
+      productsBySlug: new Map([[product.slug, product]]),
+      productsById: new Map([[product.id, product]]),
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request("/admin/v1/products/prod_test");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      variants: Array<{
+        price: { amount: string; currency: string };
+        compareAtPrice: { amount: string; currency: string } | null;
+      }>;
+    };
+    expect(body.variants[0]?.price).toEqual({
+      amount: "1500000",
+      currency: "IDR",
+    });
+    expect(body.variants[0]?.compareAtPrice).toEqual({
+      amount: "2000000",
+      currency: "IDR",
+    });
+  });
+
+  it("returns the standard error envelope for not-found", async () => {
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request("/admin/v1/products/prod_missing");
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as {
+      error: { code: string; message: string; details: Record<string, unknown> };
+    };
+    expect(body.error.code).toBe("not_found");
+    expect(typeof body.error.message).toBe("string");
+  });
+
+  it("paginates the list response with { data, total, page, pageSize }", async () => {
+    const products = new Map<string, Product>();
+    for (let i = 0; i < 25; i++) {
+      const p = makeProduct({ id: `prod_${i}`, slug: `p-${i}` });
+      products.set(p.id, p);
+    }
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: products,
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request("/admin/v1/products?page=2&pageSize=10");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: unknown[];
+      total: number;
+      page: number;
+      pageSize: number;
+    };
+    expect(body.total).toBe(25);
+    expect(body.page).toBe(2);
+    expect(body.pageSize).toBe(10);
+    expect(body.data).toHaveLength(10);
+  });
+});
+
+describe("storefront routes /storefront/v1/products/:slug", () => {
+  it("hides drafts from storefront callers", async () => {
+    const draft = makeProduct({ slug: "draft-only", status: "draft" });
+    const state: FakeServiceState = {
+      productsBySlug: new Map([[draft.slug, draft]]),
+      productsById: new Map([[draft.id, draft]]),
+    };
+    const app = buildStorefrontApp(createFakeService(state));
+    const res = await app.request("/storefront/v1/products/draft-only");
+    expect(res.status).toBe(404);
+  });
+
+  it("returns active products with Money serialized as MoneyJSON", async () => {
+    const product = makeProduct({ slug: "active-listing" });
+    const state: FakeServiceState = {
+      productsBySlug: new Map([[product.slug, product]]),
+      productsById: new Map([[product.id, product]]),
+    };
+    const app = buildStorefrontApp(createFakeService(state));
+    const res = await app.request("/storefront/v1/products/active-listing");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      slug: string;
+      variants: Array<{ price: { amount: string; currency: string } }>;
+    };
+    expect(body.slug).toBe("active-listing");
+    expect(body.variants[0]?.price.currency).toBe("IDR");
+    expect(body.variants[0]?.price.amount).toMatch(/^\d+$/);
+  });
+});
