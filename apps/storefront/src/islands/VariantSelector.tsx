@@ -11,23 +11,20 @@
  * "thump" as the user clicked through them. The terracotta border alone
  * is enough state signal in the calmer redesign.
  *
- * When a variant is selected, this island:
- *   1. Updates its own displayed price using local React state.
- *   2. Dispatches a `variant-change` CustomEvent on the document so other
- *      islands on the page (currently `AddToCartButton`) can react.
- *
- * Inter-island communication via DOM events is intentional and minimal. It
- * avoids a global store while the cart module does not yet exist. When that
- * lands, both islands will read from a shared client-side store and this
- * event-bus pattern goes away.
+ * When a variant is picked, this island writes to the module-level
+ * `variant-store` keyed by `productId`. AddToCartButton subscribes to that
+ * same store, so the two surfaces stay in sync without sharing a React
+ * tree (Astro hydrates each island independently). See
+ * `./lib/variant-store.ts` for the full rationale.
  *
  * NOTE: the selected price is rendered by `ProductDetail` (not here), so
  * this island only renders the chips. The price block above the chips
  * remains anchored at the lowest variant price, matching the typical
  * Saturdays NYC behaviour where chips don't reshuffle a "from" price.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { format as formatMoney, type Money } from "@mt-commerce/core/money";
+import { setSelectedVariant } from "./lib/variant-store.js";
 
 export type VariantOption = {
   id: string;
@@ -38,6 +35,8 @@ export type VariantOption = {
 };
 
 export type VariantSelectorProps = {
+  /** Stable product id — keys the shared variant store. */
+  productId: string;
   variants: VariantOption[];
   /** BCP 47 locale for currency formatting. */
   locale: string;
@@ -48,6 +47,7 @@ export type VariantSelectorProps = {
 };
 
 export default function VariantSelector({
+  productId,
   variants,
   locale,
   heading,
@@ -60,13 +60,30 @@ export default function VariantSelector({
   const [selectedId, setSelectedId] = useState(initial.id);
   const selected = variants.find((v) => v.id === selectedId) ?? initial;
 
+  // Seed the store with the initial variant on mount so subscribers (e.g.
+  // AddToCartButton) see a value even before the user clicks a chip. We
+  // intentionally do this in an effect rather than at render time — keeping
+  // module-level writes out of the render path makes the component safe to
+  // server-render and avoids surprising re-render loops in subscribers.
+  //
+  // Initial seed is keyed to the productId only. Re-seeding when the
+  // `variants` array reference changes would clobber the user's pick, so
+  // we read `initial` via a ref-equivalent local instead of widening deps.
+  const initialVariantId = initial.id;
+  const initialAvailable = initial.available;
+  useEffect(() => {
+    setSelectedVariant(productId, {
+      variantId: initialVariantId,
+      available: initialAvailable,
+    });
+  }, [productId, initialVariantId, initialAvailable]);
+
   function onSelect(variant: VariantOption) {
     setSelectedId(variant.id);
-    document.dispatchEvent(
-      new CustomEvent("variant-change", {
-        detail: { variantId: variant.id, available: variant.available },
-      }),
-    );
+    setSelectedVariant(productId, {
+      variantId: variant.id,
+      available: variant.available,
+    });
   }
 
   // If there is only a single variant, hide the chips entirely — picking
