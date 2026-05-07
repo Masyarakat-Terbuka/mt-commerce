@@ -18,6 +18,7 @@ import { Hono } from "hono";
 import { buildHealthRoutes } from "./health.js";
 import { buildV1Routes } from "./v1/index.js";
 import { adminRoutes as catalogAdminRoutes, storefrontRoutes as catalogStorefrontRoutes } from "../modules/catalog/index.js";
+import { adminRoutes as authAdminRoutes, storefrontRoutes as authStorefrontRoutes } from "../modules/auth/index.js";
 import type { AppBindings } from "../lib/types.js";
 
 export function buildRoutes(): Hono<AppBindings> {
@@ -28,6 +29,8 @@ export function buildRoutes(): Hono<AppBindings> {
   // Admin and storefront mount at top-level versioned prefixes. As more
   // modules ship, each registers its admin/storefront sub-routers under the
   // same shared prefix.
+  router.route("/admin/v1/auth", authAdminRoutes);
+  router.route("/storefront/v1/auth", authStorefrontRoutes);
   router.route("/admin/v1", catalogAdminRoutes);
   router.route("/storefront/v1", catalogStorefrontRoutes);
 

@@ -9,12 +9,13 @@
  *   3. Pagination shape `{ data, total, page, pageSize }`
  *   4. Storefront active-only filter rejecting drafts
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { buildCatalogAdminRoutes } from "../../../src/modules/catalog/routes/admin.js";
 import { buildCatalogStorefrontRoutes } from "../../../src/modules/catalog/routes/storefront.js";
 import { errorHandler } from "../../../src/middleware/error-handler.js";
 import { installBigIntJsonSerializer } from "../../../src/lib/json.js";
+import { authService } from "../../../src/modules/auth/index.js";
 import type {
   Category,
   CatalogService,
@@ -28,6 +29,59 @@ import type { AppBindings } from "../../../src/lib/types.js";
 // Ensure the global BigInt serializer is installed exactly once for these
 // tests; in production `app.ts` does this on first call.
 installBigIntJsonSerializer();
+
+// The catalog admin routes are gated by requireAuth + requireRole from the
+// auth module. These tests focus on catalog wire/validation behavior, not
+// auth — so we stub the auth singleton's verifier and staff lookup to
+// always succeed for a synthetic bearer. Each request that wants to be
+// authenticated sends `Authorization: Bearer test-staff` and gets through
+// as a staff user named `usr_test`.
+const STAFF_BEARER = "Bearer test-staff";
+const TEST_NOW = new Date("2026-05-07T12:00:00.000Z");
+const STAFF_USER = {
+  id: "usr_test",
+  email: "test@example.com",
+  emailVerified: true,
+  name: "Test",
+  image: null,
+  createdAt: TEST_NOW,
+  updatedAt: TEST_NOW,
+};
+
+beforeEach(() => {
+  vi.spyOn(authService, "verifyApiKey").mockImplementation(async (bearer) => {
+    if (bearer !== "test-staff") return null;
+    return {
+      apiKey: {
+        id: "apik_test",
+        userId: STAFF_USER.id,
+        name: "test",
+        scopes: ["catalog:read", "catalog:write"],
+        lastUsedAt: null,
+        createdAt: TEST_NOW,
+        revokedAt: null,
+      },
+      user: STAFF_USER,
+    };
+  });
+  vi.spyOn(authService, "getStaffProfile").mockImplementation(async (id) => {
+    if (id !== STAFF_USER.id) return null;
+    return {
+      authUserId: STAFF_USER.id,
+      role: "admin",
+      displayName: "Test",
+      createdAt: TEST_NOW,
+      updatedAt: TEST_NOW,
+    };
+  });
+});
+
+/** Convenience: attach the test bearer to a request init. */
+function withAuth(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers);
+  headers.set("authorization", STAFF_BEARER);
+  return { ...init, headers };
+}
 
 const fixedDate = new Date("2026-05-07T12:00:00.000Z");
 
@@ -168,7 +222,7 @@ describe("admin routes /admin/v1/products", () => {
       productsById: new Map([[product.id, product]]),
     };
     const app = buildAdminApp(createFakeService(state));
-    const res = await app.request("/admin/v1/products/prod_test");
+    const res = await app.request("/admin/v1/products/prod_test", withAuth());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       variants: Array<{
@@ -192,7 +246,7 @@ describe("admin routes /admin/v1/products", () => {
       productsById: new Map(),
     };
     const app = buildAdminApp(createFakeService(state));
-    const res = await app.request("/admin/v1/products/prod_missing");
+    const res = await app.request("/admin/v1/products/prod_missing", withAuth());
     expect(res.status).toBe(404);
     const body = (await res.json()) as {
       error: { code: string; message: string; details: Record<string, unknown> };
@@ -211,11 +265,11 @@ describe("admin routes /admin/v1/products", () => {
     const app = buildAdminApp(createFakeService(state));
     const res = await app.request(
       "/admin/v1/variants/var_xyz/inventory/adjust",
-      {
+      withAuth({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ delta: 9_999_999 }),
-      },
+      }),
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
@@ -232,15 +286,18 @@ describe("admin routes /admin/v1/products", () => {
       productsById: new Map(),
     };
     const app = buildAdminApp(createFakeService(state));
-    const res = await app.request("/admin/v1/products", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        slug: "unknown-currency",
-        title: "Unknown Currency",
-        defaultCurrency: "XXX",
+    const res = await app.request(
+      "/admin/v1/products",
+      withAuth({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          slug: "unknown-currency",
+          title: "Unknown Currency",
+          defaultCurrency: "XXX",
+        }),
       }),
-    });
+    );
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
       error: { code: string };
@@ -257,6 +314,7 @@ describe("admin routes /admin/v1/products", () => {
     const app = buildAdminApp(createFakeService(state));
     const res = await app.request(
       "/admin/v1/products?categoryId=cat_1&categorySlug=foo",
+      withAuth(),
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
@@ -276,7 +334,10 @@ describe("admin routes /admin/v1/products", () => {
       productsById: products,
     };
     const app = buildAdminApp(createFakeService(state));
-    const res = await app.request("/admin/v1/products?page=2&pageSize=10");
+    const res = await app.request(
+      "/admin/v1/products?page=2&pageSize=10",
+      withAuth(),
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       data: unknown[];

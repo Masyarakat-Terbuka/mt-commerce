@@ -60,6 +60,42 @@ const baseSchema = z.object({
   REDIS_URL: z.string().url({ message: "REDIS_URL must be a valid URL." }),
   CORS_ORIGIN: z.string().optional(),
   TRUST_PROXY: booleanFromString.default(false),
+  // Auth — Better Auth secret. Required in every non-test environment because
+  // Better Auth refuses to sign cookies without it. The 32-char minimum is the
+  // framework's recommendation (`openssl rand -base64 32` produces a value of
+  // sufficient entropy). In `test` we provide a fixed dummy via vitest config.
+  BETTER_AUTH_SECRET: isTestRun
+    ? z.string().default("test-secret-test-secret-test-secret-test")
+    : z
+        .string()
+        .min(32, {
+          message:
+            "BETTER_AUTH_SECRET must be at least 32 characters. Generate one with `openssl rand -base64 32`.",
+        }),
+  /**
+   * Optional. Better Auth uses this to construct callback URLs and verify
+   * origin headers. Leave unset in dev — env.ts derives a sensible default
+   * from `PORT` below. Required in production deployments behind a real host.
+   */
+  BETTER_AUTH_URL: z
+    .string()
+    .url({ message: "BETTER_AUTH_URL must be a valid URL." })
+    .optional(),
+  SESSION_COOKIE_NAME: z
+    .string()
+    .min(1)
+    .regex(/^[A-Za-z0-9_-]+$/, {
+      message:
+        "SESSION_COOKIE_NAME may only contain letters, digits, underscores, or hyphens.",
+    })
+    .default("mt_session"),
+  /**
+   * Default mirrors the production guard: secure cookies in production, plain
+   * cookies in dev so a local browser without HTTPS can still authenticate.
+   * Operators can force-enable in non-prod for testing TLS-terminated
+   * proxies.
+   */
+  SESSION_COOKIE_SECURE: booleanFromString.optional(),
 });
 
 const envSchema = baseSchema.extend({
@@ -94,10 +130,12 @@ if (!parsed.success) {
 
 const data = parsed.data;
 
+const isProd = data.NODE_ENV === "production";
+
 export const env = {
   nodeEnv: data.NODE_ENV,
   isDev: data.NODE_ENV === "development",
-  isProd: data.NODE_ENV === "production",
+  isProd,
   isTest: data.NODE_ENV === "test",
   port: data.PORT,
   logLevel: data.LOG_LEVEL,
@@ -106,6 +144,21 @@ export const env = {
   /** Raw, unparsed CORS_ORIGIN. The CORS middleware parses and validates it. */
   corsOrigin: data.CORS_ORIGIN,
   trustProxy: data.TRUST_PROXY,
+  betterAuthSecret: data.BETTER_AUTH_SECRET,
+  /**
+   * Best-effort default: when the operator did not pin a URL, build one from
+   * the port the API listens on. Better Auth uses this to construct callback
+   * URLs and to verify the `Origin` header on credentialed requests.
+   */
+  betterAuthUrl:
+    data.BETTER_AUTH_URL ?? `http://localhost:${String(data.PORT)}`,
+  sessionCookieName: data.SESSION_COOKIE_NAME,
+  /**
+   * If the operator did not set the flag explicitly, derive from NODE_ENV:
+   * secure cookies in production, plain cookies in dev so a local browser on
+   * `http://localhost` still authenticates.
+   */
+  sessionCookieSecure: data.SESSION_COOKIE_SECURE ?? isProd,
 } as const;
 
 export type Env = typeof env;

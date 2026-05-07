@@ -16,6 +16,8 @@
     "@hono/swagger-ui": "^0.5.0",
     "@hono/zod-openapi": "^0.18.0",
     "@mt-commerce/core": "workspace:*",
+    "@node-rs/argon2": "^2.0.2",
+    "better-auth": "^1.2.0",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",

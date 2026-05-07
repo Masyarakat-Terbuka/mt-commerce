@@ -3,12 +3,16 @@
  * categories, and inventory. Mounted at `/admin/v1` from the top-level
  * router.
  *
- * Auth status:
+ * Auth: every route in this file requires a session-authenticated staff
+ * user. The role gate accepts `owner`, `admin`, and `staff` — `viewer` is
+ * read-only at the role level and intentionally NOT in the set, since this
+ * router's surface is mutating. A future read-only `/admin/v1/catalog/...`
+ * surface (if added) would gate on `viewer` plus the others.
  *
- *   TODO requireRole('admin') when auth module lands. Every route in this
- *   file is currently public and that is wrong for production. The auth
- *   module owns the middleware; this file will pick it up via a single
- *   `router.use("*", requireRole("admin"))` once available.
+ * The middleware comes from the auth module's public contract per ADR-0005.
+ * `requireAuth` runs first to populate `c.var.authUser`; `requireRole` then
+ * looks up the staff profile and rejects with 403 if the role is not in
+ * the accepted set.
  *
  * Conventions in this file:
  *   - Bodies are validated through the Zod schemas exported from `types.ts`.
@@ -27,6 +31,7 @@ import {
   issuesToDetails,
 } from "../../../lib/errors.js";
 import type { AppBindings } from "../../../lib/types.js";
+import { requireAuth, requireRole } from "../../auth/index.js";
 import {
   toWireCategory,
   toWireInventoryLevel,
@@ -76,6 +81,11 @@ export function buildCatalogAdminRoutes(
   service: CatalogService,
 ): Hono<AppBindings> {
   const router = new Hono<AppBindings>();
+
+  // Gate every route in this router. The auth module's middlewares populate
+  // c.var.authUser and check the staff profile's role.
+  router.use("*", requireAuth());
+  router.use("*", requireRole("owner", "admin", "staff"));
 
   // -------------------------------------------------------------------
   // Products

@@ -8,3 +8,6 @@ export * from "./products.js";
 export * from "./product_variants.js";
 export * from "./inventory_levels.js";
 export * from "./product_categories.js";
+export * from "./auth.js";
+export * from "./staff_profiles.js";
+export * from "./api_keys.js";
