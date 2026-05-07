@@ -1,0 +1,72 @@
+---
+/**
+ * Help topic detail — Indonesian.
+ *
+ * `getStaticPaths` enumerates every help entry under `id/` so each topic
+ * gets a static HTML file at build time. The MDX body is rendered through
+ * `<Content />` from `entry.render()` and dropped into a centered prose
+ * column. Styling for headings, paragraphs, lists, and links comes from
+ * the `.prose-mt` rule in `global.css` — see the comment there for the
+ * reasoning against `@tailwindcss/typography`.
+ *
+ * Astro 5 returns content via `render()` rather than the older default-
+ * export pattern, so we destructure `Content` from the awaited result.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getCollection, render, type CollectionEntry } from "astro:content";
+import { createTranslator, localePath } from "@/lib/i18n";
+
+export async function getStaticPaths() {
+  const entries = await getCollection("help", (entry: CollectionEntry<"help">) =>
+    entry.id.startsWith("id/"),
+  );
+  return entries.map((entry) => ({
+    // The route param is the bare slug (e.g. "shipping"), not the locale-
+    // prefixed collection id ("id/shipping").
+    params: { slug: entry.id.replace(/^id\//, "") },
+    props: { entry },
+  }));
+}
+
+interface Props {
+  entry: CollectionEntry<"help">;
+}
+
+const locale = "id" as const;
+const t = createTranslator(locale);
+
+const { entry } = Astro.props as Props;
+const { Content } = await render(entry);
+
+const title = `${entry.data.title} — ${t("help.index.title")} — mt-commerce`;
+---
+
+<BaseLayout title={title} description={entry.data.summary}>
+  <article class="mx-auto max-w-[64ch] px-5 pb-24 pt-12 md:px-8 md:pb-32 md:pt-20">
+    {/*
+      Quiet back-link — text-only, no chevron-icon component, matches the
+      rest of the storefront's restrained ornamentation.
+    */}
+    <a
+      href={localePath(locale, "/help")}
+      class="t-caption text-muted underline-offset-[6px] transition-colors duration-150 hover:text-accent hover:underline"
+    >
+      &larr; {t("help.index.title")}
+    </a>
+
+    <header class="mt-8">
+      <h1 class="t-display text-fg">{entry.data.title}</h1>
+      <p class="mt-4 t-body text-muted">{entry.data.summary}</p>
+    </header>
+
+    {/*
+      MDX body. The `prose-mt` class scopes the small set of element rules
+      defined in global.css — h2/h3, p, ul/ol, a, strong. Anything outside
+      that list will fall back to base styles, which is the correct
+      conservative default until a real need shows up.
+    */}
+    <div class="prose-mt mt-12">
+      <Content />
+    </div>
+  </article>
+</BaseLayout>

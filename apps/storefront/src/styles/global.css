@@ -218,6 +218,84 @@
   }
 
   /*
+   * Prose styling for MDX-rendered content (help topics, legal drafts).
+   *
+   * Why a hand-rolled rule rather than `@tailwindcss/typography`:
+   *   - The plugin ships a large, opinionated stylesheet that fights our
+   *     design tokens (it sets its own colors, sizes, weights). Our type
+   *     ramp is intentionally narrow; the plugin would widen it.
+   *   - We control exactly five elements (h2, h3, p, ul/ol, a). Anything
+   *     beyond that is not used in the current MDX content, and adding
+   *     selectors here is cheaper than overriding the plugin.
+   *   - One less dependency to track.
+   *
+   * Scoped under `.prose-mt` so authors must opt in. The class is applied
+   * to the wrapping element of the MDX render slot, never to a page root.
+   *
+   * Type sizes intentionally re-use the same scale as `.t-body`, so the
+   * MDX content feels like the rest of the storefront rather than a docs
+   * island with a different rhythm. Headings use `t-h1` for `h2` (the top
+   * heading inside an entry) and a slightly smaller variant for `h3`.
+   */
+  .prose-mt {
+    color: var(--color-fg);
+  }
+  .prose-mt > * + * {
+    margin-top: 1.25rem;
+  }
+  .prose-mt h2 {
+    font-size: 1.25rem; /* 20px */
+    line-height: 1.75rem;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    margin-top: 2.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .prose-mt h2:first-child {
+    margin-top: 0;
+  }
+  .prose-mt h3 {
+    font-size: 1.0625rem; /* 17px */
+    line-height: 1.5rem;
+    font-weight: 500;
+    margin-top: 2rem;
+    margin-bottom: 0.5rem;
+  }
+  .prose-mt p {
+    font-size: 0.9375rem;
+    line-height: 1.625rem;
+    color: var(--color-fg);
+  }
+  .prose-mt ul,
+  .prose-mt ol {
+    font-size: 0.9375rem;
+    line-height: 1.625rem;
+    padding-left: 1.25rem;
+  }
+  .prose-mt ul {
+    list-style: disc;
+  }
+  .prose-mt ol {
+    list-style: decimal;
+  }
+  .prose-mt li + li {
+    margin-top: 0.375rem;
+  }
+  .prose-mt a {
+    color: var(--color-fg);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: color 150ms ease;
+  }
+  .prose-mt a:hover {
+    color: var(--color-accent);
+  }
+  .prose-mt strong {
+    font-weight: 500;
+  }
+
+  /*
    * Skeleton block — lower-contrast than before. Earlier passes used a
    * solid `--color-line` rectangle which read as "broken" rather than
    * "loading". The new value sits ~3% darker than cream so the pulse is

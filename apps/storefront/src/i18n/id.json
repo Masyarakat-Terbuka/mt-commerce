@@ -6,6 +6,24 @@
   "nav.search": "Cari",
   "nav.account": "Akun",
   "nav.menu": "Menu",
+  "nav.help": "Bantuan",
+  "nav.privacy": "Kebijakan privasi",
+  "nav.terms": "Syarat layanan",
+
+  "help.index.title": "Bantuan",
+  "help.index.subhead": "Panduan singkat tentang pengiriman, pembayaran, pengembalian, dan platform mt-commerce.",
+  "help.topics.shipping": "Pengiriman",
+  "help.topics.returns": "Pengembalian",
+  "help.topics.payment": "Pembayaran",
+  "help.topics.faq": "Pertanyaan umum",
+
+  "about.title": "Tentang mt-commerce",
+  "about.subhead": "Platform commerce sumber terbuka untuk Indonesia.",
+
+  "legal.privacy.title": "Kebijakan privasi",
+  "legal.terms.title": "Syarat layanan",
+  "legal.draft_notice": "Halaman ini adalah draft dan bukan nasihat hukum. Pengelola toko sebaiknya melakukan peninjauan sendiri sebelum menerbitkan.",
+  "legal.last_updated": "Diperbarui",
 
   "home.hero.title": "Mulai jualan online dengan toko Anda sendiri.",
   "home.hero.subtitle": "Toko digital yang ringan dibuka di jaringan apa pun, dengan pembayaran dan pengiriman lokal.",

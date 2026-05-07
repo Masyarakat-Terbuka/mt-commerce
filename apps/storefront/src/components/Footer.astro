@@ -1,14 +1,21 @@
 ---
 /**
- * Footer — a single line of inline links and a copyright.
+ * Footer — sectioned link groups, calm typography.
  *
- * The 4-column "site map" layout is intentionally gone. It read as
- * generic ecommerce; the editorial direction calls for a single
- * horizontal row of text-links separated by middots, followed by a
- * copyright row with a quiet locale toggle on the right.
+ * The previous footer was a single inline middot-separated row. With the
+ * static content pages landing (help/about/legal), we now have enough
+ * destinations that a sectioned layout reads more clearly than another
+ * inline pile. The original inline row pattern is preserved underneath
+ * the section grid as the "secondary" line — the sections handle
+ * navigation, the inline row keeps the calm bottom edge.
  *
- * No social icons, no newsletter signup, no "back to top" button. When
- * something becomes worth pointing at, it earns a place inline here.
+ * Sections:
+ *   - Help (Pengiriman / Pengembalian / Pembayaran / FAQ)
+ *   - About (Tentang)
+ *   - Legal (Privasi / Syarat)
+ *
+ * No social icons, no newsletter, no "back to top". Same restraint as
+ * before, just more navigational reach.
  */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
 
@@ -23,40 +30,69 @@ const stripped = currentPath.replace(/^\/(en|id)(?=\/|$)/, "") || "/";
 const idHref = localePath("id", stripped);
 const enHref = localePath("en", stripped);
 
-const links = [
-  { label: t("footer.col.about.title"), href: localePath(locale, "/about") },
-  { label: t("footer.col.help.title"), href: localePath(locale, "/help/faq") },
-  { label: t("footer.col.community.title"), href: localePath(locale, "/contributing") },
-  { label: t("footer.col.legal.privacy"), href: localePath(locale, "/legal/privacy") },
-  { label: t("footer.col.legal.terms"), href: localePath(locale, "/legal/terms") },
+// Sectioned link model. Defining the data once keeps the JSX flat and
+// makes adding a future section a one-line change.
+const sections = [
+  {
+    title: t("footer.col.help.title"),
+    links: [
+      { label: t("help.topics.shipping"), href: localePath(locale, "/help/shipping") },
+      { label: t("help.topics.returns"), href: localePath(locale, "/help/returns") },
+      { label: t("help.topics.payment"), href: localePath(locale, "/help/payment") },
+      { label: t("help.topics.faq"), href: localePath(locale, "/help/faq") },
+    ],
+  },
+  {
+    title: t("footer.col.about.title"),
+    links: [
+      { label: t("nav.about"), href: localePath(locale, "/about") },
+      { label: t("footer.col.community.github"), href: "https://github.com/masyarakat-terbuka/mt-commerce" },
+    ],
+  },
+  {
+    title: t("footer.col.legal.title"),
+    links: [
+      { label: t("nav.privacy"), href: localePath(locale, "/legal/privacy") },
+      { label: t("nav.terms"), href: localePath(locale, "/legal/terms") },
+    ],
+  },
 ];
 ---
 
 <footer class="mt-32 border-t border-line bg-cream">
   <div class="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16">
-    {/* Single inline row of links — middot separated, wraps gracefully. */}
-    <ul class="flex flex-wrap items-center gap-x-3 gap-y-2 t-body">
+    {/*
+      Sectioned grid — three columns on desktop, stacks on mobile. Section
+      titles use the overline style so they read as quiet labels rather
+      than competing headings.
+    */}
+    <div class="grid grid-cols-1 gap-10 md:grid-cols-3 md:gap-12">
       {
-        links.map((link, idx) => (
-          <li class="flex items-center gap-x-3">
-            <a
-              class="text-fg transition-colors duration-150 hover:text-accent"
-              href={link.href}
-            >
-              {link.label}
-            </a>
-            {idx < links.length - 1 && (
-              <span class="text-faint" aria-hidden="true">·</span>
-            )}
-          </li>
+        sections.map((section) => (
+          <div>
+            <h2 class="t-overline text-muted">{section.title}</h2>
+            <ul class="mt-4 flex flex-col gap-2 t-body">
+              {section.links.map((link) => (
+                <li>
+                  <a
+                    class="text-fg transition-colors duration-150 hover:text-accent"
+                    href={link.href}
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         ))
       }
-    </ul>
+    </div>
 
-    {/* Copyright + locale toggle. The line above does the navigational work;
-        this row is the page's quiet bottom edge. */}
+    {/* Copyright + locale toggle. The grid above does the navigational work;
+        this row is the page's quiet bottom edge. Pulled apart from the grid
+        with a thin border-line so the two zones read as separate. */}
     <div
-      class="mt-10 flex flex-col items-start gap-3 t-caption md:flex-row md:items-center md:justify-between"
+      class="mt-12 flex flex-col items-start gap-3 border-t border-line pt-8 t-caption md:flex-row md:items-center md:justify-between"
     >
       <p class="text-faint">© {year} {t("footer.copyright")}</p>
       <div class="flex items-center gap-1">

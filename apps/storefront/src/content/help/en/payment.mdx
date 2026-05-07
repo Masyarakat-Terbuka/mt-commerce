@@ -1,0 +1,39 @@
+---
+title: Payment
+summary: Payment methods supported by mt-commerce, including manual bank transfer, gateways, and cash on delivery.
+order: 3
+---
+
+mt-commerce supports several payment methods commonly used in Indonesia. Which methods are available in a given store is decided by the operator.
+
+## Manual bank transfer
+
+The buyer chooses a destination bank at checkout, then transfers the amount based on instructions emailed after the order is created. The store operator confirms payment manually after funds arrive.
+
+This is a fit for stores that do not yet need a paid gateway, or that handle volumes manageable by hand. There are no transaction fees from a third party.
+
+## Payment gateway (Midtrans)
+
+For stores that want automatic payment confirmation, mt-commerce integrates with Midtrans. Through Midtrans, buyers can pay with:
+
+- Virtual Accounts (BCA, BRI, BNI, Mandiri, Permata)
+- E-wallets (GoPay, ShopeePay, OVO, Dana)
+- QRIS
+- Credit and debit cards
+- Retail outlets (Indomaret, Alfamart)
+
+Successful payments automatically move the order to "Paid" without manual confirmation.
+
+## Cash on delivery (COD)
+
+For deliveries through couriers that support it, mt-commerce enables cash on delivery via the Biteship integration. Buyers pay cash to the courier when the parcel arrives.
+
+COD is usually limited to certain regions and order values, per courier rules. Operators can disable COD if they prefer.
+
+## Security
+
+mt-commerce does not store buyer card data. For gateway payments, card data is handled entirely by the PCI-DSS-compliant gateway provider. For manual bank transfer, mt-commerce only stores the transfer reference entered by the operator.
+
+## Refunds
+
+See the [Returns](/en/help/returns) page for details on how and when refunds are processed.
