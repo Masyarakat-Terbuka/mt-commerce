@@ -170,14 +170,35 @@ dropdown is wrong:
 }
 ```
 
+## Demo data
+
+Run `bun --filter '@mt-commerce/api' db:seed:regions` to populate the
+region tables with a hand-picked sample so the address dropdowns and
+postal-code lookup return real data immediately. The seed is idempotent
+(`INSERT ... ON CONFLICT (id) DO NOTHING`) so you can re-run it freely.
+
+What ships in the sample:
+
+- **3 provinces** — DKI Jakarta (`31`), Jawa Barat (`32`), Jawa Timur (`35`)
+- **5 kota/kabupaten** — Jakarta Pusat (`3171`), Jakarta Selatan (`3174`),
+  Bandung (`3273`), Surabaya (`3578`), Malang (`3573`)
+- **8 kecamatan** — two each in Jakarta Pusat (Menteng, Tanah Abang),
+  Bandung (Coblong, Sukajadi), Surabaya (Gubeng, Wonokromo), and Malang
+  (Klojen, Blimbing)
+- **12 kelurahan** with real five-digit postal codes
+
+Jakarta Selatan is intentionally seeded without children so the address-
+hierarchy validator has a kota-with-no-kecamatan case to refuse.
+
+The full BPS dataset (~80k rows) lands as a separate bulk loader; this
+seed exists to unblock interactive dev work, not to replace it.
+
 ## Follow-ups (out of scope this round)
 
 - Auth integration: import `requireAuth` / `requireRole` from
   `modules/auth`, drop the `x-customer-id` storefront stand-in header.
 - Add the deferred `customers.auth_user_id` FK to `auth_users.id` in a
   follow-up migration.
-- Sample regions seed script (a few real BPS rows so dev environments
-  have something to autofill against).
 - Full BPS regions data import — bulk loader + admin UI for region updates.
 - Mapper-level and route-level tests (this round ships only the focused
   service test).

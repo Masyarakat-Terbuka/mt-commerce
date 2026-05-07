@@ -86,6 +86,11 @@ cd mt-commerce
 cp .env.example .env
 docker compose up -d
 
+# Apply database migrations and load demo data so the storefront and admin
+# come up with real categories, products, and Indonesian region rows.
+bun --filter '@mt-commerce/api' db:migrate
+bun --filter '@mt-commerce/api' db:seed
+
 # API at http://localhost:8000
 # Admin at http://localhost:7000
 # Storefront at http://localhost:3000

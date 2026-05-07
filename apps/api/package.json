@@ -10,7 +10,11 @@
     "lint": "eslint .",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "bun run src/db/migrate.ts"
+    "db:migrate": "bun run src/db/migrate.ts",
+    "db:seed": "bun run src/scripts/seed.ts",
+    "db:seed:regions": "bun run src/scripts/seed-regions.ts",
+    "db:seed:demo-catalog": "bun run src/scripts/seed-demo-catalog.ts",
+    "provision-owner": "bun run src/scripts/provision-owner.ts"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.5.0",

@@ -109,6 +109,19 @@ A variant's `priceCurrency` must equal the parent product's
 product default is used. Cross-currency variants under one product are
 forbidden — create separate products for separate currencies.
 
+## Demo data
+
+Run `bun --filter '@mt-commerce/api' db:seed:demo-catalog` to populate
+the catalog with six realistic Indonesian products (kopi, batik,
+kerajinan, kuliner) across five categories. Each variant gets an
+inventory row with `available: 100`. The seed is idempotent — products
+conflict on `slug`, variants on `sku`, categories on `slug` — so a
+re-run on a non-empty DB is a no-op.
+
+Use this for local dev and demos; the source list lives at
+`src/modules/catalog/seed/demo-catalog.ts`. Edit it freely to shape
+the catalog you want to walk through with stakeholders.
+
 ## TODO follow-ups
 
 - `requireRole('admin')` middleware once the auth module ships
