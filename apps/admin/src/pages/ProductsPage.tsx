@@ -19,7 +19,11 @@ import * as React from "react";
 import { Link } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, ImageAdd01Icon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  Edit02Icon,
+  ImageAdd01Icon,
+} from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -254,6 +258,11 @@ export function ProductsPage() {
                 <TableHead className="w-40">
                   {t("products.col.updated")}
                 </TableHead>
+                <TableHead className="w-20 text-right">
+                  <span className="sr-only">
+                    {t("products.col.actions")}
+                  </span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -274,6 +283,9 @@ export function ProductsPage() {
                     </TableCell>
                     <TableCell>
                       <Skeleton className="h-3.5 w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="ml-auto h-6 w-12" />
                     </TableCell>
                   </TableRow>
                 ))
@@ -316,11 +328,23 @@ export function ProductsPage() {
                     <TableCell className="text-muted-foreground">
                       {relativeTime(product.updatedAt, locale)}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="sm">
+                        <Link
+                          to="/produk/$id"
+                          params={{ id: product.id }}
+                          aria-label={t("products.action.edit")}
+                        >
+                          <HugeiconsIcon icon={Edit02Icon} data-icon />
+                          <span>{t("products.action.edit")}</span>
+                        </Link>
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-12">
+                  <TableCell colSpan={6} className="py-12">
                     <Empty>
                       <EmptyHeader>
                         <EmptyTitle>{t("products.empty")}</EmptyTitle>

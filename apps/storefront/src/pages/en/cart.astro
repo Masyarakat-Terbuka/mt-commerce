@@ -1,0 +1,33 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import CartPage from "@/islands/CartPage.tsx";
+import { createTranslator, localePath } from "@/lib/i18n";
+
+const locale = "en" as const;
+const t = createTranslator(locale);
+const intlLocale = "en-US";
+
+const productsHref = localePath(locale, "/products");
+const checkoutHref = localePath(locale, "/checkout");
+
+const title = `${t("cart.title")} — mt-commerce`;
+---
+
+<BaseLayout title={title} description={t("cart.title")}>
+  <CartPage
+    client:load
+    locale={intlLocale}
+    productsHref={productsHref}
+    checkoutHref={checkoutHref}
+    titleLabel={t("cart.title")}
+    emptyLabel={t("cart.empty")}
+    emptyCtaLabel={t("cart.empty_cta")}
+    subtotalLabel={t("cart.subtotal")}
+    taxLabel={t("cart.tax")}
+    shippingLabel={t("cart.shipping")}
+    totalLabel={t("cart.total")}
+    checkoutCtaLabel={t("cart.checkout_cta")}
+    removeLabel={t("cart.remove_item")}
+    quantityLabel={t("cart.quantity")}
+  />
+</BaseLayout>

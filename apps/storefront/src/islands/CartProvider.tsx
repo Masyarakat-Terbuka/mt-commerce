@@ -1,0 +1,305 @@
+/**
+ * CartProvider — small React context that owns the guest cart for the storefront.
+ *
+ * Persistence model — pragmatic for v0.1:
+ *
+ *   - The guest cart id lives in `localStorage` under `mt.cartId`. On mount we
+ *     read it, and if present, fetch the cart through the SDK to hydrate state.
+ *   - A 404 / not_found from the API means the cart has expired or was wiped;
+ *     we clear the localStorage key and fall back to "no cart yet".
+ *   - First add-to-cart creates a guest cart with `currency: "IDR"`, persists
+ *     the new id, and then performs the addItem call. Currency is fixed at
+ *     IDR for v0.1 — the storefront ships rupiah-only at this milestone.
+ *
+ * Cross-island sharing — Astro mounts each island in its own React tree. To
+ * keep multiple islands (header badge, drawer, /cart page, AddToCartButton)
+ * in sync, this provider:
+ *
+ *   1. Stores `cartId` in localStorage so every island agrees on the id.
+ *   2. Broadcasts state updates over a `mt:cart-changed` CustomEvent on the
+ *      `window` so islands without a shared React tree can re-render. This
+ *      keeps the API surface (`useCart()`) familiar without forcing a single
+ *      root island wrapping the whole page (which Astro's slot model doesn't
+ *      support cleanly across pages).
+ *
+ * The drawer-open signal travels on `mt:cart-open` (a separate event) so the
+ * AddToCartButton can ask the drawer to slide in after a successful add
+ * without coupling the two islands directly.
+ */
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { ApiError, createClient, type Cart } from "@mt-commerce/sdk";
+import { resolveApiUrl } from "../lib/api.js";
+
+const STORAGE_KEY = "mt.cartId";
+const CART_CHANGED_EVENT = "mt:cart-changed";
+const CART_OPEN_EVENT = "mt:cart-open";
+
+/** Single-source-of-truth currency for v0.1. */
+const DEFAULT_CURRENCY = "IDR";
+
+export interface CartContextValue {
+  cart: Cart | null;
+  loading: boolean;
+  error: string | null;
+  /** Sum of item quantities — what the header badge displays. */
+  itemCount: number;
+  addItem: (variantId: string, quantity?: number) => Promise<void>;
+  updateItem: (itemId: string, quantity: number) => Promise<void>;
+  removeItem: (itemId: string) => Promise<void>;
+  clear: () => Promise<void>;
+  /** Imperatively open the drawer (used by AddToCartButton on success). */
+  openDrawer: () => void;
+}
+
+const CartContext = createContext<CartContextValue | null>(null);
+
+function readPersistedCartId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    // Some browsers throw on storage access in privacy modes; treat it as
+    // "no persisted cart" rather than crash the island.
+    return null;
+  }
+}
+
+function writePersistedCartId(id: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (id === null) {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(STORAGE_KEY, id);
+    }
+  } catch {
+    // Same rationale as readPersistedCartId — silently swallow.
+  }
+}
+
+function broadcastCartChange(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(CART_CHANGED_EVENT));
+}
+
+export function openCartDrawer(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(CART_OPEN_EVENT));
+}
+
+export interface CartProviderProps {
+  children: ReactNode;
+  /** Override for tests; production reads from `PUBLIC_API_URL`. */
+  apiUrl?: string;
+}
+
+/**
+ * `CartProvider` wraps the React subtree of a single island. Multiple islands
+ * each create their own provider; cross-island synchrony comes via the
+ * `mt:cart-changed` window event (broadcast by every mutation) plus the shared
+ * `localStorage` cart id.
+ */
+export function CartProvider({ children, apiUrl }: CartProviderProps) {
+  const [cart, setCart] = useState<Cart | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Keep `cartId` in a ref AND in localStorage. The ref lets callers read the
+  // current id without a re-render; localStorage is the cross-tab source of
+  // truth.
+  const cartIdRef = useRef<string | null>(null);
+
+  const client = useMemo(
+    () => createClient({ baseUrl: apiUrl ?? resolveApiUrl() }),
+    [apiUrl],
+  );
+
+  // Hydrate from localStorage on mount; refresh whenever another island
+  // signals a change.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrate(): Promise<void> {
+      const persistedId = readPersistedCartId();
+      cartIdRef.current = persistedId;
+      if (!persistedId) {
+        if (!cancelled) {
+          setCart(null);
+          setLoading(false);
+        }
+        return;
+      }
+      try {
+        const fetched = await client.storefront.cart.byId(persistedId);
+        if (cancelled) return;
+        setCart(fetched);
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        // Cart expired or was wiped on the server — drop the persisted id.
+        if (err instanceof ApiError && err.code === "not_found") {
+          writePersistedCartId(null);
+          cartIdRef.current = null;
+          setCart(null);
+          setLoading(false);
+          return;
+        }
+        // Network/transport failure — keep the id, just surface the error.
+        // The next mutation attempt will retry.
+        setError(err instanceof Error ? err.message : "cart_load_failed");
+        setLoading(false);
+      }
+    }
+
+    void hydrate();
+
+    function onChanged() {
+      void hydrate();
+    }
+    window.addEventListener(CART_CHANGED_EVENT, onChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(CART_CHANGED_EVENT, onChanged);
+    };
+  }, [client]);
+
+  // Ensure a cart exists; returns the id for use by the caller. Persistence
+  // is updated synchronously so a refresh mid-flight still finds the cart.
+  const ensureCart = useCallback(async (): Promise<string> => {
+    if (cartIdRef.current) return cartIdRef.current;
+    const created = await client.storefront.cart.create({
+      currency: DEFAULT_CURRENCY,
+    });
+    cartIdRef.current = created.id;
+    writePersistedCartId(created.id);
+    setCart(created);
+    return created.id;
+  }, [client]);
+
+  const addItem = useCallback(
+    async (variantId: string, quantity = 1) => {
+      setError(null);
+      setLoading(true);
+      try {
+        const id = await ensureCart();
+        const next = await client.storefront.cart.addItem(id, {
+          variantId,
+          quantity,
+        });
+        setCart(next);
+        broadcastCartChange();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "cart_add_failed");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client, ensureCart],
+  );
+
+  const updateItem = useCallback(
+    async (itemId: string, quantity: number) => {
+      const id = cartIdRef.current;
+      if (!id) return;
+      setError(null);
+      setLoading(true);
+      try {
+        const next = await client.storefront.cart.updateItem(id, itemId, {
+          quantity,
+        });
+        setCart(next);
+        broadcastCartChange();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "cart_update_failed");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+
+  const removeItem = useCallback(
+    async (itemId: string) => {
+      const id = cartIdRef.current;
+      if (!id) return;
+      setError(null);
+      setLoading(true);
+      try {
+        const next = await client.storefront.cart.removeItem(id, itemId);
+        setCart(next);
+        broadcastCartChange();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "cart_remove_failed");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+
+  const clear = useCallback(async () => {
+    const id = cartIdRef.current;
+    if (!id) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const next = await client.storefront.cart.clear(id);
+      setCart(next);
+      broadcastCartChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "cart_clear_failed");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [client]);
+
+  const itemCount = useMemo(() => {
+    if (!cart) return 0;
+    let n = 0;
+    for (const item of cart.items) n += item.quantity;
+    return n;
+  }, [cart]);
+
+  const value = useMemo<CartContextValue>(
+    () => ({
+      cart,
+      loading,
+      error,
+      itemCount,
+      addItem,
+      updateItem,
+      removeItem,
+      clear,
+      openDrawer: openCartDrawer,
+    }),
+    [cart, loading, error, itemCount, addItem, updateItem, removeItem, clear],
+  );
+
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+}
+
+export function useCart(): CartContextValue {
+  const ctx = useContext(CartContext);
+  if (!ctx) {
+    throw new Error("useCart must be used inside <CartProvider>.");
+  }
+  return ctx;
+}
+
+/** Event name for cross-island drawer-open coordination. */
+export const CART_OPEN_EVENT_NAME = CART_OPEN_EVENT;
+/** Event name for cross-island state-changed broadcasts. */
+export const CART_CHANGED_EVENT_NAME = CART_CHANGED_EVENT;

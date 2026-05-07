@@ -33,26 +33,42 @@
 import { fromJSON as moneyFromJSON } from "@mt-commerce/core/money";
 import { ApiError, isApiErrorEnvelope } from "./errors.js";
 import type {
+  AddCartItemInput,
   AdminListProductsQuery,
   AuthMe,
   AuthSession,
+  Cart,
+  CartItem,
+  CartTotals,
   Category,
   City,
+  CreateCartInput,
+  CreateCategoryInput,
+  CreateProductInput,
+  CreateVariantInput,
   District,
   ListKecamatanQuery,
   ListKelurahanQuery,
   ListKotaKabupatenQuery,
   ListProductsQuery,
   LocaleQuery,
+  MoneyAmountInput,
   Paginated,
   Product,
   Province,
   RequestOptions,
   SignInInput,
   Subdistrict,
+  UpdateCartItemInput,
+  UpdateCategoryInput,
+  UpdateProductInput,
+  UpdateVariantInput,
   Variant,
   WireAuthMe,
   WireAuthSession,
+  WireCart,
+  WireCartItem,
+  WireCartTotals,
   WireCategory,
   WireCity,
   WireDistrict,
@@ -170,12 +186,130 @@ function toSubdistrict(w: WireSubdistrict): Subdistrict {
   };
 }
 
+function toCartItem(w: WireCartItem): CartItem {
+  return {
+    id: w.id,
+    cartId: w.cartId,
+    variantId: w.variantId,
+    quantity: w.quantity,
+    unitPrice: moneyFromJSON(w.unitPrice),
+    lineTotal: moneyFromJSON(w.lineTotal),
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toCartTotals(w: WireCartTotals): CartTotals {
+  return {
+    subtotal: moneyFromJSON(w.subtotal),
+    tax: moneyFromJSON(w.tax),
+    shipping: moneyFromJSON(w.shipping),
+    total: moneyFromJSON(w.total),
+  };
+}
+
+function toCart(w: WireCart): Cart {
+  return {
+    id: w.id,
+    customerId: w.customerId,
+    currency: w.currency,
+    status: w.status,
+    items: w.items.map(toCartItem),
+    totals: toCartTotals(w.totals),
+    expiresAt: new Date(w.expiresAt),
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
 // ----------------------------------------------------------------------------
 // Internals
 // ----------------------------------------------------------------------------
 
 function trimTrailingSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+/**
+ * Serialize a money amount accepted on admin write inputs to the wire form
+ * (decimal integer string). The API's Zod `moneyAmountSchema` accepts both
+ * `string` and `number`, but JSON.stringify throws on `bigint` — so we
+ * normalize at the SDK boundary so callers can hand us whichever form is
+ * natural at the call site (typically a `bigint` from `Money.amount`).
+ *
+ * Numbers must already be safe integers; the API's schema also rejects
+ * non-integers, but a synchronous client-side throw produces a more useful
+ * stack trace than a 422 round-trip.
+ */
+function serializeMoneyAmount(value: MoneyAmountInput): string {
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+      throw new TypeError(
+        "Money amount must be a finite integer (or bigint/string).",
+      );
+    }
+    return value.toString();
+  }
+  // String — forward verbatim. The API validates the digit-only shape.
+  return value;
+}
+
+/**
+ * Strip `undefined` properties from a plain object so the serialized JSON
+ * does not carry `"foo":null`-vs-missing ambiguity. We deliberately keep
+ * `null` (the wire signal for "clear this field") and only drop keys whose
+ * value is `undefined`.
+ */
+function omitUndefined<T extends Record<string, unknown>>(input: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value !== undefined) {
+      (out as Record<string, unknown>)[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Build the JSON body for variant create/update calls. Money fields collapse
+ * through `serializeMoneyAmount` so the body is JSON-safe regardless of
+ * whether the caller passed a `bigint` or a `string`.
+ */
+function serializeCreateVariantBody(
+  input: CreateVariantInput,
+): Record<string, unknown> {
+  return omitUndefined({
+    sku: input.sku,
+    translations: input.translations,
+    priceAmount: serializeMoneyAmount(input.priceAmount),
+    priceCurrency: input.priceCurrency,
+    compareAtAmount:
+      input.compareAtAmount !== undefined
+        ? serializeMoneyAmount(input.compareAtAmount)
+        : undefined,
+  });
+}
+
+function serializeUpdateVariantBody(
+  patch: UpdateVariantInput,
+): Record<string, unknown> {
+  return omitUndefined({
+    sku: patch.sku,
+    translations: patch.translations,
+    priceAmount:
+      patch.priceAmount !== undefined
+        ? serializeMoneyAmount(patch.priceAmount)
+        : undefined,
+    priceCurrency: patch.priceCurrency,
+    // `null` on compareAtAmount is the explicit "clear" signal — preserve it.
+    compareAtAmount:
+      patch.compareAtAmount === undefined
+        ? undefined
+        : patch.compareAtAmount === null
+          ? null
+          : serializeMoneyAmount(patch.compareAtAmount),
+  });
 }
 
 /**
@@ -418,10 +552,39 @@ export interface StorefrontRegionsApi {
   postalCode(code: string, options?: RequestOptions): Promise<Subdistrict[]>;
 }
 
+export interface StorefrontCartApi {
+  /** POST /storefront/v1/carts — create a guest cart in `currency`. */
+  create(input: CreateCartInput, options?: RequestOptions): Promise<Cart>;
+  /** GET /storefront/v1/carts/:id — fetch by id; 404 surfaces as ApiError. */
+  byId(cartId: string, options?: RequestOptions): Promise<Cart>;
+  /** POST /storefront/v1/carts/:id/items — add a line item, returns the cart. */
+  addItem(
+    cartId: string,
+    input: AddCartItemInput,
+    options?: RequestOptions,
+  ): Promise<Cart>;
+  /** PATCH /storefront/v1/carts/:id/items/:itemId — `quantity: 0` removes the line. */
+  updateItem(
+    cartId: string,
+    itemId: string,
+    input: UpdateCartItemInput,
+    options?: RequestOptions,
+  ): Promise<Cart>;
+  /** DELETE /storefront/v1/carts/:id/items/:itemId. */
+  removeItem(
+    cartId: string,
+    itemId: string,
+    options?: RequestOptions,
+  ): Promise<Cart>;
+  /** POST /storefront/v1/carts/:id/clear — empties items, keeps the cart. */
+  clear(cartId: string, options?: RequestOptions): Promise<Cart>;
+}
+
 export interface StorefrontApi {
   products: StorefrontProductsApi;
   categories: StorefrontCategoriesApi;
   regions: StorefrontRegionsApi;
+  cart: StorefrontCartApi;
 }
 
 // ---- Admin surface --------------------------------------------------------
@@ -444,10 +607,41 @@ export interface AdminProductsApi {
     options?: RequestOptions,
   ): Promise<Paginated<Product>>;
   byId(id: string, options?: RequestOptions): Promise<Product>;
+  /** Create a product. Returns the persisted product (variants empty initially). */
+  create(input: CreateProductInput, options?: RequestOptions): Promise<Product>;
+  /** Patch a product. Translations merge per ADR-0010 — only locales sent are touched. */
+  update(
+    id: string,
+    patch: UpdateProductInput,
+    options?: RequestOptions,
+  ): Promise<Product>;
+  /** Soft-delete a product. The row stays in the database with `deletedAt` set. */
+  delete(id: string, options?: RequestOptions): Promise<void>;
+  /** Add a variant under an existing product. */
+  createVariant(
+    productId: string,
+    input: CreateVariantInput,
+    options?: RequestOptions,
+  ): Promise<Variant>;
+  /** Patch a variant. */
+  updateVariant(
+    variantId: string,
+    patch: UpdateVariantInput,
+    options?: RequestOptions,
+  ): Promise<Variant>;
+  /** Soft-delete a variant. */
+  deleteVariant(variantId: string, options?: RequestOptions): Promise<void>;
 }
 
 export interface AdminCategoriesApi {
   list(options?: RequestOptions): Promise<Category[]>;
+  create(input: CreateCategoryInput, options?: RequestOptions): Promise<Category>;
+  update(
+    id: string,
+    patch: UpdateCategoryInput,
+    options?: RequestOptions,
+  ): Promise<Category>;
+  delete(id: string, options?: RequestOptions): Promise<void>;
 }
 
 export interface AdminApi {
@@ -576,6 +770,61 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         return wire.data.map(toSubdistrict);
       },
     },
+    cart: {
+      // The cart id itself is the bearer token in v0.1 (unguessable ULID),
+      // so every method just URL-encodes it into the path. Money fields on
+      // the response cross the wire→domain boundary via `toCart`, so consumers
+      // receive `bigint` amounts and `Date` timestamps consistently with the
+      // rest of the SDK.
+      async create(input, requestOptions) {
+        const wire = await request<WireCart>(ctx, "/storefront/v1/carts", {
+          ...(requestOptions ?? {}),
+          method: "POST",
+          body: input,
+        });
+        return toCart(wire);
+      },
+      async byId(cartId, requestOptions) {
+        const wire = await request<WireCart>(
+          ctx,
+          `/storefront/v1/carts/${encodeURIComponent(cartId)}`,
+          requestOptions,
+        );
+        return toCart(wire);
+      },
+      async addItem(cartId, input, requestOptions) {
+        const wire = await request<WireCart>(
+          ctx,
+          `/storefront/v1/carts/${encodeURIComponent(cartId)}/items`,
+          { ...(requestOptions ?? {}), method: "POST", body: input },
+        );
+        return toCart(wire);
+      },
+      async updateItem(cartId, itemId, input, requestOptions) {
+        const wire = await request<WireCart>(
+          ctx,
+          `/storefront/v1/carts/${encodeURIComponent(cartId)}/items/${encodeURIComponent(itemId)}`,
+          { ...(requestOptions ?? {}), method: "PATCH", body: input },
+        );
+        return toCart(wire);
+      },
+      async removeItem(cartId, itemId, requestOptions) {
+        const wire = await request<WireCart>(
+          ctx,
+          `/storefront/v1/carts/${encodeURIComponent(cartId)}/items/${encodeURIComponent(itemId)}`,
+          { ...(requestOptions ?? {}), method: "DELETE" },
+        );
+        return toCart(wire);
+      },
+      async clear(cartId, requestOptions) {
+        const wire = await request<WireCart>(
+          ctx,
+          `/storefront/v1/carts/${encodeURIComponent(cartId)}/clear`,
+          { ...(requestOptions ?? {}), method: "POST" },
+        );
+        return toCart(wire);
+      },
+    },
   };
 
   // -------------------------------------------------------------------------
@@ -691,6 +940,80 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         );
         return toProduct(wire);
       },
+      async create(input, requestOptions) {
+        const wire = await request<WireProduct>(adminCtx, "/admin/v1/products", {
+          ...(requestOptions ?? {}),
+          method: "POST",
+          body: omitUndefined({
+            slug: input.slug,
+            translations: input.translations,
+            status: input.status,
+            defaultCurrency: input.defaultCurrency,
+            imageUrl: input.imageUrl,
+            imageAlt: input.imageAlt,
+            categoryIds: input.categoryIds,
+          }),
+        });
+        return toProduct(wire);
+      },
+      async update(id, patch, requestOptions) {
+        const wire = await request<WireProduct>(
+          adminCtx,
+          `/admin/v1/products/${encodeURIComponent(id)}`,
+          {
+            ...(requestOptions ?? {}),
+            method: "PATCH",
+            body: omitUndefined({
+              slug: patch.slug,
+              translations: patch.translations,
+              status: patch.status,
+              defaultCurrency: patch.defaultCurrency,
+              imageUrl: patch.imageUrl,
+              imageAlt: patch.imageAlt,
+              categoryIds: patch.categoryIds,
+            }),
+          },
+        );
+        return toProduct(wire);
+      },
+      async delete(id, requestOptions) {
+        await request<unknown>(
+          adminCtx,
+          `/admin/v1/products/${encodeURIComponent(id)}`,
+          { ...(requestOptions ?? {}), method: "DELETE" },
+        );
+      },
+      async createVariant(productId, input, requestOptions) {
+        const wire = await request<WireVariant>(
+          adminCtx,
+          `/admin/v1/products/${encodeURIComponent(productId)}/variants`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: serializeCreateVariantBody(input),
+          },
+        );
+        return toVariant(wire);
+      },
+      async updateVariant(variantId, patch, requestOptions) {
+        const wire = await request<WireVariant>(
+          adminCtx,
+          `/admin/v1/variants/${encodeURIComponent(variantId)}`,
+          {
+            ...(requestOptions ?? {}),
+            method: "PATCH",
+            body: serializeUpdateVariantBody(patch),
+          },
+        );
+        return toVariant(wire);
+      },
+      async deleteVariant(variantId, requestOptions) {
+        await request<unknown>(
+          adminCtx,
+          `/admin/v1/variants/${encodeURIComponent(variantId)}`,
+          { ...(requestOptions ?? {}), method: "DELETE" },
+        );
+      },
     },
     categories: {
       async list(requestOptions) {
@@ -700,6 +1023,45 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           requestOptions,
         );
         return wire.data.map(toCategory);
+      },
+      async create(input, requestOptions) {
+        const wire = await request<WireCategory>(
+          adminCtx,
+          "/admin/v1/categories",
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({
+              slug: input.slug,
+              translations: input.translations,
+              parentId: input.parentId,
+            }),
+          },
+        );
+        return toCategory(wire);
+      },
+      async update(id, patch, requestOptions) {
+        const wire = await request<WireCategory>(
+          adminCtx,
+          `/admin/v1/categories/${encodeURIComponent(id)}`,
+          {
+            ...(requestOptions ?? {}),
+            method: "PATCH",
+            body: omitUndefined({
+              slug: patch.slug,
+              translations: patch.translations,
+              parentId: patch.parentId,
+            }),
+          },
+        );
+        return toCategory(wire);
+      },
+      async delete(id, requestOptions) {
+        await request<unknown>(
+          adminCtx,
+          `/admin/v1/categories/${encodeURIComponent(id)}`,
+          { ...(requestOptions ?? {}), method: "DELETE" },
+        );
       },
     },
   };

@@ -27,6 +27,7 @@ import { AppShell } from "@/components/AppShell";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
+import { ProductEditorPage } from "@/pages/ProductEditorPage";
 import { ComingSoonPage } from "@/pages/ComingSoonPage";
 import { SignOutPage } from "@/pages/SignOutPage";
 
@@ -122,9 +123,13 @@ const productsRoute = createRoute({
 const productNewRoute = createRoute({
   getParentRoute: () => gatedRoute,
   path: "/produk/baru",
-  // TODO: replace with the real product-create form once the SDK exposes
-  // mutating admin endpoints.
-  component: ComingSoonPage,
+  component: () => <ProductEditorPage mode="create" />,
+});
+
+const productEditRoute = createRoute({
+  getParentRoute: () => gatedRoute,
+  path: "/produk/$id",
+  component: () => <ProductEditorPage mode="edit" />,
 });
 
 const ordersRoute = createRoute({
@@ -152,6 +157,7 @@ const routeTree = rootRoute.addChildren([
     dashboardRoute,
     productsRoute,
     productNewRoute,
+    productEditRoute,
     ordersRoute,
     customersRoute,
     settingsRoute,

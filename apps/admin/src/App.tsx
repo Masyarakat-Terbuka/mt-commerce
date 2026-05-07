@@ -9,6 +9,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import { LocaleProvider } from "@/lib/i18n-provider";
 import { createAppRouter } from "@/router";
 
@@ -36,6 +37,7 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <LocaleProvider>
           <RouterProvider router={router} />
+          <Toaster position="bottom-right" richColors closeButton />
         </LocaleProvider>
       </QueryClientProvider>
     </ThemeProvider>

@@ -141,3 +141,36 @@ This ADR should be revisited if:
 - [`ARCHITECTURE.md`](../../ARCHITECTURE.md) — locks in shadcn/ui and Tailwind for the admin
 - [ADR-0001](./0001-headless-architecture.md) — the headless decision that led to a separate admin SPA
 - [`apps/admin/components.json`](../../apps/admin/components.json) — the resolved configuration
+
+---
+
+## Status update — 2026-05-07
+
+The preset was switched from `b1D0eErI` (`mira` style) to **`buFzG2y`** (`lyra`
+style) when the product editor work landed. The substrate, base color, and
+icon library are unchanged — the only field that materially shifted is the
+component-level `style`.
+
+| Field          | Was (`b1D0eErI`)        | Now (`buFzG2y`)         |
+| -------------- | ----------------------- | ----------------------- |
+| Style          | `mira`                  | `lyra`                  |
+| Base color     | `neutral`               | `neutral` (unchanged)   |
+| Primitive base | Radix UI                | Radix UI (unchanged)    |
+| Icon library   | `hugeicons`             | `hugeicons` (unchanged) |
+| Font           | Geist Variable          | Geist Variable (unchanged) |
+| Radius         | `small`                 | `default`               |
+
+`components.json` now reads `"style": "radix-lyra"`. `src/index.css` was
+rewritten by the CLI; the only manual follow-up was a small fix to the
+generated `spinner.tsx` (the preset spread `React.ComponentProps<"svg">`
+onto `HugeiconsIcon`, which expects narrower numeric props — pinned the
+prop type to the icon component's surface).
+
+Reproduce with:
+
+```bash
+bunx --bun shadcn@latest init --preset buFzG2y --force --reinstall --yes
+```
+
+from `apps/admin/`. The `--reinstall` flag overwrites every file in
+`src/components/ui/`; custom files (AppShell, pages, etc.) are untouched.

@@ -309,6 +309,130 @@ describe("createClient — locale", () => {
   });
 });
 
+describe("createClient — storefront.cart", () => {
+  // A minimally complete WireCart payload reused across cart tests. Money
+  // values arrive as decimal strings on the wire and must surface as bigints
+  // on the domain side; the assertions below pin that boundary.
+  const sampleCartPayload = {
+    id: "cart_01J",
+    customerId: null,
+    currency: "IDR",
+    status: "active",
+    items: [
+      {
+        id: "ci_01",
+        cartId: "cart_01J",
+        variantId: "var_abc",
+        quantity: 2,
+        unitPrice: { amount: "95000", currency: "IDR" },
+        lineTotal: { amount: "190000", currency: "IDR" },
+        createdAt: "2026-05-01T08:00:00.000Z",
+        updatedAt: "2026-05-01T08:00:00.000Z",
+      },
+    ],
+    totals: {
+      subtotal: { amount: "190000", currency: "IDR" },
+      tax: { amount: "0", currency: "IDR" },
+      shipping: { amount: "0", currency: "IDR" },
+      total: { amount: "190000", currency: "IDR" },
+    },
+    expiresAt: "2026-06-01T08:00:00.000Z",
+    createdAt: "2026-05-01T08:00:00.000Z",
+    updatedAt: "2026-05-01T08:00:00.000Z",
+  };
+
+  it("creates a guest cart and POSTs the currency body", async () => {
+    const { fetch, calls } = mockFetch({ status: 201, body: { ...sampleCartPayload, items: [], totals: sampleCartPayload.totals } });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const cart = await client.storefront.cart.create({ currency: "IDR" });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("http://localhost:8000/storefront/v1/carts");
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect(calls[0]!.init?.body).toBe(JSON.stringify({ currency: "IDR" }));
+    expect(cart.id).toBe("cart_01J");
+    expect(cart.currency).toBe("IDR");
+    expect(cart.expiresAt).toBeInstanceOf(Date);
+  });
+
+  it("addItem returns a cart with bigint Money on items and totals", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: sampleCartPayload });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const cart = await client.storefront.cart.addItem("cart_01J", {
+      variantId: "var_abc",
+      quantity: 2,
+    });
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/storefront/v1/carts/cart_01J/items");
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect(calls[0]!.init?.body).toBe(
+      JSON.stringify({ variantId: "var_abc", quantity: 2 }),
+    );
+
+    expect(cart.items).toHaveLength(1);
+    const item = cart.items[0]!;
+    expect(typeof item.unitPrice.amount).toBe("bigint");
+    expect(item.unitPrice.amount).toBe(95_000n);
+    expect(typeof item.lineTotal.amount).toBe("bigint");
+    expect(item.lineTotal.amount).toBe(190_000n);
+    expect(typeof cart.totals.subtotal.amount).toBe("bigint");
+    expect(cart.totals.subtotal.amount).toBe(190_000n);
+    expect(cart.totals.total.amount).toBe(190_000n);
+  });
+
+  it("surfaces validation_error envelope when variantId is invalid", async () => {
+    const { fetch } = mockFetch({
+      status: 422,
+      body: {
+        error: {
+          code: "validation_error",
+          message: "Request validation failed.",
+          details: { variantId: "Required" },
+        },
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(
+      client.storefront.cart.addItem("cart_01J", {
+        variantId: "",
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      code: "validation_error",
+      status: 422,
+      details: { variantId: "Required" },
+    });
+  });
+
+  it("URL-encodes ids on updateItem, removeItem, and clear", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: sampleCartPayload });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.storefront.cart.updateItem("cart 01", "ci/01", { quantity: 3 });
+    await client.storefront.cart.removeItem("cart 01", "ci/01");
+    await client.storefront.cart.clear("cart 01");
+
+    expect(calls).toHaveLength(3);
+    const update = new URL(calls[0]!.url);
+    expect(update.pathname).toBe("/storefront/v1/carts/cart%2001/items/ci%2F01");
+    expect(calls[0]!.init?.method).toBe("PATCH");
+    expect(calls[0]!.init?.body).toBe(JSON.stringify({ quantity: 3 }));
+
+    const remove = new URL(calls[1]!.url);
+    expect(remove.pathname).toBe("/storefront/v1/carts/cart%2001/items/ci%2F01");
+    expect(calls[1]!.init?.method).toBe("DELETE");
+
+    const clear = new URL(calls[2]!.url);
+    expect(clear.pathname).toBe("/storefront/v1/carts/cart%2001/clear");
+    expect(calls[2]!.init?.method).toBe("POST");
+  });
+});
+
 describe("createClient — regions", () => {
   it("lists provinces and returns plain shapes", async () => {
     const { fetch, calls } = mockFetch({
@@ -330,5 +454,188 @@ describe("createClient — regions", () => {
     const url = new URL(calls[0]!.url);
     expect(url.pathname).toBe("/storefront/v1/regions/kota-kabupaten");
     expect(url.searchParams.get("provinsiId")).toBe("31");
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Admin product mutations
+//
+// These tests pin four properties that matter for the admin product editor:
+//
+//   1. Happy path — the create body lands at the right URL with the right
+//      method and the wire response round-trips back to a domain `Product`.
+//   2. Conflict envelope — a 409 with the standard `{error:{code,message}}`
+//      shape surfaces as an `ApiError` whose `code` matches the server, so
+//      the editor can branch on it without parsing strings.
+//   3. Locale forwarding — the PATCH body stays clean (instance-default
+//      locale rides on reads, not writes) and `credentials: include` flips
+//      on so the session cookie travels.
+//   4. Bigint serialization — `JSON.stringify` would throw on a `bigint`,
+//      so the SDK must convert variant prices to decimal-integer strings at
+//      the boundary while keeping `bigint` on the domain side.
+// ----------------------------------------------------------------------------
+
+const sampleVariantWirePayload = {
+  id: "var_new",
+  productId: "prod_abc",
+  sku: "GAYO-200-WHOLE",
+  title: "Biji utuh",
+  price: { amount: "95000", currency: "IDR" },
+  compareAtPrice: null,
+  createdAt: "2026-04-12T08:00:00.000Z",
+  updatedAt: "2026-04-12T08:00:00.000Z",
+  deletedAt: null,
+};
+
+const sampleProductWirePayload = {
+  id: "prod_abc",
+  slug: "kopi-arabika-gayo-200g",
+  title: "Kopi Arabika Gayo 200g",
+  description: "Kopi arabika dari Gayo.",
+  status: "draft",
+  defaultCurrency: "IDR",
+  imageUrl: null,
+  imageAlt: null,
+  categoryIds: [],
+  variants: [],
+  createdAt: "2026-04-12T08:00:00.000Z",
+  updatedAt: "2026-04-12T08:00:00.000Z",
+  deletedAt: null,
+};
+
+describe("createClient — admin.products mutations", () => {
+  it("posts the create body and round-trips the response to a domain Product", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 201,
+      body: sampleProductWirePayload,
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const product = await client.admin.products.create({
+      slug: "kopi-arabika-gayo-200g",
+      defaultCurrency: "IDR",
+      translations: {
+        id: { title: "Kopi Arabika Gayo 200g", description: "Kopi arabika." },
+        en: { title: "Gayo Arabica Coffee 200g" },
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("http://localhost:8000/admin/v1/products");
+    expect(calls[0]!.init?.method).toBe("POST");
+    // Cookie must travel on the admin namespace.
+    expect(calls[0]!.init?.credentials).toBe("include");
+
+    const sentBody = JSON.parse(String(calls[0]!.init?.body));
+    expect(sentBody).toEqual({
+      slug: "kopi-arabika-gayo-200g",
+      defaultCurrency: "IDR",
+      translations: {
+        id: { title: "Kopi Arabika Gayo 200g", description: "Kopi arabika." },
+        en: { title: "Gayo Arabica Coffee 200g" },
+      },
+    });
+    expect(product.slug).toBe("kopi-arabika-gayo-200g");
+    expect(product.createdAt).toBeInstanceOf(Date);
+  });
+
+  it("surfaces the conflict envelope as an ApiError with the server code", async () => {
+    const { fetch } = mockFetch({
+      status: 409,
+      body: {
+        error: {
+          code: "conflict",
+          message: "A product with that slug already exists.",
+          details: { field: "slug" },
+        },
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(
+      client.admin.products.create({
+        slug: "kopi-arabika-gayo-200g",
+        defaultCurrency: "IDR",
+        translations: { id: { title: "Kopi" } },
+      }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      code: "conflict",
+      status: 409,
+      details: { field: "slug" },
+    });
+  });
+
+  it("issues a clean PATCH body with credentials on update", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: sampleProductWirePayload,
+    });
+    const client = createClient({
+      baseUrl: "http://localhost:8000",
+      fetch,
+      // Admin writes do not currently send `?locale=` per call. The instance
+      // default still rides on read calls (list/byId); a future change to
+      // forward it on writes would be a deliberate decision and break this
+      // test. Pinning the current behavior keeps that decision visible.
+      locale: "id",
+    });
+
+    await client.admin.products.update("prod_abc", { status: "active" });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(
+      "http://localhost:8000/admin/v1/products/prod_abc",
+    );
+    expect(calls[0]!.init?.method).toBe("PATCH");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    const sentBody = JSON.parse(String(calls[0]!.init?.body));
+    expect(sentBody).toEqual({ status: "active" });
+  });
+
+  it("serializes bigint variant prices to decimal strings on the wire", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 201,
+      body: sampleVariantWirePayload,
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const variant = await client.admin.products.createVariant("prod_abc", {
+      sku: "GAYO-200-WHOLE",
+      priceAmount: 95_000n,
+      compareAtAmount: 120_000n,
+      translations: { id: { title: "Biji utuh" } },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(
+      "http://localhost:8000/admin/v1/products/prod_abc/variants",
+    );
+    expect(calls[0]!.init?.method).toBe("POST");
+    const sentBody = JSON.parse(String(calls[0]!.init?.body));
+    // The wire form is decimal-integer strings — JSON.stringify on a bigint
+    // would otherwise throw. This is the load-bearing property.
+    expect(sentBody.priceAmount).toBe("95000");
+    expect(sentBody.compareAtAmount).toBe("120000");
+    expect(typeof sentBody.priceAmount).toBe("string");
+    // The response decode still produces a `bigint` on the domain side.
+    expect(typeof variant.price.amount).toBe("bigint");
+    expect(variant.price.amount).toBe(95_000n);
+  });
+
+  it("issues a DELETE for soft-delete", async () => {
+    // The mock returns 200 with an empty body (the `Response` constructor
+    // refuses a 204 + body in some runtimes). The behavior we care about is
+    // the URL, method, and that the SDK does not throw on an empty success.
+    const { fetch, calls } = mockFetch({ status: 200, body: {} });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.admin.products.delete("prod_abc");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(
+      "http://localhost:8000/admin/v1/products/prod_abc",
+    );
+    expect(calls[0]!.init?.method).toBe("DELETE");
   });
 });

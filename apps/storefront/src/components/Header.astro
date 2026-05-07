@@ -20,6 +20,8 @@
  * without restyling the header.
  */
 import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import CartCountBadge from "@/islands/CartCountBadge.tsx";
+import CartDrawer from "@/islands/CartDrawer.tsx";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -37,6 +39,9 @@ const currentPath = Astro.url.pathname;
 const stripped = currentPath.replace(/^\/(en|id)(?=\/|$)/, "") || "/";
 const idHref = localePath("id", stripped);
 const enHref = localePath("en", stripped);
+
+const checkoutHref = localePath(locale, "/checkout");
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
 ---
 
 <header class="sticky top-0 z-40 border-b border-line bg-cream">

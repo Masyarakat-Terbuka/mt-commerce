@@ -105,6 +105,42 @@ export interface WireListEnvelope<T> {
 }
 
 // ----------------------------------------------------------------------------
+// Cart wire shapes — mirror `apps/api/src/modules/cart/routes/wire.ts`
+// ----------------------------------------------------------------------------
+
+export type CartStatus = "active" | "abandoned" | "converted";
+
+export interface WireCartItem {
+  id: string;
+  cartId: string;
+  variantId: string;
+  quantity: number;
+  unitPrice: MoneyJSON;
+  lineTotal: MoneyJSON;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WireCartTotals {
+  subtotal: MoneyJSON;
+  tax: MoneyJSON;
+  shipping: MoneyJSON;
+  total: MoneyJSON;
+}
+
+export interface WireCart {
+  id: string;
+  customerId: string | null;
+  currency: string;
+  status: CartStatus;
+  items: WireCartItem[];
+  totals: WireCartTotals;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ----------------------------------------------------------------------------
 // Domain shapes — what consumers receive after deserialization
 // ----------------------------------------------------------------------------
 
@@ -181,6 +217,64 @@ export interface Paginated<T> {
   total: number;
   page: number;
   pageSize: number;
+}
+
+// ----------------------------------------------------------------------------
+// Cart domain shapes — Money is `Money` (bigint amount), dates are `Date`
+// ----------------------------------------------------------------------------
+
+export interface CartItem {
+  id: string;
+  cartId: string;
+  variantId: string;
+  quantity: number;
+  /** Captured at add-time; catalog price changes do not silently re-price. */
+  unitPrice: Money;
+  /** Convenience: `unitPrice * quantity`, same currency as `unitPrice`. */
+  lineTotal: Money;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CartTotals {
+  subtotal: Money;
+  /** PPN placeholder; service contract owns the rate. */
+  tax: Money;
+  /** Always zero at v0.1. */
+  shipping: Money;
+  total: Money;
+}
+
+export interface Cart {
+  id: string;
+  customerId: string | null;
+  /** ISO 4217 code; locked at first item add. */
+  currency: string;
+  status: CartStatus;
+  items: CartItem[];
+  totals: CartTotals;
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ----------------------------------------------------------------------------
+// Cart inputs
+// ----------------------------------------------------------------------------
+
+export interface CreateCartInput {
+  /** ISO 4217 code; storefront passes its locale's currency. */
+  currency: string;
+}
+
+export interface AddCartItemInput {
+  variantId: string;
+  quantity: number;
+}
+
+export interface UpdateCartItemInput {
+  /** `0` is interpreted by the API as remove-line. */
+  quantity: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -297,6 +391,118 @@ export interface AdminListProductsQuery {
  */
 export interface LocaleQuery {
   locale?: string;
+}
+
+// ----------------------------------------------------------------------------
+// Admin write inputs
+//
+// Mirror the Zod schemas in `apps/api/src/modules/catalog/types.ts`. The API
+// accepts `translations` as a locale-keyed object per ADR-0010. The default
+// locale (`id`) is required on create; on update only the locales that are
+// actually being changed need to be present.
+//
+// Money on inputs travels via string amounts so JSON.stringify never throws
+// on a `bigint`. The client converts `bigint | string | number` to a decimal
+// string at the boundary so callers can pass whichever form is natural at
+// the call site.
+// ----------------------------------------------------------------------------
+
+/**
+ * Locale code used by the admin write surface. A string union (not a wider
+ * `string`) so TypeScript catches obvious typos at the call site; the API
+ * rejects unknown locales server-side regardless.
+ */
+export type AdminLocale = "id" | "en";
+
+export interface ProductTranslationFields {
+  title: string;
+  description?: string | null;
+}
+
+export interface ProductTranslationsCreateInput {
+  /** Required on create — every product must carry the default locale. */
+  id: ProductTranslationFields;
+  en?: ProductTranslationFields;
+}
+
+export type ProductTranslationsUpdateInput = Partial<
+  Record<AdminLocale, ProductTranslationFields | undefined>
+>;
+
+export interface VariantTranslationFields {
+  title: string;
+}
+
+export type VariantTranslationsInput = Partial<
+  Record<AdminLocale, VariantTranslationFields | undefined>
+>;
+
+export interface CategoryTranslationFields {
+  name: string;
+}
+
+export interface CategoryTranslationsCreateInput {
+  id: CategoryTranslationFields;
+  en?: CategoryTranslationFields;
+}
+
+export type CategoryTranslationsUpdateInput = Partial<
+  Record<AdminLocale, CategoryTranslationFields | undefined>
+>;
+
+/**
+ * Money amount accepted on writes. Strings travel verbatim; numbers must be
+ * safe integers; bigints are stringified at the SDK boundary so JSON
+ * serialization never throws.
+ */
+export type MoneyAmountInput = bigint | string | number;
+
+export interface CreateProductInput {
+  slug: string;
+  translations: ProductTranslationsCreateInput;
+  status?: ProductStatus;
+  defaultCurrency: string;
+  imageUrl?: string | null;
+  imageAlt?: string | null;
+  categoryIds?: string[];
+}
+
+export interface UpdateProductInput {
+  slug?: string;
+  translations?: ProductTranslationsUpdateInput;
+  status?: ProductStatus;
+  defaultCurrency?: string;
+  imageUrl?: string | null;
+  imageAlt?: string | null;
+  categoryIds?: string[];
+}
+
+export interface CreateVariantInput {
+  sku: string;
+  translations?: VariantTranslationsInput;
+  priceAmount: MoneyAmountInput;
+  priceCurrency?: string;
+  compareAtAmount?: MoneyAmountInput;
+}
+
+export interface UpdateVariantInput {
+  sku?: string;
+  translations?: VariantTranslationsInput;
+  priceAmount?: MoneyAmountInput;
+  priceCurrency?: string;
+  compareAtAmount?: MoneyAmountInput | null;
+}
+
+export interface CreateCategoryInput {
+  slug: string;
+  translations: CategoryTranslationsCreateInput;
+  parentId?: string | null;
+}
+
+export interface UpdateCategoryInput {
+  slug?: string;
+  translations?: CategoryTranslationsUpdateInput;
+  parentId?: string | null;
 }
 
 // ----------------------------------------------------------------------------

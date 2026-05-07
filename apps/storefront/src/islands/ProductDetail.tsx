@@ -54,6 +54,10 @@ export type ProductDetailProps = {
   compareAtLabel: string;
   addToCartLabel: string;
   outOfStockLabel: string;
+  /** Localized success-flash label, e.g. "Ditambahkan" / "Added". */
+  addedLabel: string;
+  /** Localized generic error copy for cart failures. */
+  cartErrorLabel: string;
   /** Localized "Beranda / Home" label — kept in props for backwards compat. */
   breadcrumbHomeLabel: string;
   /** Localized "Produk serupa" / "Related products" heading. */
@@ -90,6 +94,8 @@ export default function ProductDetail(props: ProductDetailProps) {
     compareAtLabel,
     addToCartLabel,
     outOfStockLabel,
+    addedLabel,
+    cartErrorLabel,
     relatedTitle,
     detailHrefBase,
   } = props;
@@ -270,6 +276,8 @@ export default function ProductDetail(props: ProductDetailProps) {
                 variantId={firstVariant.id}
                 label={addToCartLabel}
                 soldOutLabel={outOfStockLabel}
+                addedLabel={addedLabel}
+                errorLabel={cartErrorLabel}
                 soldOut={!firstVariant.available}
               />
             </div>
