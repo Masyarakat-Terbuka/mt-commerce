@@ -8,6 +8,8 @@
   ],
   "packageManager": "bun@1.3.7",
   "scripts": {
+    "setup": "./scripts/setup.sh",
+    "reset": "./scripts/reset.sh",
     "dev": "bun --filter '*' dev",
     "build": "bun --filter '*' build",
     "typecheck": "bun --filter '*' typecheck",

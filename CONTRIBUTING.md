@@ -50,12 +50,16 @@ To get the project running locally:
 git clone https://github.com/masyarakat-terbuka/mt-commerce.git
 cd mt-commerce
 
-bun install
-cp .env.example .env
+# Copies .env files, installs deps, starts Postgres + Redis, runs
+# migrations, seeds demo data. Idempotent — safe to re-run.
+bun run setup
 
-docker compose up -d
+# Run all three apps in parallel.
 bun dev
 ```
+
+If the local database ends up in a weird state, `bun run reset` wipes
+the Postgres + Redis volumes and re-runs setup.
 
 ---
 

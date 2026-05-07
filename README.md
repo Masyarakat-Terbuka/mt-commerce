@@ -83,18 +83,20 @@ You will need [Docker](https://www.docker.com/) and [Bun](https://bun.sh/).
 git clone https://github.com/masyarakat-terbuka/mt-commerce.git
 cd mt-commerce
 
-cp .env.example .env
-docker compose up -d
+# One-command setup: copies .env files, installs deps, brings up Postgres +
+# Redis, runs migrations, and loads demo data. Idempotent — re-run any time.
+bun run setup
 
-# Apply database migrations and load demo data so the storefront and admin
-# come up with real categories, products, and Indonesian region rows.
-bun --filter '@mt-commerce/api' db:migrate
-bun --filter '@mt-commerce/api' db:seed
+# Run all three apps in parallel:
+bun dev
 
-# API at http://localhost:8000
-# Admin at http://localhost:7000
-# Storefront at http://localhost:3000
+# API at        http://localhost:8000
+# Storefront at http://localhost:4321
+# Admin at      http://localhost:5173
 ```
+
+Use `bun run reset` if the local database ends up in a weird state — it
+wipes the Postgres + Redis volumes and re-runs setup.
 
 The default setup runs the API, database, cache, admin, and storefront together. Production deployment guides for common Indonesian and international hosts will live under `docs/deployment` once written.
 
