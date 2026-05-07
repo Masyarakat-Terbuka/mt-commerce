@@ -13,14 +13,21 @@
  * and dedups replays. Other transitions are NOT guarded — they are safe
  * to retry because they are state-machine writes that either succeed
  * (no-op on repeat) or fail with `invalid_transition`.
+ *
+ * OpenAPI: each route is declared via `createRoute`/`router.openapi(...)`.
+ * The cancel endpoint reads the raw body directly because its body schema
+ * is fully optional (so the OpenAPI body wrapper would force a content
+ * type even on the no-body call); manual parsing keeps the documented
+ * behavior identical.
  */
-import { Hono } from "hono";
-import type { ZodTypeAny, z } from "zod";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { ValidationError } from "../../../lib/errors.js";
+import { NotFoundError } from "../../../lib/errors.js";
+import { issuesToDetails } from "../../../lib/errors.js";
 import {
-  NotFoundError,
-  ValidationError,
-  issuesToDetails,
-} from "../../../lib/errors.js";
+  defaultValidationHook,
+  errorResponse,
+} from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import {
   buildIdempotencyKeyTestMiddleware,
@@ -35,10 +42,23 @@ import {
   setShippingSchema,
   startCheckoutSchema,
 } from "../types.js";
+import { toWireCheckout, toWireOrderIntent } from "./wire.js";
 import {
-  toWireCheckout,
-  toWireOrderIntent,
-} from "./wire.js";
+  CheckoutWire,
+  CompleteCheckoutResponseWire,
+} from "./openapi-schemas.js";
+
+const TAG = "checkout (storefront)";
+
+const IdParam = z.object({ id: z.string().min(1) });
+
+export interface BuildCheckoutStorefrontOptions {
+  /**
+   * Test seam — inject a fake idempotency store so route-level tests do
+   * not need a real database. Production callers omit this.
+   */
+  idempotencyStore?: IdempotencyStore;
+}
 
 async function readJsonBody(req: Request): Promise<unknown> {
   const text = await req.text();
@@ -50,73 +70,155 @@ async function readJsonBody(req: Request): Promise<unknown> {
   }
 }
 
-function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new ValidationError(
-      "Request validation failed.",
-      issuesToDetails(result.error.issues),
-    );
-  }
-  return result.data as z.infer<S>;
-}
-
-export interface BuildCheckoutStorefrontOptions {
-  /**
-   * Test seam — inject a fake idempotency store so route-level tests do
-   * not need a real database. Production callers omit this.
-   */
-  idempotencyStore?: IdempotencyStore;
-}
-
 export function buildCheckoutStorefrontRoutes(
   service: CheckoutService,
   options: BuildCheckoutStorefrontOptions = {},
-): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
+): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>({
+    defaultHook: defaultValidationHook,
+  });
 
   const requireIdempotencyKey = options.idempotencyStore
     ? buildIdempotencyKeyTestMiddleware(options.idempotencyStore)
     : defaultRequireIdempotencyKey;
 
-  // POST /checkouts — start a checkout
-  router.post("/checkouts", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(startCheckoutSchema, raw);
-    const checkout = await service.startCheckout(input);
-    return c.json(toWireCheckout(checkout), 201);
-  });
-
-  // GET /checkouts/:id
-  router.get("/checkouts/:id", async (c) => {
-    const checkout = await service.getCheckout(c.req.param("id"));
-    if (!checkout) throw new NotFoundError("Checkout not found.");
-    return c.json(toWireCheckout(checkout));
-  });
-
-  // PUT /checkouts/:id/addresses
-  router.put("/checkouts/:id/addresses", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(setAddressesSchema, raw);
-    const checkout = await service.setAddresses(c.req.param("id"), input);
-    return c.json(toWireCheckout(checkout));
-  });
-
-  // PUT /checkouts/:id/shipping
-  router.put("/checkouts/:id/shipping", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(setShippingSchema, raw);
-    const checkout = await service.setShipping(c.req.param("id"), input);
-    return c.json(toWireCheckout(checkout));
-  });
-
-  // POST /checkouts/:id/complete — guarded by Idempotency-Key
-  router.post(
-    "/checkouts/:id/complete",
-    requireIdempotencyKey({ scope: "checkout.complete" }),
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/checkouts",
+      tags: [TAG],
+      summary: "Start a checkout from a cart",
+      request: {
+        body: {
+          content: { "application/json": { schema: startCheckoutSchema } },
+        },
+      },
+      responses: {
+        201: {
+          content: { "application/json": { schema: CheckoutWire } },
+          description: "Created checkout.",
+        },
+        400: errorResponse("Validation failed."),
+        404: errorResponse("Cart not found."),
+        409: errorResponse("Cart is not in a startable state."),
+      },
+    }),
     async (c) => {
-      const raw = await readJsonBody(c.req.raw);
-      const input = parseOrThrow(completeCheckoutSchema, raw);
+      const input = c.req.valid("json");
+      const checkout = await service.startCheckout(input);
+      return c.json(toWireCheckout(checkout), 201);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/checkouts/{id}",
+      tags: [TAG],
+      summary: "Get a checkout by id",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CheckoutWire } },
+          description: "Checkout.",
+        },
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const checkout = await service.getCheckout(c.req.param("id"));
+      if (!checkout) throw new NotFoundError("Checkout not found.");
+      return c.json(toWireCheckout(checkout), 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "put",
+      path: "/checkouts/{id}/addresses",
+      tags: [TAG],
+      summary: "Set the shipping (and optional billing) address",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: setAddressesSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CheckoutWire } },
+          description: "Updated checkout.",
+        },
+        400: errorResponse("Validation failed."),
+        404: errorResponse("Checkout or address not found."),
+        409: errorResponse("Invalid state transition."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const checkout = await service.setAddresses(c.req.param("id"), input);
+      return c.json(toWireCheckout(checkout), 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "put",
+      path: "/checkouts/{id}/shipping",
+      tags: [TAG],
+      summary: "Select shipping method and rate",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: setShippingSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CheckoutWire } },
+          description: "Updated checkout.",
+        },
+        400: errorResponse("Validation failed."),
+        404: errorResponse("Checkout not found."),
+        409: errorResponse("Invalid state transition."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const checkout = await service.setShipping(c.req.param("id"), input);
+      return c.json(toWireCheckout(checkout), 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/checkouts/{id}/complete",
+      tags: [TAG],
+      summary: "Complete a checkout (idempotent)",
+      description:
+        "Idempotent: requires an `Idempotency-Key` header. Replays return the same response without re-running the underlying transition.",
+      middleware: [requireIdempotencyKey({ scope: "checkout.complete" })],
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: completeCheckoutSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: {
+            "application/json": { schema: CompleteCheckoutResponseWire },
+          },
+          description: "Checkout completed; order intent attached.",
+        },
+        400: errorResponse("Validation failed or missing Idempotency-Key."),
+        404: errorResponse("Checkout not found."),
+        409: errorResponse("Invalid state transition or idempotency conflict."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
       const idempotencyKey =
         c.req.header("idempotency-key") ??
         c.req.header("Idempotency-Key") ??
@@ -125,24 +227,53 @@ export function buildCheckoutStorefrontRoutes(
         paymentMethod: input.paymentMethod,
         idempotencyKey,
       });
-      return c.json({
-        checkout: toWireCheckout(result.checkout),
-        orderIntent: toWireOrderIntent(result.orderIntent),
-      });
+      return c.json(
+        {
+          checkout: toWireCheckout(result.checkout),
+          orderIntent: toWireOrderIntent(result.orderIntent),
+        },
+        200,
+      );
     },
   );
 
-  // POST /checkouts/:id/cancel
-  router.post("/checkouts/:id/cancel", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    // The cancel body is fully optional. `cancelCheckoutSchema` is itself
-    // optional() at the top level so missing/empty is allowed.
-    const input = parseOrThrow(cancelCheckoutSchema, raw ?? {});
-    const checkout = await service.cancel(c.req.param("id"), {
-      reason: input?.reason ?? null,
-    });
-    return c.json(toWireCheckout(checkout));
-  });
+  // Cancel: the body schema is wrapped in `.optional()` so the route accepts
+  // a no-body POST. We do not declare `body` in the OpenAPI request descriptor
+  // because that would imply a required content-type; instead we read the
+  // raw body and parse manually, preserving the existing public contract.
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/checkouts/{id}/cancel",
+      tags: [TAG],
+      summary: "Cancel a checkout",
+      description:
+        "Optional body: `{ reason?: string | null }`. Cancellation is allowed from any non-terminal state and yields `state=failed`.",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CheckoutWire } },
+          description: "Cancelled checkout.",
+        },
+        404: errorResponse("Checkout not found."),
+        409: errorResponse("Invalid state transition."),
+      },
+    }),
+    async (c) => {
+      const raw = await readJsonBody(c.req.raw);
+      const parsed = cancelCheckoutSchema.safeParse(raw ?? {});
+      if (!parsed.success) {
+        throw new ValidationError(
+          "Request validation failed.",
+          issuesToDetails(parsed.error.issues),
+        );
+      }
+      const checkout = await service.cancel(c.req.param("id"), {
+        reason: parsed.data?.reason ?? null,
+      });
+      return c.json(toWireCheckout(checkout), 200);
+    },
+  );
 
   return router;
 }

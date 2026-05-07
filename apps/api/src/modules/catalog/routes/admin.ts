@@ -14,25 +14,20 @@
  * looks up the staff profile and rejects with 403 if the role is not in
  * the accepted set.
  *
- * Conventions in this file:
- *   - Bodies are validated through the Zod schemas exported from `types.ts`.
- *   - On validation failure we throw `ValidationError` so the standard error
- *     handler renders the consistent `{ error: { code, message, details } }`
- *     envelope.
- *   - Domain types are converted to wire shapes by `toWireProduct`,
- *     `toWireVariant`, etc., which keep `bigint` amounts as
- *     `MoneyJSON` (string amounts) per ADR-0007.
- *   - Read paths accept `?locale=` so the admin can preview each locale
- *     without flipping a global UI setting; it follows the same resolution
- *     order as the storefront (query → Accept-Language → DEFAULT_LOCALE).
+ * OpenAPI: routes are declared via `createRoute`/`router.openapi(...)` so
+ * each endpoint shows up in `/openapi.json` with its request and response
+ * schemas. Bodies are still validated through the same Zod schemas exported
+ * from `types.ts`; the framework runs the parse from the route descriptor
+ * instead of the handler calling `parseOrThrow`. Validation failures throw
+ * `ZodError`, caught by the global error handler and rendered as the
+ * standard `validation_error` envelope.
  */
-import { Hono } from "hono";
-import type { ZodTypeAny, z } from "zod";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { NotFoundError } from "../../../lib/errors.js";
 import {
-  NotFoundError,
-  ValidationError,
-  issuesToDetails,
-} from "../../../lib/errors.js";
+  defaultValidationHook,
+  errorResponse,
+} from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import { requireAuth, requireRole } from "../../auth/index.js";
 import {
@@ -41,6 +36,14 @@ import {
   toWireProduct,
   toWireVariant,
 } from "./wire.js";
+import {
+  CategoryListEnvelope,
+  CategoryWire,
+  InventoryLevelWire,
+  PaginatedProductWire,
+  ProductWire,
+  VariantWire,
+} from "./openapi-schemas.js";
 import {
   adjustInventorySchema,
   createCategorySchema,
@@ -54,37 +57,16 @@ import {
 import type { CatalogService } from "../service.js";
 import { localeFromRequest } from "./locale.js";
 
-/**
- * Read JSON from a request, returning `undefined` for empty bodies and
- * surfacing parse errors as `invalid_json` to match the existing `/v1/ping`
- * pattern. Local copy rather than an import because we do not want to take a
- * dependency on the routes/v1 module.
- */
-async function readJsonBody(req: Request): Promise<unknown> {
-  const text = await req.text();
-  if (text.length === 0) return undefined;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new ValidationError("Request body is not valid JSON.");
-  }
-}
+const TAG = "catalog (admin)";
 
-function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new ValidationError(
-      "Request validation failed.",
-      issuesToDetails(result.error.issues),
-    );
-  }
-  return result.data as z.infer<S>;
-}
+const IdParam = z.object({ id: z.string().min(1) });
 
 export function buildCatalogAdminRoutes(
   service: CatalogService,
-): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
+): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>({
+    defaultHook: defaultValidationHook,
+  });
 
   // Gate every route in this router. The auth module's middlewares populate
   // c.var.authUser and check the staff profile's role.
@@ -95,115 +77,397 @@ export function buildCatalogAdminRoutes(
   // Products
   // -------------------------------------------------------------------
 
-  router.get("/products", async (c) => {
-    const query = parseOrThrow(
-      listProductsQuerySchema,
-      Object.fromEntries(new URL(c.req.url).searchParams),
-    );
-    const locale = localeFromRequest(c);
-    const result = await service.listProducts({ ...query, locale });
-    return c.json({
-      data: result.data.map((p) => toWireProduct(p)),
-      total: result.total,
-      page: result.page,
-      pageSize: result.pageSize,
-    });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/products",
+      tags: [TAG],
+      summary: "List products",
+      description:
+        "Paginated product list. Supports `categoryId`, `search`, price bounds, and sort. Translatable fields resolve from the locale chain (?locale, Accept-Language, default).",
+      request: { query: listProductsQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: PaginatedProductWire } },
+          description: "Page of products.",
+        },
+        400: errorResponse("Invalid query."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden — staff role required."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const locale = localeFromRequest(c);
+      const result = await service.listProducts({ ...query, locale });
+      return c.json(
+        {
+          data: result.data.map((p) => toWireProduct(p)),
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+        },
+        200,
+      );
+    },
+  );
 
-  router.post("/products", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(createProductSchema, raw);
-    const locale = localeFromRequest(c);
-    const product = await service.createProduct(input, locale);
-    return c.json(toWireProduct(product), 201);
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/products",
+      tags: [TAG],
+      summary: "Create a product",
+      description:
+        "Create a product with a `translations` blob (see ADR-0010). Default locale must be present.",
+      request: {
+        body: {
+          content: { "application/json": { schema: createProductSchema } },
+        },
+      },
+      responses: {
+        201: {
+          content: { "application/json": { schema: ProductWire } },
+          description: "Created.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        409: errorResponse("Slug already in use."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const locale = localeFromRequest(c);
+      const product = await service.createProduct(input, locale);
+      return c.json(toWireProduct(product), 201);
+    },
+  );
 
-  router.get("/products/:id", async (c) => {
-    const locale = localeFromRequest(c);
-    const product = await service.getProductById(c.req.param("id"), locale);
-    if (!product) throw new NotFoundError("Product not found.");
-    return c.json(toWireProduct(product));
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/products/{id}",
+      tags: [TAG],
+      summary: "Get a product by id",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: ProductWire } },
+          description: "Product.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const locale = localeFromRequest(c);
+      const product = await service.getProductById(c.req.param("id"), locale);
+      if (!product) throw new NotFoundError("Product not found.");
+      return c.json(toWireProduct(product), 200);
+    },
+  );
 
-  router.patch("/products/:id", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const patch = parseOrThrow(updateProductSchema, raw);
-    const locale = localeFromRequest(c);
-    const product = await service.updateProduct(c.req.param("id"), patch, locale);
-    return c.json(toWireProduct(product));
-  });
+  router.openapi(
+    createRoute({
+      method: "patch",
+      path: "/products/{id}",
+      tags: [TAG],
+      summary: "Update a product",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: updateProductSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: ProductWire } },
+          description: "Updated.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const patch = c.req.valid("json");
+      const locale = localeFromRequest(c);
+      const product = await service.updateProduct(
+        c.req.param("id"),
+        patch,
+        locale,
+      );
+      return c.json(toWireProduct(product), 200);
+    },
+  );
 
-  router.delete("/products/:id", async (c) => {
-    await service.softDeleteProduct(c.req.param("id"));
-    return c.body(null, 204);
-  });
+  router.openapi(
+    createRoute({
+      method: "delete",
+      path: "/products/{id}",
+      tags: [TAG],
+      summary: "Soft-delete a product",
+      request: { params: IdParam },
+      responses: {
+        204: { description: "Deleted." },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      await service.softDeleteProduct(c.req.param("id"));
+      return c.body(null, 204);
+    },
+  );
 
   // -------------------------------------------------------------------
   // Variants
   // -------------------------------------------------------------------
 
-  router.post("/products/:id/variants", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(createVariantSchema, raw);
-    const locale = localeFromRequest(c);
-    const variant = await service.createVariant(c.req.param("id"), input, locale);
-    return c.json(toWireVariant(variant), 201);
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/products/{id}/variants",
+      tags: [TAG],
+      summary: "Create a variant",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: createVariantSchema } },
+        },
+      },
+      responses: {
+        201: {
+          content: { "application/json": { schema: VariantWire } },
+          description: "Created.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Parent product not found."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const locale = localeFromRequest(c);
+      const variant = await service.createVariant(
+        c.req.param("id"),
+        input,
+        locale,
+      );
+      return c.json(toWireVariant(variant), 201);
+    },
+  );
 
-  router.patch("/variants/:id", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const patch = parseOrThrow(updateVariantSchema, raw);
-    const locale = localeFromRequest(c);
-    const variant = await service.updateVariant(c.req.param("id"), patch, locale);
-    return c.json(toWireVariant(variant));
-  });
+  router.openapi(
+    createRoute({
+      method: "patch",
+      path: "/variants/{id}",
+      tags: [TAG],
+      summary: "Update a variant",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: updateVariantSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: VariantWire } },
+          description: "Updated.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const patch = c.req.valid("json");
+      const locale = localeFromRequest(c);
+      const variant = await service.updateVariant(
+        c.req.param("id"),
+        patch,
+        locale,
+      );
+      return c.json(toWireVariant(variant), 200);
+    },
+  );
 
-  router.delete("/variants/:id", async (c) => {
-    await service.softDeleteVariant(c.req.param("id"));
-    return c.body(null, 204);
-  });
+  router.openapi(
+    createRoute({
+      method: "delete",
+      path: "/variants/{id}",
+      tags: [TAG],
+      summary: "Soft-delete a variant",
+      request: { params: IdParam },
+      responses: {
+        204: { description: "Deleted." },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      await service.softDeleteVariant(c.req.param("id"));
+      return c.body(null, 204);
+    },
+  );
 
   // -------------------------------------------------------------------
   // Categories
   // -------------------------------------------------------------------
 
-  router.get("/categories", async (c) => {
-    const locale = localeFromRequest(c);
-    const categories = await service.listCategories(locale);
-    return c.json({ data: categories.map((cat) => toWireCategory(cat)) });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/categories",
+      tags: [TAG],
+      summary: "List categories",
+      description: "Flat list with `parentId`. Clients build a tree client-side.",
+      responses: {
+        200: {
+          content: { "application/json": { schema: CategoryListEnvelope } },
+          description: "Categories.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+      },
+    }),
+    async (c) => {
+      const locale = localeFromRequest(c);
+      const categories = await service.listCategories(locale);
+      return c.json({ data: categories.map((cat) => toWireCategory(cat)) }, 200);
+    },
+  );
 
-  router.post("/categories", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(createCategorySchema, raw);
-    const locale = localeFromRequest(c);
-    const category = await service.createCategory(input, locale);
-    return c.json(toWireCategory(category), 201);
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/categories",
+      tags: [TAG],
+      summary: "Create a category",
+      request: {
+        body: {
+          content: { "application/json": { schema: createCategorySchema } },
+        },
+      },
+      responses: {
+        201: {
+          content: { "application/json": { schema: CategoryWire } },
+          description: "Created.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        409: errorResponse("Slug already in use."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const locale = localeFromRequest(c);
+      const category = await service.createCategory(input, locale);
+      return c.json(toWireCategory(category), 201);
+    },
+  );
 
-  router.patch("/categories/:id", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const patch = parseOrThrow(updateCategorySchema, raw);
-    const locale = localeFromRequest(c);
-    const category = await service.updateCategory(c.req.param("id"), patch, locale);
-    return c.json(toWireCategory(category));
-  });
+  router.openapi(
+    createRoute({
+      method: "patch",
+      path: "/categories/{id}",
+      tags: [TAG],
+      summary: "Update a category",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: updateCategorySchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CategoryWire } },
+          description: "Updated.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const patch = c.req.valid("json");
+      const locale = localeFromRequest(c);
+      const category = await service.updateCategory(
+        c.req.param("id"),
+        patch,
+        locale,
+      );
+      return c.json(toWireCategory(category), 200);
+    },
+  );
 
-  router.delete("/categories/:id", async (c) => {
-    await service.deleteCategory(c.req.param("id"));
-    return c.body(null, 204);
-  });
+  router.openapi(
+    createRoute({
+      method: "delete",
+      path: "/categories/{id}",
+      tags: [TAG],
+      summary: "Delete a category",
+      request: { params: IdParam },
+      responses: {
+        204: { description: "Deleted." },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      await service.deleteCategory(c.req.param("id"));
+      return c.body(null, 204);
+    },
+  );
 
   // -------------------------------------------------------------------
   // Inventory
   // -------------------------------------------------------------------
 
-  router.post("/variants/:id/inventory/adjust", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(adjustInventorySchema, raw);
-    const level = await service.adjustInventory(c.req.param("id"), input.delta);
-    return c.json(toWireInventoryLevel(level));
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/variants/{id}/inventory/adjust",
+      tags: [TAG],
+      summary: "Adjust inventory for a variant",
+      description:
+        "Apply a signed `delta` to the variant's available count. Bounded to ±1,000,000 to keep the value safely inside int4.",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: adjustInventorySchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: InventoryLevelWire } },
+          description: "Updated inventory level.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Variant not found."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const level = await service.adjustInventory(
+        c.req.param("id"),
+        input.delta,
+      );
+      return c.json(toWireInventoryLevel(level), 200);
+    },
+  );
 
   return router;
 }

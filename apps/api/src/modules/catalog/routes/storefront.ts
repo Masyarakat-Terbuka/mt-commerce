@@ -7,90 +7,133 @@
  *     enforces this via `activeOnly: true`, never the route.
  *   - Filters use the `categorySlug` querystring (admin uses `categoryId`)
  *     because the storefront should not need to know IDs.
- *   - The category endpoint returns a flat list with `parent_id` so callers
- *     can build their own tree client-side. Document choice: flat over tree
- *     keeps the response simple and avoids a recursive payload that bloats
- *     for deeply nested categories. The storefront SDK will render a tree
- *     when needed.
+ *   - Categories are returned as a flat list with `parentId` so callers
+ *     build their own tree client-side. Flat over tree keeps the response
+ *     simple and avoids a recursive payload that bloats for deeply nested
+ *     categories.
  *   - Locale resolution: every read pulls the locale from
  *     `localeFromRequest(c)` (`?locale=` query → `Accept-Language` header →
  *     `DEFAULT_LOCALE`) and forwards it to the service so the response
  *     carries translated `title`/`description`/`name` strings per ADR-0010.
+ *
+ * OpenAPI: each route is declared via `createRoute`/`router.openapi(...)` so
+ * it surfaces in `/openapi.json` with the same Zod schemas the runtime
+ * validation enforces. Response shapes mirror the wire helpers.
  */
-import { Hono } from "hono";
-import type { ZodTypeAny, z } from "zod";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { NotFoundError } from "../../../lib/errors.js";
 import {
-  NotFoundError,
-  ValidationError,
-  issuesToDetails,
-} from "../../../lib/errors.js";
+  defaultValidationHook,
+  errorResponse,
+} from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
+import { toWireCategory, toWireProduct } from "./wire.js";
 import {
-  toWireCategory,
-  toWireProduct,
-  type WireCategory,
-} from "./wire.js";
+  CategoryListEnvelope,
+  PaginatedProductWire,
+  ProductWire,
+} from "./openapi-schemas.js";
 import { listProductsQuerySchema } from "../types.js";
 import type { CatalogService } from "../service.js";
 import { localeFromRequest } from "./locale.js";
 
-function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new ValidationError(
-      "Request validation failed.",
-      issuesToDetails(result.error.issues),
-    );
-  }
-  return result.data as z.infer<S>;
-}
+const TAG = "catalog (storefront)";
+
+const SlugParam = z.object({ slug: z.string().min(1) });
 
 export function buildCatalogStorefrontRoutes(
   service: CatalogService,
-): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
-
-  router.get("/products", async (c) => {
-    const query = parseOrThrow(
-      listProductsQuerySchema,
-      Object.fromEntries(new URL(c.req.url).searchParams),
-    );
-    // Storefront cannot select by `status` or see drafts. Strip the field
-    // before handing to the service so a client-set `status=draft` is
-    // ignored rather than silently honored.
-    const safeQuery = { ...query, status: undefined };
-    const locale = localeFromRequest(c);
-    const result = await service.listProducts({
-      ...safeQuery,
-      activeOnly: true,
-      locale,
-    });
-    return c.json({
-      data: result.data.map((p) => toWireProduct(p)),
-      total: result.total,
-      page: result.page,
-      pageSize: result.pageSize,
-    });
+): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>({
+    defaultHook: defaultValidationHook,
   });
 
-  router.get("/products/:slug", async (c) => {
-    const locale = localeFromRequest(c);
-    const product = await service.getProductBySlug(c.req.param("slug"), {
-      activeOnly: true,
-      locale,
-    });
-    if (!product) throw new NotFoundError("Product not found.");
-    return c.json(toWireProduct(product));
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/products",
+      tags: [TAG],
+      summary: "List products (public)",
+      description:
+        "Returns active, non-deleted products. Supports `categorySlug`, `search`, price bounds, and sort. The `status` query field is ignored — drafts and archived items are never visible on the storefront.",
+      request: { query: listProductsQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: PaginatedProductWire } },
+          description: "Page of products.",
+        },
+        400: errorResponse("Invalid query."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      // Strip any client-supplied `status` so a `status=draft` is ignored
+      // rather than silently honored.
+      const safeQuery = { ...query, status: undefined };
+      const locale = localeFromRequest(c);
+      const result = await service.listProducts({
+        ...safeQuery,
+        activeOnly: true,
+        locale,
+      });
+      return c.json(
+        {
+          data: result.data.map((p) => toWireProduct(p)),
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+        },
+        200,
+      );
+    },
+  );
 
-  router.get("/categories", async (c) => {
-    // Flat list with parent_id; the client builds the tree. See the file
-    // comment for the rationale.
-    const locale = localeFromRequest(c);
-    const categories = await service.listCategories(locale);
-    const data: WireCategory[] = categories.map((cat) => toWireCategory(cat));
-    return c.json({ data });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/products/{slug}",
+      tags: [TAG],
+      summary: "Get a product by slug (public)",
+      request: { params: SlugParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: ProductWire } },
+          description: "Product.",
+        },
+        404: errorResponse("Not found or not active."),
+      },
+    }),
+    async (c) => {
+      const locale = localeFromRequest(c);
+      const product = await service.getProductBySlug(c.req.param("slug"), {
+        activeOnly: true,
+        locale,
+      });
+      if (!product) throw new NotFoundError("Product not found.");
+      return c.json(toWireProduct(product), 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/categories",
+      tags: [TAG],
+      summary: "List categories (public)",
+      description: "Flat list with `parentId` so clients can build a tree client-side.",
+      responses: {
+        200: {
+          content: { "application/json": { schema: CategoryListEnvelope } },
+          description: "Categories.",
+        },
+      },
+    }),
+    async (c) => {
+      const locale = localeFromRequest(c);
+      const categories = await service.listCategories(locale);
+      return c.json({ data: categories.map((cat) => toWireCategory(cat)) }, 200);
+    },
+  );
 
   return router;
 }

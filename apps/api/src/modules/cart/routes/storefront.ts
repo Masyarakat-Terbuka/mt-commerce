@@ -7,30 +7,27 @@
  *
  *   1. `POST /carts`, `GET /carts/:id`, items + clear — public.
  *      Anyone with a cart id can act on it. Cart ids are unguessable ULIDs;
- *      treat the id itself as the bearer token (the catalog/storefront
- *      pattern). When auth lands, an authenticated cart will additionally
- *      be ownership-checked against `c.var.authUser`-derived customer id.
+ *      the id itself is the bearer token (the catalog/storefront pattern).
+ *      When auth lands, an authenticated cart will additionally be
+ *      ownership-checked against `c.var.authUser`-derived customer id.
  *
  *   2. `/customer/me/cart` — requires an authenticated customer.
  *      TODO requireAuth(): the auth module will populate `c.var.authUser`,
  *      from which we will resolve the customer via `getCustomerByAuthUserId`.
  *      Until that lands, these routes accept a stand-in `x-customer-id`
- *      header (development-only). Production builds MUST replace this with
- *      auth-derived resolution.
+ *      header (development-only).
  *
- * Conventions match the catalog/customer storefront routers:
- *   - Zod-validated bodies
- *   - `ValidationError` for parse failures
- *   - wire helpers for JSON shaping
+ * OpenAPI: each route is declared via `createRoute`/`router.openapi(...)`.
+ * Bodies are validated with the Zod schemas exported from `types.ts`;
+ * failures throw `ZodError`, caught by the global error handler.
  */
-import { Hono, type Context } from "hono";
-import type { ZodTypeAny, z } from "zod";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import type { Context } from "hono";
+import { NotFoundError, UnauthorizedError } from "../../../lib/errors.js";
 import {
-  NotFoundError,
-  UnauthorizedError,
-  ValidationError,
-  issuesToDetails,
-} from "../../../lib/errors.js";
+  defaultValidationHook,
+  errorResponse,
+} from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import type { CartService } from "../service.js";
 import {
@@ -39,34 +36,20 @@ import {
   updateItemQuantitySchema,
 } from "../types.js";
 import { toWireCart } from "./wire.js";
+import { CartWire } from "./openapi-schemas.js";
 
-async function readJsonBody(req: Request): Promise<unknown> {
-  const text = await req.text();
-  if (text.length === 0) return undefined;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new ValidationError("Request body is not valid JSON.");
-  }
-}
+const TAG = "cart (storefront)";
 
-function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new ValidationError(
-      "Request validation failed.",
-      issuesToDetails(result.error.issues),
-    );
-  }
-  return result.data as z.infer<S>;
-}
+const IdParam = z.object({ id: z.string().min(1) });
+const IdItemParam = z.object({
+  id: z.string().min(1),
+  itemId: z.string().min(1),
+});
 
 /**
  * TEMPORARY: resolve the current customer id from the `x-customer-id`
  * request header. Replaced by `c.var.authUser`-driven lookup once auth
- * lands. Same pattern as the customer module's storefront router; behavior
- * matches so clients that wire the stand-in today continue to work
- * tomorrow with only their auth setup changing.
+ * lands. Same pattern as the customer storefront router.
  */
 async function resolveCurrentCustomerId(
   c: Context<AppBindings>,
@@ -82,87 +65,242 @@ async function resolveCurrentCustomerId(
 
 export function buildCartStorefrontRoutes(
   service: CartService,
-): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
+): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>({
+    defaultHook: defaultValidationHook,
+  });
 
   // -------------------------------------------------------------------
   // Cart CRUD — public; ULID id is the bearer
   // -------------------------------------------------------------------
 
-  router.post("/carts", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(createCartSchema, raw);
-    const cart = await service.createGuestCart(input.currency);
-    return c.json(toWireCart(cart, service.getTotals(cart)), 201);
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/carts",
+      tags: [TAG],
+      summary: "Create a guest cart",
+      description: "Currency is locked at create-time and may not change later.",
+      request: {
+        body: { content: { "application/json": { schema: createCartSchema } } },
+      },
+      responses: {
+        201: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Created cart.",
+        },
+        400: errorResponse("Validation failed."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const cart = await service.createGuestCart(input.currency);
+      return c.json(toWireCart(cart, service.getTotals(cart)), 201);
+    },
+  );
 
-  router.get("/carts/:id", async (c) => {
-    const cart = await service.getCartById(c.req.param("id"));
-    if (!cart) throw new NotFoundError("Cart not found.");
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/carts/{id}",
+      tags: [TAG],
+      summary: "Get a cart by id (public; ULID is the bearer)",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Cart.",
+        },
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const cart = await service.getCartById(c.req.param("id"));
+      if (!cart) throw new NotFoundError("Cart not found.");
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
-  router.post("/carts/:id/items", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(addItemSchema, raw);
-    const cart = await service.addItem(c.req.param("id"), input);
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/carts/{id}/items",
+      tags: [TAG],
+      summary: "Add a line item",
+      description:
+        "Adding the same variant twice merges into a single line; the latest add's price wins.",
+      request: {
+        params: IdParam,
+        body: { content: { "application/json": { schema: addItemSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Updated cart.",
+        },
+        400: errorResponse("Validation failed."),
+        404: errorResponse("Cart or variant not found."),
+        409: errorResponse("Currency mismatch or cart not active."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const cart = await service.addItem(c.req.param("id"), input);
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
-  router.patch("/carts/:id/items/:itemId", async (c) => {
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(updateItemQuantitySchema, raw);
-    const cart = await service.updateItemQuantity(
-      c.req.param("id"),
-      c.req.param("itemId"),
-      input.quantity,
-    );
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "patch",
+      path: "/carts/{id}/items/{itemId}",
+      tags: [TAG],
+      summary: "Set a line item's quantity",
+      description: "`quantity: 0` removes the line.",
+      request: {
+        params: IdItemParam,
+        body: {
+          content: { "application/json": { schema: updateItemQuantitySchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Updated cart.",
+        },
+        400: errorResponse("Validation failed."),
+        404: errorResponse("Cart or item not found."),
+      },
+    }),
+    async (c) => {
+      const input = c.req.valid("json");
+      const cart = await service.updateItemQuantity(
+        c.req.param("id"),
+        c.req.param("itemId"),
+        input.quantity,
+      );
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
-  router.delete("/carts/:id/items/:itemId", async (c) => {
-    const cart = await service.removeItem(
-      c.req.param("id"),
-      c.req.param("itemId"),
-    );
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "delete",
+      path: "/carts/{id}/items/{itemId}",
+      tags: [TAG],
+      summary: "Remove a line item",
+      request: { params: IdItemParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Updated cart.",
+        },
+        404: errorResponse("Cart or item not found."),
+      },
+    }),
+    async (c) => {
+      const cart = await service.removeItem(
+        c.req.param("id"),
+        c.req.param("itemId"),
+      );
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
-  router.post("/carts/:id/clear", async (c) => {
-    const cart = await service.clear(c.req.param("id"));
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/carts/{id}/clear",
+      tags: [TAG],
+      summary: "Remove all items from a cart",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Cleared cart.",
+        },
+        404: errorResponse("Cart not found."),
+        409: errorResponse("Cart is converted and cannot be cleared."),
+      },
+    }),
+    async (c) => {
+      const cart = await service.clear(c.req.param("id"));
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
   // -------------------------------------------------------------------
   // /customer/me/cart — TODO requireAuth()
   // -------------------------------------------------------------------
 
-  router.get("/customer/me/cart", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const cart = await service.getActiveCartForCustomer(customerId);
-    if (!cart) throw new NotFoundError("No active cart for this customer.");
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/customer/me/cart",
+      tags: [TAG],
+      summary: "Get the current customer's active cart",
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Active cart.",
+        },
+        401: errorResponse("Authentication required."),
+        404: errorResponse("No active cart."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const cart = await service.getActiveCartForCustomer(customerId);
+      if (!cart) throw new NotFoundError("No active cart for this customer.");
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
   /**
    * Idempotent-ish: if the customer already has an active cart, return it
    * (200) instead of creating a second one. Otherwise create a new active
-   * cart bound to the customer (201). Currency comes from the request body
-   * because v0.1 has no per-customer default currency stored anywhere; the
-   * storefront passes its locale's currency.
+   * cart bound to the customer (201).
+   *
+   * The route declares 201 in its OpenAPI spec because that's the
+   * "canonical" outcome; the 200 variant is a documented quirk noted in the
+   * description. We render the actual status at runtime based on whether a
+   * cart already existed.
    */
-  router.post("/customer/me/cart", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(createCartSchema, raw);
-
-    const existing = await service.getActiveCartForCustomer(customerId);
-    if (existing) {
-      return c.json(toWireCart(existing, service.getTotals(existing)));
-    }
-    const cart = await service.createCustomerCart(customerId, input.currency);
-    return c.json(toWireCart(cart, service.getTotals(cart)), 201);
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/customer/me/cart",
+      tags: [TAG],
+      summary: "Create or reuse the current customer's active cart",
+      description:
+        "If the customer already has an active cart, returns it with status 200. Otherwise creates a new one and returns 201. Currency comes from the request body; the storefront passes its locale's currency.",
+      request: {
+        body: { content: { "application/json": { schema: createCartSchema } } },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Existing active cart returned.",
+        },
+        201: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Newly created cart.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const input = c.req.valid("json");
+      const existing = await service.getActiveCartForCustomer(customerId);
+      if (existing) {
+        return c.json(toWireCart(existing, service.getTotals(existing)), 200);
+      }
+      const cart = await service.createCustomerCart(customerId, input.currency);
+      return c.json(toWireCart(cart, service.getTotals(cart)), 201);
+    },
+  );
 
   return router;
 }

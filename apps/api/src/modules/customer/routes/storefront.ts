@@ -15,18 +15,18 @@
  *   2. `/regions/*` is public (anyone building a checkout autofill needs
  *      these without an account). No auth gate now or later.
  *
- * Conventions match the admin router: Zod-validated bodies, ValidationError
- * for parse failures, wire helpers for JSON shaping.
+ * OpenAPI: every route is declared via `createRoute`/`router.openapi(...)`
+ * so it surfaces in `/openapi.json`. Bodies and queries are validated through
+ * the same Zod schemas exported from `types.ts`; failures throw `ZodError`.
  */
-import { Hono, type Context } from "hono";
-import type { ZodTypeAny, z } from "zod";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { NotFoundError, UnauthorizedError } from "../../../lib/errors.js";
 import {
-  NotFoundError,
-  UnauthorizedError,
-  ValidationError,
-  issuesToDetails,
-} from "../../../lib/errors.js";
+  defaultValidationHook,
+  errorResponse,
+} from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
+import type { Context } from "hono";
 import type { CustomerService } from "../service.js";
 import {
   createAddressSchema,
@@ -45,34 +45,28 @@ import {
   toWireProvince,
   toWireSubdistrict,
 } from "./wire.js";
+import {
+  AddressListEnvelope,
+  AddressWire,
+  CityListEnvelope,
+  CustomerWire,
+  DistrictListEnvelope,
+  ProvinceListEnvelope,
+  SubdistrictListEnvelope,
+} from "./openapi-schemas.js";
 
-async function readJsonBody(req: Request): Promise<unknown> {
-  const text = await req.text();
-  if (text.length === 0) return undefined;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new ValidationError("Request body is not valid JSON.");
-  }
-}
+const TAG = "customer (storefront)";
 
-function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new ValidationError(
-      "Request validation failed.",
-      issuesToDetails(result.error.issues),
-    );
-  }
-  return result.data as z.infer<S>;
-}
+const IdParam = z.object({ id: z.string().min(1) });
+const PostalCodeParam = z.object({
+  code: z.string().regex(/^\d{5}$/, "postal code must be a 5-digit numeric string."),
+});
 
 /**
  * TEMPORARY: resolve the current customer from the `x-customer-id` request
  * header. Replaced by `c.var.authUser`-driven lookup once the auth module is
  * wired. Throws 401 when the header is missing so the contract matches the
- * eventual auth-gated behavior — clients that work today will continue to
- * work tomorrow with only their auth setup changing.
+ * eventual auth-gated behavior.
  */
 async function resolveCurrentCustomerId(
   c: Context<AppBindings>,
@@ -88,139 +82,339 @@ async function resolveCurrentCustomerId(
 
 export function buildCustomerStorefrontRoutes(
   service: CustomerService,
-): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
+): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>({
+    defaultHook: defaultValidationHook,
+  });
 
   // -------------------------------------------------------------------
   // /customer/me — TODO requireAuth()
   // -------------------------------------------------------------------
 
-  router.get("/customer/me", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const customer = await service.getCustomerById(customerId);
-    if (!customer) throw new NotFoundError("Customer not found.");
-    return c.json(toWireCustomer(customer));
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/customer/me",
+      tags: [TAG],
+      summary: "Get the current customer",
+      description:
+        "Returns the authenticated customer's profile. Until customer-auth lands the resolver reads the `x-customer-id` header.",
+      responses: {
+        200: {
+          content: { "application/json": { schema: CustomerWire } },
+          description: "Customer.",
+        },
+        401: errorResponse("Authentication required."),
+        404: errorResponse("Customer not found."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const customer = await service.getCustomerById(customerId);
+      if (!customer) throw new NotFoundError("Customer not found.");
+      return c.json(toWireCustomer(customer), 200);
+    },
+  );
 
-  router.patch("/customer/me", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const raw = await readJsonBody(c.req.raw);
-    const patch = parseOrThrow(updateCustomerSchema, raw);
-    const customer = await service.updateCustomer(customerId, patch);
-    return c.json(toWireCustomer(customer));
-  });
+  router.openapi(
+    createRoute({
+      method: "patch",
+      path: "/customer/me",
+      tags: [TAG],
+      summary: "Update the current customer",
+      request: {
+        body: {
+          content: { "application/json": { schema: updateCustomerSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CustomerWire } },
+          description: "Updated.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        404: errorResponse("Customer not found."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const patch = c.req.valid("json");
+      const customer = await service.updateCustomer(customerId, patch);
+      return c.json(toWireCustomer(customer), 200);
+    },
+  );
 
-  router.get("/customer/me/addresses", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const addresses = await service.listAddresses(customerId);
-    return c.json({ data: addresses.map((a) => toWireAddress(a)) });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/customer/me/addresses",
+      tags: [TAG],
+      summary: "List the current customer's addresses",
+      responses: {
+        200: {
+          content: { "application/json": { schema: AddressListEnvelope } },
+          description: "Addresses.",
+        },
+        401: errorResponse("Authentication required."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const addresses = await service.listAddresses(customerId);
+      return c.json({ data: addresses.map((a) => toWireAddress(a)) }, 200);
+    },
+  );
 
-  router.post("/customer/me/addresses", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const raw = await readJsonBody(c.req.raw);
-    const input = parseOrThrow(createAddressSchema, raw);
-    const address = await service.createAddress(customerId, input);
-    return c.json(toWireAddress(address), 201);
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/customer/me/addresses",
+      tags: [TAG],
+      summary: "Create an address",
+      request: {
+        body: {
+          content: { "application/json": { schema: createAddressSchema } },
+        },
+      },
+      responses: {
+        201: {
+          content: { "application/json": { schema: AddressWire } },
+          description: "Created.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const input = c.req.valid("json");
+      const address = await service.createAddress(customerId, input);
+      return c.json(toWireAddress(address), 201);
+    },
+  );
 
-  router.patch("/customer/me/addresses/:id", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const addressId = c.req.param("id");
-    const raw = await readJsonBody(c.req.raw);
-    const patch = parseOrThrow(updateAddressSchema, raw);
-    const address = await service.updateAddress(addressId, customerId, patch);
-    return c.json(toWireAddress(address));
-  });
+  router.openapi(
+    createRoute({
+      method: "patch",
+      path: "/customer/me/addresses/{id}",
+      tags: [TAG],
+      summary: "Update one of the current customer's addresses",
+      request: {
+        params: IdParam,
+        body: {
+          content: { "application/json": { schema: updateAddressSchema } },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: AddressWire } },
+          description: "Updated.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        404: errorResponse("Address not found."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const addressId = c.req.param("id");
+      const patch = c.req.valid("json");
+      const address = await service.updateAddress(addressId, customerId, patch);
+      return c.json(toWireAddress(address), 200);
+    },
+  );
 
-  router.delete("/customer/me/addresses/:id", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const addressId = c.req.param("id");
-    await service.deleteAddress(addressId, customerId);
-    return c.body(null, 204);
-  });
+  router.openapi(
+    createRoute({
+      method: "delete",
+      path: "/customer/me/addresses/{id}",
+      tags: [TAG],
+      summary: "Delete one of the current customer's addresses",
+      request: { params: IdParam },
+      responses: {
+        204: { description: "Deleted." },
+        401: errorResponse("Authentication required."),
+        404: errorResponse("Address not found."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const addressId = c.req.param("id");
+      await service.deleteAddress(addressId, customerId);
+      return c.body(null, 204);
+    },
+  );
 
-  router.put("/customer/me/addresses/:id/default", async (c) => {
-    const customerId = await resolveCurrentCustomerId(c);
-    const addressId = c.req.param("id");
-    const raw = await readJsonBody(c.req.raw);
-    const { kind } = parseOrThrow(setDefaultAddressSchema, raw);
-    const address = await service.setDefaultAddress(
-      customerId,
-      addressId,
-      kind,
-    );
-    return c.json(toWireAddress(address));
-  });
+  router.openapi(
+    createRoute({
+      method: "put",
+      path: "/customer/me/addresses/{id}/default",
+      tags: [TAG],
+      summary: "Mark an address as default for a kind",
+      request: {
+        params: IdParam,
+        body: {
+          content: {
+            "application/json": { schema: setDefaultAddressSchema },
+          },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: AddressWire } },
+          description: "Updated address.",
+        },
+        400: errorResponse("Validation failed."),
+        401: errorResponse("Authentication required."),
+        404: errorResponse("Address not found."),
+      },
+    }),
+    async (c) => {
+      const customerId = await resolveCurrentCustomerId(c);
+      const addressId = c.req.param("id");
+      const { kind } = c.req.valid("json");
+      const address = await service.setDefaultAddress(
+        customerId,
+        addressId,
+        kind,
+      );
+      return c.json(toWireAddress(address), 200);
+    },
+  );
 
   // -------------------------------------------------------------------
-  // /regions — public (no auth gate, now or later)
+  // /regions — public (no auth gate)
   //
-  // Region data is platform-managed reference data sourced from BPS
-  // imports — it changes on the order of months. Without a Cache-Control
-  // hint, every storefront page render and every checkout autofill spins
-  // up a fresh round-trip; with `public, max-age=86400` browsers and
-  // shared caches (CDN, reverse proxies) will serve repeats locally for
-  // a day. If we ever push a partial BPS update, bump the deploy and the
-  // cached entries age out within 24h. The middleware below applies the
-  // header to every `/regions/*` GET before the handler runs.
+  // Region data is platform-managed reference data sourced from BPS imports
+  // and changes on the order of months. The Cache-Control middleware below
+  // tags successful responses for shared caches; `/regions/*` reads are
+  // safe to memoize for a day.
   // -------------------------------------------------------------------
 
   const REGIONS_CACHE_HEADER = "public, max-age=86400";
 
   router.use("/regions/*", async (c, next) => {
     await next();
-    // Only set the header on success — for 4xx (e.g. invalid postal code)
-    // we do not want shared caches to memoize the error.
     if (c.res.status >= 200 && c.res.status < 300) {
       c.header("Cache-Control", REGIONS_CACHE_HEADER);
     }
   });
 
-  router.get("/regions/provinsi", async (c) => {
-    const provinces = await service.listProvinsi();
-    return c.json({ data: provinces.map((p) => toWireProvince(p)) });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/regions/provinsi",
+      tags: [TAG],
+      summary: "List provinces (public)",
+      responses: {
+        200: {
+          content: { "application/json": { schema: ProvinceListEnvelope } },
+          description: "Provinces.",
+        },
+      },
+    }),
+    async (c) => {
+      const provinces = await service.listProvinsi();
+      return c.json({ data: provinces.map((p) => toWireProvince(p)) }, 200);
+    },
+  );
 
-  router.get("/regions/kota-kabupaten", async (c) => {
-    const query = parseOrThrow(
-      listKotaKabupatenQuerySchema,
-      Object.fromEntries(new URL(c.req.url).searchParams),
-    );
-    const cities = await service.listKotaKabupaten(query);
-    return c.json({ data: cities.map((city) => toWireCity(city)) });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/regions/kota-kabupaten",
+      tags: [TAG],
+      summary: "List cities/regencies under a province (public)",
+      request: { query: listKotaKabupatenQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CityListEnvelope } },
+          description: "Cities.",
+        },
+        400: errorResponse("Invalid query."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const cities = await service.listKotaKabupaten(query);
+      return c.json({ data: cities.map((city) => toWireCity(city)) }, 200);
+    },
+  );
 
-  router.get("/regions/kecamatan", async (c) => {
-    const query = parseOrThrow(
-      listKecamatanQuerySchema,
-      Object.fromEntries(new URL(c.req.url).searchParams),
-    );
-    const districts = await service.listKecamatan(query);
-    return c.json({ data: districts.map((d) => toWireDistrict(d)) });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/regions/kecamatan",
+      tags: [TAG],
+      summary: "List districts under a city/regency (public)",
+      request: { query: listKecamatanQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: DistrictListEnvelope } },
+          description: "Districts.",
+        },
+        400: errorResponse("Invalid query."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const districts = await service.listKecamatan(query);
+      return c.json({ data: districts.map((d) => toWireDistrict(d)) }, 200);
+    },
+  );
 
-  router.get("/regions/kelurahan", async (c) => {
-    const query = parseOrThrow(
-      listKelurahanQuerySchema,
-      Object.fromEntries(new URL(c.req.url).searchParams),
-    );
-    const subdistricts = await service.listKelurahan(query);
-    return c.json({ data: subdistricts.map((s) => toWireSubdistrict(s)) });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/regions/kelurahan",
+      tags: [TAG],
+      summary: "List subdistricts under a district (public)",
+      request: { query: listKelurahanQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: SubdistrictListEnvelope } },
+          description: "Subdistricts.",
+        },
+        400: errorResponse("Invalid query."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const subdistricts = await service.listKelurahan(query);
+      return c.json(
+        { data: subdistricts.map((s) => toWireSubdistrict(s)) },
+        200,
+      );
+    },
+  );
 
-  router.get("/regions/postal-code/:code", async (c) => {
-    const code = c.req.param("code");
-    if (!/^\d{5}$/.test(code)) {
-      throw new ValidationError("postal code must be a 5-digit numeric string.", {
-        code: "invalid_postal_code",
-        value: code,
-      });
-    }
-    const subdistricts = await service.searchPostalCode(code);
-    // Multiple kelurahans can share a postal code — return the full list.
-    return c.json({ data: subdistricts.map((s) => toWireSubdistrict(s)) });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/regions/postal-code/{code}",
+      tags: [TAG],
+      summary: "Look up subdistricts by postal code (public)",
+      description:
+        "Multiple kelurahans can share a postal code; the response is a list.",
+      request: { params: PostalCodeParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: SubdistrictListEnvelope } },
+          description: "Matching subdistricts.",
+        },
+        400: errorResponse("Invalid postal code."),
+      },
+    }),
+    async (c) => {
+      const code = c.req.valid("param").code;
+      const subdistricts = await service.searchPostalCode(code);
+      return c.json(
+        { data: subdistricts.map((s) => toWireSubdistrict(s)) },
+        200,
+      );
+    },
+  );
 
   return router;
 }

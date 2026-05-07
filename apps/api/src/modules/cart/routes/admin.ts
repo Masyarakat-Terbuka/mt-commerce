@@ -9,73 +9,124 @@
  * uniform across the router. (The catalog and customer admin routers use
  * the same set; matching them keeps reasoning predictable.)
  *
- * Conventions match the catalog/customer admin routers:
- *   - Bodies (where present) are validated through Zod schemas.
- *   - Validation failures throw `ValidationError` so the standard error
- *     handler renders the consistent envelope.
- *   - Domain types are converted to wire shapes by `toWireCart`, which
- *     embeds `getTotals(cart)` so admins see the breakdown immediately.
+ * OpenAPI: routes are declared via `createRoute`/`router.openapi(...)` so
+ * each shows up in `/openapi.json`. The standard error envelope renders
+ * for validation failures, missing auth, and forbidden roles.
  */
-import { Hono } from "hono";
-import type { ZodTypeAny, z } from "zod";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { NotFoundError } from "../../../lib/errors.js";
 import {
-  NotFoundError,
-  ValidationError,
-  issuesToDetails,
-} from "../../../lib/errors.js";
+  defaultValidationHook,
+  errorResponse,
+} from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import { requireAuth, requireRole } from "../../auth/index.js";
 import type { CartService } from "../service.js";
 import { listCartsQuerySchema } from "../types.js";
 import { toWireCart } from "./wire.js";
+import { CartWire, PaginatedCartWire } from "./openapi-schemas.js";
 
-function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new ValidationError(
-      "Request validation failed.",
-      issuesToDetails(result.error.issues),
-    );
-  }
-  return result.data as z.infer<S>;
-}
+const TAG = "cart (admin)";
+
+const IdParam = z.object({ id: z.string().min(1) });
 
 export function buildCartAdminRoutes(
   service: CartService,
-): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
+): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>({
+    defaultHook: defaultValidationHook,
+  });
 
   // Gate every route. The auth module's middlewares populate
   // c.var.authUser and check the staff profile's role.
   router.use("*", requireAuth());
   router.use("*", requireRole("owner", "admin", "staff"));
 
-  router.get("/carts", async (c) => {
-    const query = parseOrThrow(
-      listCartsQuerySchema,
-      Object.fromEntries(new URL(c.req.url).searchParams),
-    );
-    const result = await service.listCarts(query);
-    return c.json({
-      data: result.data.map((cart) =>
-        toWireCart(cart, service.getTotals(cart)),
-      ),
-      total: result.total,
-      page: result.page,
-      pageSize: result.pageSize,
-    });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/carts",
+      tags: [TAG],
+      summary: "List carts",
+      description:
+        "Paginated cart list. Supports filtering by `status` and `customerId`. Each entry includes precomputed totals.",
+      request: { query: listCartsQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: PaginatedCartWire } },
+          description: "Page of carts.",
+        },
+        400: errorResponse("Invalid query."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden — staff role required."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const result = await service.listCarts(query);
+      return c.json(
+        {
+          data: result.data.map((cart) =>
+            toWireCart(cart, service.getTotals(cart)),
+          ),
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+        },
+        200,
+      );
+    },
+  );
 
-  router.get("/carts/:id", async (c) => {
-    const cart = await service.getCartById(c.req.param("id"));
-    if (!cart) throw new NotFoundError("Cart not found.");
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/carts/{id}",
+      tags: [TAG],
+      summary: "Get a cart by id",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Cart with totals.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const cart = await service.getCartById(c.req.param("id"));
+      if (!cart) throw new NotFoundError("Cart not found.");
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
-  router.post("/carts/:id/abandon", async (c) => {
-    const cart = await service.markAbandoned(c.req.param("id"));
-    return c.json(toWireCart(cart, service.getTotals(cart)));
-  });
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/carts/{id}/abandon",
+      tags: [TAG],
+      summary: "Mark a cart as abandoned (override)",
+      description:
+        "Force-transitions an active cart to `abandoned`. Refused for converted carts.",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CartWire } },
+          description: "Updated cart.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+        409: errorResponse("Cart cannot be abandoned in its current state."),
+      },
+    }),
+    async (c) => {
+      const cart = await service.markAbandoned(c.req.param("id"));
+      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+    },
+  );
 
   return router;
 }

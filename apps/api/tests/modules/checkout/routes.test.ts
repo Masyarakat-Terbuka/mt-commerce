@@ -185,15 +185,17 @@ function createFakeService(opts: FakeOpts = {}): {
       return updated;
     },
     async setShipping(id, input) {
+      // The route layer no longer passes a client-supplied amount —
+      // the service resolves the amount via the shipping module.
+      // For the route smoke test we pin a fixed amount so the wire
+      // shape assertions stay deterministic; the resolution path is
+      // covered separately in the service test.
       const existing = checkouts.get(id) ?? makeCheckout({ id });
       const updated: Checkout = {
         ...existing,
         state: "awaiting_payment",
         shippingMethodCode: input.shippingMethodCode,
-        shippingAmount: {
-          amount: BigInt(input.shippingAmount.amount),
-          currency: input.shippingAmount.currency,
-        },
+        shippingAmount: { amount: 15_000n, currency: existing.shippingAmount?.currency ?? "IDR" },
       };
       checkouts.set(id, updated);
       return updated;
@@ -331,7 +333,8 @@ describe("storefront checkout — happy path", () => {
     const addrBody = (await addrRes.json()) as { state: string };
     expect(addrBody.state).toBe("awaiting_shipping");
 
-    // 3. Set shipping
+    // 3. Set shipping — body carries only the method code; the server
+    // resolves the amount via the shipping module's quote().
     const shipRes = await app.request(
       `/storefront/v1/checkouts/${startBody.id}/shipping`,
       {
@@ -339,7 +342,6 @@ describe("storefront checkout — happy path", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           shippingMethodCode: "flat",
-          shippingAmount: { amount: "10000", currency: "IDR" },
         }),
       },
     );
@@ -349,7 +351,9 @@ describe("storefront checkout — happy path", () => {
       shippingAmount: { amount: string; currency: string };
     };
     expect(shipBody.state).toBe("awaiting_payment");
-    expect(shipBody.shippingAmount).toEqual({ amount: "10000", currency: "IDR" });
+    // The fake service in this test pins the amount to 15_000 IDR (see
+    // setShipping in createFakeService).
+    expect(shipBody.shippingAmount).toEqual({ amount: "15000", currency: "IDR" });
 
     // 4. Complete (with Idempotency-Key)
     const compRes = await app.request(

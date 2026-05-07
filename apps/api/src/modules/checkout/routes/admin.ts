@@ -12,68 +12,122 @@
  * uses the storefront `cancel` route on behalf of the customer, with
  * appropriate auditing once the auth integration matures.
  */
-import { Hono } from "hono";
-import type { ZodTypeAny, z } from "zod";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { NotFoundError } from "../../../lib/errors.js";
 import {
-  NotFoundError,
-  ValidationError,
-  issuesToDetails,
-} from "../../../lib/errors.js";
+  defaultValidationHook,
+  errorResponse,
+} from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import { requireAuth, requireRole } from "../../auth/index.js";
 import type { CheckoutService } from "../service.js";
 import { listCheckoutsQuerySchema } from "../types.js";
 import { toWireCheckout, toWireCheckoutEvent } from "./wire.js";
+import {
+  CheckoutEventListEnvelope,
+  CheckoutWire,
+  PaginatedCheckoutWire,
+} from "./openapi-schemas.js";
 
-function parseOrThrow<S extends ZodTypeAny>(schema: S, raw: unknown): z.infer<S> {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new ValidationError(
-      "Request validation failed.",
-      issuesToDetails(result.error.issues),
-    );
-  }
-  return result.data as z.infer<S>;
-}
+const TAG = "checkout (admin)";
+
+const IdParam = z.object({ id: z.string().min(1) });
 
 export function buildCheckoutAdminRoutes(
   service: CheckoutService,
-): Hono<AppBindings> {
-  const router = new Hono<AppBindings>();
+): OpenAPIHono<AppBindings> {
+  const router = new OpenAPIHono<AppBindings>({
+    defaultHook: defaultValidationHook,
+  });
 
   router.use("*", requireAuth());
   router.use("*", requireRole("owner", "admin", "staff"));
 
-  router.get("/checkouts", async (c) => {
-    const query = parseOrThrow(
-      listCheckoutsQuerySchema,
-      Object.fromEntries(new URL(c.req.url).searchParams),
-    );
-    const result = await service.listCheckouts(query);
-    return c.json({
-      data: result.data.map(toWireCheckout),
-      total: result.total,
-      page: result.page,
-      pageSize: result.pageSize,
-    });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/checkouts",
+      tags: [TAG],
+      summary: "List checkouts",
+      description: "Paginated list. Filter by `state` and `customerId`.",
+      request: { query: listCheckoutsQuerySchema },
+      responses: {
+        200: {
+          content: { "application/json": { schema: PaginatedCheckoutWire } },
+          description: "Page of checkouts.",
+        },
+        400: errorResponse("Invalid query."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden — staff role required."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const result = await service.listCheckouts(query);
+      return c.json(
+        {
+          data: result.data.map(toWireCheckout),
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+        },
+        200,
+      );
+    },
+  );
 
-  router.get("/checkouts/:id", async (c) => {
-    const checkout = await service.getCheckout(c.req.param("id"));
-    if (!checkout) throw new NotFoundError("Checkout not found.");
-    return c.json(toWireCheckout(checkout));
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/checkouts/{id}",
+      tags: [TAG],
+      summary: "Get a checkout by id",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: CheckoutWire } },
+          description: "Checkout.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Not found."),
+      },
+    }),
+    async (c) => {
+      const checkout = await service.getCheckout(c.req.param("id"));
+      if (!checkout) throw new NotFoundError("Checkout not found.");
+      return c.json(toWireCheckout(checkout), 200);
+    },
+  );
 
-  router.get("/checkouts/:id/events", async (c) => {
-    // Existence check so a non-existent id returns 404 rather than an
-    // empty list (which could mask a typo'd id).
-    const checkout = await service.getCheckout(c.req.param("id"));
-    if (!checkout) throw new NotFoundError("Checkout not found.");
-    const eventRows = await service.listEvents(checkout.id);
-    return c.json({
-      data: eventRows.map(toWireCheckoutEvent),
-    });
-  });
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/checkouts/{id}/events",
+      tags: [TAG],
+      summary: "List state-transition events for a checkout",
+      description:
+        "Audit trail of checkout state transitions. Returns 404 if the checkout id does not exist (rather than an empty list, which could mask a typo).",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: {
+            "application/json": { schema: CheckoutEventListEnvelope },
+          },
+          description: "Events.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Checkout not found."),
+      },
+    }),
+    async (c) => {
+      const checkout = await service.getCheckout(c.req.param("id"));
+      if (!checkout) throw new NotFoundError("Checkout not found.");
+      const eventRows = await service.listEvents(checkout.id);
+      return c.json({ data: eventRows.map(toWireCheckoutEvent) }, 200);
+    },
+  );
 
   return router;
 }
