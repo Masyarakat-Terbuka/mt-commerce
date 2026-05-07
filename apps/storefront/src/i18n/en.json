@@ -6,6 +6,24 @@
   "nav.search": "Search",
   "nav.account": "Account",
   "nav.menu": "Menu",
+  "nav.help": "Help",
+  "nav.privacy": "Privacy policy",
+  "nav.terms": "Terms of service",
+
+  "help.index.title": "Help",
+  "help.index.subhead": "Short guides on shipping, payment, returns, and the mt-commerce platform.",
+  "help.topics.shipping": "Shipping",
+  "help.topics.returns": "Returns",
+  "help.topics.payment": "Payment",
+  "help.topics.faq": "FAQ",
+
+  "about.title": "About mt-commerce",
+  "about.subhead": "An open-source commerce platform for Indonesia.",
+
+  "legal.privacy.title": "Privacy policy",
+  "legal.terms.title": "Terms of service",
+  "legal.draft_notice": "This is a draft and not legal advice. Operators should commission their own review before publishing.",
+  "legal.last_updated": "Updated",
 
   "home.hero.title": "Start selling online with your own store.",
   "home.hero.subtitle": "A lightweight storefront that loads on any connection, with local payments and shipping.",

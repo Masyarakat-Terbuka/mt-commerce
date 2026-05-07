@@ -1,0 +1,39 @@
+---
+title: Pembayaran
+summary: Metode pembayaran yang tersedia di mt-commerce, termasuk transfer bank manual, gateway, dan COD.
+order: 3
+---
+
+mt-commerce mendukung beberapa metode pembayaran yang umum digunakan di Indonesia. Metode yang tersedia di sebuah toko ditentukan oleh pengelola toko.
+
+## Transfer bank manual
+
+Pembeli memilih bank tujuan saat checkout, lalu mentransfer sesuai instruksi yang dikirim ke email setelah pesanan dibuat. Pengelola toko mengonfirmasi pembayaran secara manual setelah dana diterima.
+
+Cocok untuk toko yang belum memerlukan gateway berbayar atau yang volumenya masih terkelola secara manual. Tidak ada potongan biaya transaksi dari pihak ketiga.
+
+## Gateway pembayaran (Midtrans)
+
+Untuk toko yang ingin menerima pembayaran dengan konfirmasi otomatis, mt-commerce terintegrasi dengan Midtrans. Lewat Midtrans, pembeli dapat membayar dengan:
+
+- Virtual Account (BCA, BRI, BNI, Mandiri, Permata)
+- E-wallet (GoPay, ShopeePay, OVO, Dana)
+- QRIS
+- Kartu kredit dan debit
+- Gerai retail (Indomaret, Alfamart)
+
+Pembayaran yang berhasil otomatis menggerakkan status pesanan ke "Dibayar" tanpa konfirmasi manual.
+
+## Bayar di tempat (COD)
+
+Untuk pengiriman dengan kurir yang mendukung, mt-commerce mengaktifkan opsi bayar di tempat (Cash on Delivery) lewat integrasi dengan Biteship. Pembeli membayar tunai ke kurir saat barang sampai.
+
+COD biasanya dibatasi pada wilayah dan nilai pesanan tertentu, sesuai aturan kurir. Pengelola toko dapat menonaktifkan opsi COD bila tidak diperlukan.
+
+## Keamanan
+
+mt-commerce tidak menyimpan data kartu pembeli. Untuk pembayaran lewat gateway, data kartu ditangani sepenuhnya oleh penyedia gateway yang sudah PCI-DSS compliant. Untuk transfer bank manual, mt-commerce hanya menyimpan referensi transfer yang dimasukkan pengelola toko.
+
+## Pengembalian dana
+
+Lihat halaman [Pengembalian](/help/returns) untuk informasi tentang cara dan waktu pengembalian dana diproses.

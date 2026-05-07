@@ -2,6 +2,7 @@
 import { defineConfig } from "astro/config";
 import react from "@astrojs/react";
 import sitemap from "@astrojs/sitemap";
+import mdx from "@astrojs/mdx";
 import tailwindcss from "@tailwindcss/vite";
 
 // `site` is required for canonical URLs, the sitemap, and absolute URLs in
@@ -15,15 +16,24 @@ const SITE_URL = process.env.SITE ?? "https://mt-commerce.example";
 // https://astro.build/config
 export default defineConfig({
   site: SITE_URL,
+  /*
+   * Integrations
+   *
+   * - `react()` mounts React for interactive islands (cart, checkout, etc.).
+   * - `mdx()` enables `.mdx` files for content collections. Static content
+   *   pages (help topics, legal drafts) live as MDX so authors can compose
+   *   prose with the small set of components we expose, without touching
+   *   page-level routing for every new article.
+   * - `sitemap()` walks every emitted page at build time and writes
+   *   `sitemap-index.xml` + per-locale `sitemap-N.xml` into `dist/`. The
+   *   `i18n` config makes it emit `<xhtml:link rel="alternate" hreflang>`
+   *   entries for the id/en pair on every URL — Google's recommendation
+   *   for multi-locale sites, mirrored in `BaseLayout`'s alternate links.
+   *   See: https://docs.astro.build/en/guides/integrations-guide/sitemap/
+   */
   integrations: [
     react(),
-    // The sitemap integration walks every emitted page at build time and
-    // writes `sitemap-index.xml` + per-locale `sitemap-N.xml` files into
-    // `dist/`. Configuring `i18n` here makes it emit `<xhtml:link rel=
-    // "alternate" hreflang="...">` entries for the id/en pair on every URL,
-    // which is what Google's documentation recommends for multi-locale
-    // sites and what we mirror in `BaseLayout`'s `<link rel="alternate">`
-    // tags. See: https://docs.astro.build/en/guides/integrations-guide/sitemap/
+    mdx(),
     sitemap({
       i18n: {
         defaultLocale: "id",

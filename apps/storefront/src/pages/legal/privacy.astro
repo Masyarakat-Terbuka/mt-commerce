@@ -1,0 +1,65 @@
+---
+/**
+ * Privacy policy — Indonesian.
+ *
+ * Renders the `legal/id/privacy` MDX entry inside a centered prose
+ * column, with a prominent "draft / not legal advice" notice at the top.
+ *
+ * Why a notice instead of trusting the deployed copy: the bundled drafts
+ * are sensible defaults but they are not legal advice and are not
+ * customised for the operator's jurisdiction. The notice is calm and
+ * factual rather than scolding — it tells the visitor what they are
+ * looking at and what they should do about it.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getEntry, render } from "astro:content";
+import { createTranslator, localePath } from "@/lib/i18n";
+
+const locale = "id" as const;
+const t = createTranslator(locale);
+
+// `getEntry` returns the typed entry or `undefined`. We treat `undefined`
+// as a build-time bug rather than a runtime branch — the file ships with
+// the storefront, so a missing entry means a misconfigured collection.
+const entry = await getEntry("legal", "id/privacy");
+if (!entry) {
+  throw new Error("Missing legal entry: legal/id/privacy.mdx");
+}
+const { Content } = await render(entry);
+
+const title = `${entry.data.title} — mt-commerce`;
+---
+
+<BaseLayout title={title} description={t("legal.draft_notice")}>
+  <article class="mx-auto max-w-[64ch] px-5 pb-24 pt-12 md:px-8 md:pb-32 md:pt-20">
+    <a
+      href={localePath(locale, "/")}
+      class="t-caption text-muted underline-offset-[6px] transition-colors duration-150 hover:text-accent hover:underline"
+    >
+      &larr; {t("nav.home")}
+    </a>
+
+    <header class="mt-8">
+      <h1 class="t-display text-fg">{entry.data.title}</h1>
+      <p class="mt-3 t-caption text-muted">
+        {t("legal.last_updated")} <time datetime={entry.data.lastUpdated}>{entry.data.lastUpdated}</time>
+      </p>
+    </header>
+
+    {/*
+      Draft notice — styled as a quiet bordered block. Uses the line token
+      and stays in the warm-neutral palette; no accent color, no warning
+      colors. It is informational, not alarming.
+    */}
+    <aside
+      class="mt-8 border border-line bg-paper px-5 py-4 t-body text-muted"
+      role="note"
+    >
+      {t("legal.draft_notice")}
+    </aside>
+
+    <div class="prose-mt mt-12">
+      <Content />
+    </div>
+  </article>
+</BaseLayout>

@@ -1,0 +1,52 @@
+---
+/**
+ * About page — English mirror of `pages/about.astro`.
+ *
+ * See the id version for the rationale behind keeping this as a flat
+ * `.astro` page rather than a content collection entry.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { createTranslator, localePath } from "@/lib/i18n";
+
+const locale = "en" as const;
+const t = createTranslator(locale);
+
+const title = `${t("about.title")} — mt-commerce`;
+const description = t("about.subhead");
+---
+
+<BaseLayout title={title} description={description}>
+  <article class="mx-auto max-w-[64ch] px-5 pb-24 pt-16 md:px-8 md:pb-32 md:pt-24">
+    <p class="t-overline text-muted">{t("about.title")}</p>
+    <h1 class="mt-4 t-display text-fg">{t("about.title")}</h1>
+    <p class="mt-5 t-body text-muted">{t("about.subhead")}</p>
+
+    <div class="prose-mt mt-12">
+      <p>
+        mt-commerce is an open-source commerce platform built for Indonesia.
+        Local payments, local shipping, address structures, language, and tax
+        live in the core — not as optional add-ons. The MIT license leaves
+        anyone free to run, modify, and build on top of it.
+      </p>
+
+      <p>
+        The project is maintained by an open-source community. No single
+        company owns it; no subscription model locks it. The roadmap,
+        decisions, and discussions happen in public. Questions and
+        contributions are equally welcome.
+      </p>
+
+      <p>
+        Contributions in code, documentation, translations, or bug reports
+        are accepted through the{" "}
+        <a href="https://github.com/masyarakat-terbuka/mt-commerce">
+          repository on GitHub
+        </a>
+        . For a fuller picture of the project's principles and direction, see
+        the{" "}
+        <a href={localePath(locale, "/help/faq")}>FAQ page</a>{" "}
+        or the <code>PRODUCT.md</code> document in the repository.
+      </p>
+    </div>
+  </article>
+</BaseLayout>
