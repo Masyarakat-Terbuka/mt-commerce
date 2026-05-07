@@ -96,6 +96,31 @@ const baseSchema = z.object({
    * proxies.
    */
   SESSION_COOKIE_SECURE: booleanFromString.optional(),
+  /**
+   * Indonesian PPN (Pajak Pertambahan Nilai) rate applied as a flat
+   * placeholder by the cart's `getTotals`. Default `0.11` = 11%.
+   *
+   * This is intentionally a single global rate — the real tax module (see
+   * `docs/v0.1-checklist.md` "Tax") will replace this with per-item /
+   * per-region / per-exemption rate selection. Keeping the rate in the
+   * environment lets operators dial it without a code change while we
+   * wait for the proper module to land.
+   *
+   * Validation accepts a value in `[0, 1]` so a misconfiguration cannot
+   * accidentally apply, say, a "11" (i.e. 1100%) to every cart.
+   */
+  TAX_PPN_RATE: z
+    .union([z.number(), z.string()])
+    .transform((value) =>
+      typeof value === "number" ? value : Number.parseFloat(value),
+    )
+    .pipe(
+      z
+        .number()
+        .min(0, { message: "TAX_PPN_RATE must be >= 0." })
+        .max(1, { message: "TAX_PPN_RATE must be <= 1 (e.g. 0.11 = 11%)." }),
+    )
+    .default(0.11),
 });
 
 const envSchema = baseSchema.extend({
@@ -159,6 +184,11 @@ export const env = {
    * `http://localhost` still authenticates.
    */
   sessionCookieSecure: data.SESSION_COOKIE_SECURE ?? isProd,
+  /**
+   * Flat PPN rate the cart applies as a placeholder. The dedicated tax
+   * module will replace this with proper per-item rate selection.
+   */
+  taxPpnRate: data.TAX_PPN_RATE,
 } as const;
 
 export type Env = typeof env;
