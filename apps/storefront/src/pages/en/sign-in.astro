@@ -1,0 +1,60 @@
+---
+/**
+ * Sign-in page (English locale, served at `/en/sign-in`). Mirrors
+ * `src/pages/sign-in.astro` — the only difference is the locale resolved
+ * from the URL prefix.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import SignInForm from "@/islands/SignInForm.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+
+const url = Astro.url;
+const nextParam = url.searchParams.get("next");
+const fallbackNext = localePath(locale, "/account");
+const nextHref =
+  nextParam && nextParam.startsWith("/") ? nextParam : fallbackNext;
+
+const signUpHref = `${localePath(locale, "/sign-up")}${
+  nextParam ? `?next=${encodeURIComponent(nextParam)}` : ""
+}`;
+
+const title = `${t("auth.sign_in.title")} — mt-commerce`;
+
+const labels = {
+  email: t("auth.sign_in.email"),
+  password: t("auth.sign_in.password"),
+  submit: t("auth.sign_in.submit"),
+  submitting: t("auth.sign_in.submitting"),
+  errors: {
+    invalidCredentials: t("auth.errors.invalid_credentials"),
+    network: t("auth.errors.network"),
+    generic: t("auth.errors.generic"),
+    fieldRequired: t("auth.errors.field_required"),
+    invalidEmail: t("auth.errors.invalid_email"),
+  },
+};
+---
+
+<BaseLayout title={title} description={t("auth.sign_in.subtitle")}>
+  <div class="mx-auto w-full max-w-[380px] px-5 py-16 md:py-24">
+    <header class="mb-10 space-y-3">
+      <h1 class="t-display text-fg">{t("auth.sign_in.title")}</h1>
+      <p class="t-body text-muted">{t("auth.sign_in.subtitle")}</p>
+    </header>
+
+    <SignInForm client:load nextHref={nextHref} labels={labels} />
+
+    <p class="mt-10 t-caption text-muted">
+      {t("auth.sign_in.no_account")}{" "}
+      <a
+        class="text-fg underline-offset-[4px] transition-colors duration-150 hover:text-accent hover:underline"
+        href={signUpHref}
+      >
+        {t("auth.sign_in.create_account")}
+      </a>
+    </p>
+  </div>
+</BaseLayout>

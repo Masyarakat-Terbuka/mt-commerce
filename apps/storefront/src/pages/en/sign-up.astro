@@ -1,0 +1,65 @@
+---
+/**
+ * Sign-up page (English locale, served at `/en/sign-up`). Mirror of
+ * `src/pages/sign-up.astro`.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import SignUpForm from "@/islands/SignUpForm.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+
+const url = Astro.url;
+const nextParam = url.searchParams.get("next");
+const fallbackNext = localePath(locale, "/account");
+const nextHref =
+  nextParam && nextParam.startsWith("/") ? nextParam : fallbackNext;
+
+const signInHref = `${localePath(locale, "/sign-in")}${
+  nextParam ? `?next=${encodeURIComponent(nextParam)}` : ""
+}`;
+
+const title = `${t("auth.sign_up.title")} — mt-commerce`;
+
+const labels = {
+  name: t("auth.sign_up.name"),
+  email: t("auth.sign_up.email"),
+  phone: t("auth.sign_up.phone"),
+  phoneHint: t("auth.sign_up.phone_hint"),
+  password: t("auth.sign_up.password"),
+  passwordHint: t("auth.sign_up.password_hint"),
+  submit: t("auth.sign_up.submit"),
+  submitting: t("auth.sign_up.submitting"),
+  errors: {
+    emailTaken: t("auth.errors.email_taken"),
+    weakPassword: t("auth.errors.weak_password"),
+    network: t("auth.errors.network"),
+    generic: t("auth.errors.generic"),
+    fieldRequired: t("auth.errors.field_required"),
+    invalidEmail: t("auth.errors.invalid_email"),
+    invalidPhone: t("auth.errors.invalid_phone"),
+  },
+};
+---
+
+<BaseLayout title={title} description={t("auth.sign_up.subtitle")}>
+  <div class="mx-auto w-full max-w-[380px] px-5 py-16 md:py-24">
+    <header class="mb-10 space-y-3">
+      <h1 class="t-display text-fg">{t("auth.sign_up.title")}</h1>
+      <p class="t-body text-muted">{t("auth.sign_up.subtitle")}</p>
+    </header>
+
+    <SignUpForm client:load nextHref={nextHref} labels={labels} />
+
+    <p class="mt-10 t-caption text-muted">
+      {t("auth.sign_up.have_account")}{" "}
+      <a
+        class="text-fg underline-offset-[4px] transition-colors duration-150 hover:text-accent hover:underline"
+        href={signInHref}
+      >
+        {t("auth.sign_up.sign_in")}
+      </a>
+    </p>
+  </div>
+</BaseLayout>

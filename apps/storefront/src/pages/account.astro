@@ -1,0 +1,64 @@
+---
+/**
+ * /account — overview page (Bahasa Indonesia, default locale).
+ *
+ * The chrome is server-rendered through `AccountLayout`; the auth-gated
+ * island handles `me()` resolution, recent-orders, and quick links.
+ */
+import AccountLayout from "@/layouts/AccountLayout.astro";
+import AccountOverview from "@/islands/AccountOverview.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import type { OrderStatus } from "@mt-commerce/sdk";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
+
+const signInHref = localePath(locale, "/sign-in");
+const currentPath = localePath(locale, "/account");
+
+const hrefs = {
+  orders: localePath(locale, "/account/orders"),
+  addresses: localePath(locale, "/account/addresses"),
+  profile: localePath(locale, "/account/profile"),
+};
+
+// `OrderStatus` is the SDK union; we keep this in sync by spelling out
+// every variant explicitly so a future status addition is a TypeScript
+// error rather than a silent fall-through.
+const status: Record<OrderStatus, string> = {
+  pending_payment: t("account.orders.status.pending_payment"),
+  paid: t("account.orders.status.paid"),
+  fulfilled: t("account.orders.status.fulfilled"),
+  cancelled: t("account.orders.status.cancelled"),
+  refunded: t("account.orders.status.refunded"),
+};
+
+const labels = {
+  greeting: t("account.greeting"),
+  emailLabel: t("account.overview.email_label"),
+  phoneLabel: t("account.overview.phone_label"),
+  recentOrders: t("account.overview.recent_orders"),
+  recentOrdersEmpty: t("account.overview.recent_orders_empty"),
+  viewAllOrders: t("account.overview.view_all_orders"),
+  quickLinks: t("account.overview.quick_links"),
+  ordersLink: t("account.sidebar.orders"),
+  addressesLink: t("account.sidebar.addresses"),
+  profileLink: t("account.sidebar.profile"),
+  status,
+};
+
+const title = `${t("account.overview.title")} — mt-commerce`;
+---
+
+<AccountLayout title={title} description={t("account.overview.title")} active="overview">
+  <AccountOverview
+    client:load
+    locale={intlLocale}
+    apiLocale={locale}
+    signInHref={signInHref}
+    currentPath={currentPath}
+    hrefs={hrefs}
+    labels={labels}
+  />
+</AccountLayout>

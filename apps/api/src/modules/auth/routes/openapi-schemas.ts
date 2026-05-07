@@ -46,9 +46,31 @@ export const MeAdminResponse = z
   })
   .openapi("MeAdminResponse");
 
+/**
+ * Compact customer summary surfaced on the storefront `/auth/me` response so
+ * the storefront can know its `customerId` without a second round-trip. Only
+ * the fields the storefront needs to render an account header — full profile
+ * lives at `/storefront/v1/customer/me`.
+ */
+export const StorefrontCustomerSummary = z
+  .object({
+    id: z.string(),
+    email: z.string().email(),
+    displayName: z.string().nullable(),
+    phone: z.string().nullable(),
+  })
+  .openapi("StorefrontCustomerSummary");
+
 export const MeStorefrontResponse = z
   .object({
     user: AuthUserPublic.nullable(),
+    /**
+     * The customer record linked to the auth user via `auth_user_id`. Null
+     * when the auth user has no linked customer (an edge case that should
+     * not occur after the sign-up hook is wired, but is surfaced rather than
+     * crashed-on so the storefront can recover gracefully).
+     */
+    customer: StorefrontCustomerSummary.nullable().optional(),
   })
   .openapi("MeStorefrontResponse");
 

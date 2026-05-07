@@ -167,9 +167,20 @@ Every route requires session auth. Role gates per row.
 
 ### Storefront (mounted at `/storefront/v1/auth`)
 
-| Method | Path                          | Notes                                   |
-| ------ | ----------------------------- | --------------------------------------- |
-| GET    | `/storefront/v1/auth/me`      | Returns `{ user: null }` for anonymous   |
+| Method | Path                          | Notes                                                                |
+| ------ | ----------------------------- | -------------------------------------------------------------------- |
+| GET    | `/storefront/v1/auth/me`      | Returns `{ user, customer }` (both nullable). The `customer` summary lets the storefront resolve `customerId` without a second round-trip. |
+
+### Customer provisioning on sign-up
+
+The Better Auth handler at `/api/auth/sign-up/email` is the canonical
+sign-up route for customers. A `databaseHooks.user.create.after` hook in
+`better-auth.ts` mints a `customers` row with `auth_user_id` set whenever
+a new auth user is created. If a `customers` row already exists at the
+sign-up email (typical of guest checkout) and is unlinked, the hook
+promotes it in place by attaching the new `auth_user_id`. This keeps the
+flow single-call from the storefront's perspective: `signUp()` followed by
+`me()` returns a fully-linked identity.
 
 ## How other modules use this
 

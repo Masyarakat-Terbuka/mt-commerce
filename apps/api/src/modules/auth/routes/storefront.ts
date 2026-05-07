@@ -21,6 +21,13 @@ import { defaultValidationHook } from "../../../lib/openapi-shared.js";
 import type { AuthAppBindings } from "../middleware.js";
 import type { AuthService } from "../service.js";
 import { buildRequireAuth } from "../middleware.js";
+// Direct import of the customer service singleton — going through the
+// customer module's index would pull in `customer/routes/admin.ts`, which
+// imports from the `auth` module, creating an import cycle that surfaces
+// as `requireAuth is not a function` at module-init time. The service
+// module has no transitive dependency on auth, so importing it directly
+// breaks the cycle.
+import { customerService } from "../../customer/service.js";
 import { MeStorefrontResponse } from "./openapi-schemas.js";
 
 const TAG = "auth (storefront)";
@@ -53,11 +60,18 @@ export function buildAuthStorefrontRoutes(
         },
       },
     }),
-    (c) => {
+    async (c) => {
       const user = c.get("authUser");
       if (!user) {
-        return c.json({ user: null }, 200);
+        return c.json({ user: null, customer: null }, 200);
       }
+      // Resolve the linked customer so the storefront can render its
+      // account header without a second round-trip. The lookup is by
+      // `auth_user_id`; the after-sign-up hook in better-auth.ts ensures
+      // a row exists. We surface `customer: null` rather than 404 when
+      // the link is missing so the UI can recover (e.g. show a
+      // recovery/contact CTA) instead of crashing.
+      const customer = await customerService.getCustomerByAuthUserId(user.id);
       return c.json(
         {
           user: {
@@ -66,6 +80,14 @@ export function buildAuthStorefrontRoutes(
             name: user.name,
             emailVerified: user.emailVerified,
           },
+          customer: customer
+            ? {
+                id: customer.id,
+                email: customer.email,
+                displayName: customer.displayName,
+                phone: customer.phone,
+              }
+            : null,
         },
         200,
       );

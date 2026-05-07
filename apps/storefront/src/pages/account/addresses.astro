@@ -1,0 +1,74 @@
+---
+import AccountLayout from "@/layouts/AccountLayout.astro";
+import AccountAddresses from "@/islands/AccountAddresses.tsx";
+import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+
+const signInHref = localePath(locale, "/sign-in");
+const currentPath = localePath(locale, "/account/addresses");
+
+const labels = {
+  title: t("account.addresses.title"),
+  empty: t("account.addresses.empty"),
+  addNew: t("account.addresses.add_new"),
+  edit: t("account.addresses.edit"),
+  delete: t("account.addresses.delete"),
+  deleteConfirm: t("account.addresses.delete_confirm"),
+  setDefaultShipping: t("account.addresses.set_default_shipping"),
+  setDefaultBilling: t("account.addresses.set_default_billing"),
+  defaultShipping: t("account.addresses.default_shipping"),
+  defaultBilling: t("account.addresses.default_billing"),
+  kindShipping: t("account.addresses.kind.shipping"),
+  kindBilling: t("account.addresses.kind.billing"),
+  loading: t("account.orders.loading"),
+  error: t("account.orders.error"),
+  form: {
+    titleNew: t("account.address_form.title_new"),
+    titleEdit: t("account.address_form.title_edit"),
+    kind: t("account.address_form.kind"),
+    recipientName: t("account.address_form.recipient_name"),
+    phone: t("account.address_form.phone"),
+    addressLine1: t("account.address_form.address_line_1"),
+    addressLine2: t("account.address_form.address_line_2"),
+    provinsi: t("account.address_form.provinsi"),
+    kotaKabupaten: t("account.address_form.kota_kabupaten"),
+    kecamatan: t("account.address_form.kecamatan"),
+    kelurahan: t("account.address_form.kelurahan"),
+    postalCode: t("account.address_form.postal_code"),
+    notes: t("account.address_form.notes"),
+    isDefaultShipping: t("account.address_form.is_default_shipping"),
+    isDefaultBilling: t("account.address_form.is_default_billing"),
+    submitNew: t("account.address_form.submit_new"),
+    submitEdit: t("account.address_form.submit_edit"),
+    submitting: t("account.address_form.submitting"),
+    cancel: t("account.address_form.cancel"),
+    placeholderSelect: t("account.address_form.placeholder_select"),
+    loadingRegions: t("account.address_form.loading_regions"),
+    errors: {
+      fieldRequired: t("auth.errors.field_required"),
+      invalidPhone: t("auth.errors.invalid_phone"),
+      invalidPostalCode: t("auth.errors.invalid_postal_code"),
+      network: t("auth.errors.network"),
+      generic: t("auth.errors.generic"),
+    },
+    kindOptions: {
+      shipping: t("account.addresses.kind.shipping"),
+      billing: t("account.addresses.kind.billing"),
+    },
+  },
+};
+
+const title = `${t("account.addresses.title")} — mt-commerce`;
+---
+
+<AccountLayout title={title} description={t("account.addresses.title")} active="addresses">
+  <AccountAddresses
+    client:load
+    apiLocale={locale}
+    signInHref={signInHref}
+    currentPath={currentPath}
+    labels={labels}
+  />
+</AccountLayout>
