@@ -92,29 +92,14 @@ export function buildAuth() {
         verification: authVerifications,
       },
     }),
-    // Explicit `fields:` blocks for columns that don't match Better Auth's
-    // default expected names. Drizzle reflects the camelCase property names
-    // (e.g. `emailVerified`) but our underlying Postgres columns are
-    // snake_case. Better Auth's adapter consults these mappings when it
-    // builds queries — without them, a future framework version that begins
-    // emitting `email_verified` directly would silently write to the wrong
-    // column. Listing them explicitly is the cheapest insurance.
-    user: {
-      fields: {
-        emailVerified: "email_verified",
-        createdAt: "created_at",
-        updatedAt: "updated_at",
-      },
-    },
+    // No explicit `fields:` blocks: our Drizzle schemas already use the
+    // camelCase property names Better Auth expects by default
+    // (`emailVerified`, `userId`, `expiresAt`, etc.). Drizzle handles the
+    // mapping to the snake_case SQL columns. Adding `fields:` here would
+    // be misleading defense-in-depth — Better Auth's adapter resolves
+    // properties by their Drizzle TS name, not the SQL column name, so
+    // mapping them to snake_case actually broke sign-up.
     session: {
-      fields: {
-        userId: "user_id",
-        expiresAt: "expires_at",
-        ipAddress: "ip_address",
-        userAgent: "user_agent",
-        createdAt: "created_at",
-        updatedAt: "updated_at",
-      },
       // 7 days is the framework default; explicit here for visibility.
       expiresIn: 60 * 60 * 24 * 7,
       // Refresh the cookie if the session is older than ~24h on a
@@ -126,27 +111,6 @@ export function buildAuth() {
         // immediately. The cost is one query per authenticated request,
         // acceptable at v0.1 traffic.
         enabled: false,
-      },
-    },
-    account: {
-      fields: {
-        userId: "user_id",
-        providerId: "provider_id",
-        accountId: "account_id",
-        accessToken: "access_token",
-        refreshToken: "refresh_token",
-        idToken: "id_token",
-        accessTokenExpiresAt: "access_token_expires_at",
-        refreshTokenExpiresAt: "refresh_token_expires_at",
-        createdAt: "created_at",
-        updatedAt: "updated_at",
-      },
-    },
-    verification: {
-      fields: {
-        expiresAt: "expires_at",
-        createdAt: "created_at",
-        updatedAt: "updated_at",
       },
     },
     emailAndPassword: {
@@ -197,9 +161,13 @@ export function buildAuth() {
       },
     },
     advanced: {
-      database: {
-        generateId: false,
-      },
+      // Better Auth's default ID generator runs (we don't override it).
+      // The `auth_users.id` column is `text` so any string identifier
+      // fits; framework defaults are collision-resistant and short
+      // enough to use as URL params. We deliberately do NOT set
+      // `database.generateId: false` here — that flag tells Better
+      // Auth the DB will provide ids, but our schema has no default
+      // on `id`, so insertions would fail with NOT NULL.
       // Force secure cookies in production. In dev we let Better Auth
       // emit non-secure cookies so localhost works without TLS.
       useSecureCookies: env.sessionCookieSecure,
