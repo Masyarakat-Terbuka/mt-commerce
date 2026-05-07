@@ -53,16 +53,20 @@ export interface CustomerAddress {
   deletedAt: Date | null;
 }
 
+// Region types — `id` IS the BPS code (e.g. "31" / "3171" / "317101" /
+// "3171010001"). An earlier draft surfaced both `id` and `code` as
+// separate fields, but they always carried the same value; consumers
+// were silently free to compare the wrong one. Picking one canonical
+// identifier removes the trap.
+
 export interface Province {
   id: string;
-  code: string;
   name: string;
 }
 
 export interface City {
   id: string;
   provinsiId: string;
-  code: string;
   name: string;
   /** "kota" or "kabupaten". */
   kind: string;
@@ -71,14 +75,12 @@ export interface City {
 export interface District {
   id: string;
   kotaKabupatenId: string;
-  code: string;
   name: string;
 }
 
 export interface Subdistrict {
   id: string;
   kecamatanId: string;
-  code: string;
   name: string;
   postalCode: string;
 }

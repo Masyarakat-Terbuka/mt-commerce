@@ -3,7 +3,7 @@
  *
  *   provinsi → kota_kabupaten → kecamatan → kelurahan
  *
- * The primary key is the BPS code (e.g. "31" for DKI Jakarta), NOT a ULID.
+ * The primary key IS the BPS code (e.g. "31" for DKI Jakarta), not a ULID.
  * BPS codes are stable, externally meaningful identifiers; using them as the
  * PK lets us:
  *   - join against external data (BPS bulk imports, courier rate tables)
@@ -11,15 +11,17 @@
  *   - keep customer-address rows portable when the seed dataset is replaced
  *     with the full BPS dataset (the IDs in `customer_addresses` survive).
  *
- * `code` is duplicated as a separate column (and unique) so the rest of the
- * system can refer to "the BPS code" without coupling to PK identity. They
- * carry the same value at write time today.
+ * There is intentionally no separate `code` column. An earlier draft kept
+ * one, but `id` and `code` carried the same value at every write — the
+ * duplication added an index, a uniqueness constraint, and a class of
+ * "did I just compare the wrong field?" bugs without buying anything. If a
+ * future use case ever needs a non-BPS surrogate, add it then; until then
+ * `id` is the canonical BPS code.
  */
 import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const provinsi = pgTable("provinsi", {
   id: text("id").primaryKey(),
-  code: text("code").notNull().unique(),
   name: text("name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

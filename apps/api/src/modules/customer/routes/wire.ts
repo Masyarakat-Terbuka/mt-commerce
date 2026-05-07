@@ -50,16 +50,17 @@ export interface WireCustomerAddress {
   deletedAt: string | null;
 }
 
+// `id` is the BPS code on every region wire shape — there is no separate
+// `code` field. See `types.ts` for why.
+
 export interface WireProvince {
   id: string;
-  code: string;
   name: string;
 }
 
 export interface WireCity {
   id: string;
   provinsiId: string;
-  code: string;
   name: string;
   kind: string;
 }
@@ -67,14 +68,12 @@ export interface WireCity {
 export interface WireDistrict {
   id: string;
   kotaKabupatenId: string;
-  code: string;
   name: string;
 }
 
 export interface WireSubdistrict {
   id: string;
   kecamatanId: string;
-  code: string;
   name: string;
   postalCode: string;
 }
@@ -118,14 +117,13 @@ export function toWireAddress(a: CustomerAddress): WireCustomerAddress {
 }
 
 export function toWireProvince(p: Province): WireProvince {
-  return { id: p.id, code: p.code, name: p.name };
+  return { id: p.id, name: p.name };
 }
 
 export function toWireCity(c: City): WireCity {
   return {
     id: c.id,
     provinsiId: c.provinsiId,
-    code: c.code,
     name: c.name,
     kind: c.kind,
   };
@@ -135,7 +133,6 @@ export function toWireDistrict(d: District): WireDistrict {
   return {
     id: d.id,
     kotaKabupatenId: d.kotaKabupatenId,
-    code: d.code,
     name: d.name,
   };
 }
@@ -144,7 +141,6 @@ export function toWireSubdistrict(s: Subdistrict): WireSubdistrict {
   return {
     id: s.id,
     kecamatanId: s.kecamatanId,
-    code: s.code,
     name: s.name,
     postalCode: s.postalCode,
   };

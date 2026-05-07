@@ -71,6 +71,19 @@ import {
 interface AuthService {
   getStaffProfile(authUserId: string): Promise<StaffProfile | null>;
   assignRole(input: { authUserId; role; displayName }): Promise<StaffProfile>;
+  /**
+   * Soft disable: downgrades the staff_profile role to `viewer` and
+   * revokes every active session. Refuses on the last `owner` (would
+   * leave the platform ownerless).
+   *
+   * Soft over hard because:
+   *   - it preserves the audit trail (who did what before disable);
+   *   - it lets an accidentally-disabled user be restored without
+   *     recreating identity;
+   *   - it requires no schema change — the `viewer` role already
+   *     exists, and every mutating role gate excludes it.
+   */
+  disableUser(authUserId: string): Promise<void>;
   listSessions(userId: string): Promise<AuthSession[]>;
   revokeSession(sessionId: string): Promise<void>;
   revokeAllSessions(userId: string): Promise<void>;

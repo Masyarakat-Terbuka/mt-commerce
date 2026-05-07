@@ -1,6 +1,7 @@
 /**
  * Kecamatan — district, third level of the Indonesian admin tree. Sits under
- * kota_kabupaten. BPS code is the PK (e.g. "317101" for Gambir).
+ * kota_kabupaten. BPS code IS the PK (e.g. "317101" for Gambir). See
+ * `provinsi.ts` for why there is no separate `code` column.
  */
 import { index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { kotaKabupaten } from "./kota_kabupaten.js";
@@ -12,7 +13,6 @@ export const kecamatan = pgTable(
     kotaKabupatenId: text("kota_kabupaten_id")
       .notNull()
       .references(() => kotaKabupaten.id),
-    code: text("code").notNull().unique(),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()

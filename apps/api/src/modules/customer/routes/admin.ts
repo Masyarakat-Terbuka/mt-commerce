@@ -2,12 +2,14 @@
  * Admin customer routes — staff-facing CRUD over customers and their
  * addresses. Mounted at `/admin/v1` from the top-level router.
  *
- * TODO requireRole("owner", "admin", "staff"):
- *   The auth module (`requireAuth` + `requireRole`) lands in a parallel
- *   track and is not imported here yet to avoid coupling the customer
- *   module to a still-merging surface. Once both tracks are reconciled,
- *   uncomment the gate at the top of `buildCustomerAdminRoutes` (the same
- *   pattern catalog/admin.ts uses).
+ * Auth: every route in this file requires a session-authenticated staff
+ * user. The role gate accepts `owner`, `admin`, and `staff` — `viewer` is
+ * intentionally NOT in the set, since this router's surface is mutating
+ * and the catalog admin router uses the same set. The middlewares come
+ * from the auth module's public contract per ADR-0005.
+ *
+ * Without these gates, anyone reaching `/admin/v1/customers/*` could list,
+ * read, modify, and soft-delete every customer — direct PII exposure.
  *
  * Conventions:
  *   - Bodies are validated through Zod schemas from `types.ts`.
@@ -24,6 +26,7 @@ import {
   issuesToDetails,
 } from "../../../lib/errors.js";
 import type { AppBindings } from "../../../lib/types.js";
+import { requireAuth, requireRole } from "../../auth/index.js";
 import type { CustomerService } from "../service.js";
 import {
   createAddressSchema,
@@ -60,10 +63,13 @@ export function buildCustomerAdminRoutes(
 ): Hono<AppBindings> {
   const router = new Hono<AppBindings>();
 
-  // TODO requireAuth() + requireRole("owner", "admin", "staff") — see file
-  // header. Wired in once the auth module is reconciled into this branch.
-  // router.use("*", requireAuth());
-  // router.use("*", requireRole("owner", "admin", "staff"));
+  // Gate every route in this router. The auth module's middlewares populate
+  // c.var.authUser and check the staff profile's role. `viewer` is excluded
+  // from the accepted set because this router's surface is mutating; a
+  // future read-only customer surface could include `viewer` plus the
+  // others, the same way catalog plans to.
+  router.use("*", requireAuth());
+  router.use("*", requireRole("owner", "admin", "staff"));
 
   // -------------------------------------------------------------------
   // Customers

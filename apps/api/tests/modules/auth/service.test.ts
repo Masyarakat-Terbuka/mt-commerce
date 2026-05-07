@@ -75,8 +75,18 @@ function createFakeRepo(store: FakeStore): AuthRepository {
     async hasAnyStaff() {
       return store.staff.size > 0;
     },
+    async lockStaffNamespace() {
+      // No-op in unit tests; serialization is asserted by the concurrent
+      // test below via its own promise plumbing.
+    },
     async countStaffByRole(role) {
       return [...store.staff.values()].filter((s) => s.role === role).length;
+    },
+    async withTransaction(fn) {
+      // Unit-level fake: just run the callback against the same repo.
+      // The race-safety test below builds a wrapping repo that simulates
+      // the lock semantics explicitly.
+      return fn(createFakeRepo(store));
     },
     async insertApiKey(row: NewApiKeyRow) {
       const apiKey: ApiKeyRow = {
@@ -106,8 +116,9 @@ function createFakeRepo(store: FakeStore): AuthRepository {
     },
     async touchApiKey(id) {
       const existing = store.apiKeys.get(id);
-      if (!existing) return;
+      if (!existing || existing.revokedAt !== null) return false;
       store.apiKeys.set(id, { ...existing, lastUsedAt: FIXED_NOW });
+      return true;
     },
     async revokeApiKey(id) {
       const existing = store.apiKeys.get(id);
@@ -171,10 +182,19 @@ describe("AuthService.assignRole", () => {
   it("upserts on second call with the same auth user", async () => {
     const { service, seedUser } = buildService();
     const userId = seedUser();
+    // The last-owner-protected guard forbids demoting the only owner — so
+    // we promote a second owner first to keep the upsert path open. See
+    // the "last-owner protection" suite below for the protected case.
+    const secondId = seedUser("usr_test_second");
     await service.assignRole({
       authUserId: userId,
       role: "owner",
       displayName: "Owner v1",
+    });
+    await service.assignRole({
+      authUserId: secondId,
+      role: "owner",
+      displayName: "Second Owner",
     });
     const updated = await service.assignRole({
       authUserId: userId,
@@ -241,5 +261,199 @@ describe("AuthService session management", () => {
     });
     const sessionsA = await service.listSessions(a);
     expect(sessionsA.map((s) => s.id)).toEqual(["sess_a"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B2 — concurrent assignRole must serialize the first-staff-must-be-owner
+// check and the upsert. Without the serialization, two callers can both
+// observe `hasAnyStaff() === false` and both succeed with non-owner roles,
+// leaving the platform with no owner.
+// ---------------------------------------------------------------------------
+
+describe("AuthService.assignRole concurrency", () => {
+  it("serializes concurrent first-staff calls — invariant: exactly one owner", async () => {
+    // The fake repo's `withTransaction` is wrapped in a manual mutex below;
+    // it queues callbacks so the (lock + check + write) sequence is
+    // observably serialized, the same property the production
+    // `pg_advisory_xact_lock` provides.
+    //
+    // Scenario: two concurrent assignRole calls hit a clean slate at the
+    // same time — one asks `owner`, the other asks `admin`. WITHOUT
+    // serialization, both could observe `hasAnyStaff() === false`
+    // simultaneously and the second's admin write would interleave in a
+    // way that left the system without a defined owner write order.
+    // WITH serialization, the second call must observe whatever the
+    // first did and react accordingly. We assert the load-bearing
+    // invariant: exactly one owner sits in the store at the end. (The
+    // admin call may either succeed or fail depending on which order
+    // the lock granted; the canonical invariant the lock defends is
+    // "at least one owner, and never zero".)
+    const store = createStore();
+    const baseRepo = createFakeRepo(store);
+    let lockChain: Promise<void> = Promise.resolve();
+    const repo: typeof baseRepo = {
+      ...baseRepo,
+      async withTransaction(fn) {
+        // Tail-chain into the mutex: each transactional unit waits for the
+        // previous to finish before starting. Mirrors the serialization
+        // the advisory lock + transaction boundary produces in production.
+        const myTurn = lockChain.then(() => fn(baseRepo));
+        lockChain = myTurn.then(
+          () => undefined,
+          () => undefined,
+        );
+        return myTurn;
+      },
+    };
+    const service = new AuthServiceImpl(repo);
+    store.users.set("usr_a", {
+      id: "usr_a",
+      email: "a@example.com",
+      emailVerified: true,
+      name: "A",
+      image: null,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+    store.users.set("usr_b", {
+      id: "usr_b",
+      email: "b@example.com",
+      emailVerified: true,
+      name: "B",
+      image: null,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+
+    await Promise.allSettled([
+      service.assignRole({
+        authUserId: "usr_a",
+        role: "owner",
+        displayName: "Owner First",
+      }),
+      service.assignRole({
+        authUserId: "usr_b",
+        role: "admin",
+        displayName: "Admin Race",
+      }),
+    ]);
+
+    // Exactly one owner exists. Two concurrent first-staff calls without
+    // the lock could both observe `hasAnyStaff === false` and both write
+    // — the lock makes the (read + write) sequence atomic.
+    const owners = [...store.staff.values()].filter((s) => s.role === "owner");
+    expect(owners).toHaveLength(1);
+    expect(owners[0]?.authUserId).toBe("usr_a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S9 — last-owner protection. Demoting the only `owner` to anything else
+// would leave the platform unable to perform any owner-only operation,
+// which is unrecoverable through the API.
+// ---------------------------------------------------------------------------
+
+describe("AuthService.assignRole last-owner protection", () => {
+  it("refuses to demote the only owner with last_owner_protected", async () => {
+    const { service, seedUser } = buildService();
+    const ownerId = seedUser("usr_only_owner");
+    await service.assignRole({
+      authUserId: ownerId,
+      role: "owner",
+      displayName: "Only Owner",
+    });
+    await expect(
+      service.assignRole({
+        authUserId: ownerId,
+        role: "admin",
+        displayName: "Demoted",
+      }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: { code: "last_owner_protected" },
+    });
+  });
+
+  it("allows demoting an owner once a second owner exists", async () => {
+    const { service, seedUser, store } = buildService();
+    const a = seedUser("usr_owner_a");
+    const b = seedUser("usr_owner_b");
+    await service.assignRole({
+      authUserId: a,
+      role: "owner",
+      displayName: "Owner A",
+    });
+    await service.assignRole({
+      authUserId: b,
+      role: "owner",
+      displayName: "Owner B",
+    });
+    await service.assignRole({
+      authUserId: a,
+      role: "admin",
+      displayName: "Owner A demoted",
+    });
+    expect(store.staff.get(a)?.role).toBe("admin");
+    expect(store.staff.get(b)?.role).toBe("owner");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S5 — disableUser: downgrades to viewer + revokes all sessions, refuses
+// on the last owner.
+// ---------------------------------------------------------------------------
+
+describe("AuthService.disableUser", () => {
+  it("downgrades the staff role to viewer and revokes every session", async () => {
+    const { service, store, seedUser } = buildService();
+    const userId = seedUser("usr_to_disable");
+    await service.assignRole({
+      authUserId: userId,
+      role: "owner",
+      displayName: "Bootstrap Owner",
+    });
+    // Add a second owner so disable is allowed (last-owner guard kicks in
+    // otherwise — exercised by the next test).
+    const second = seedUser("usr_second_owner");
+    await service.assignRole({
+      authUserId: second,
+      role: "owner",
+      displayName: "Second Owner",
+    });
+    await service.assignRole({
+      authUserId: userId,
+      role: "admin",
+      displayName: "Bootstrap Owner",
+    });
+    store.sessions.set("sess_x", {
+      id: "sess_x",
+      userId,
+      token: "tx",
+      expiresAt: new Date(FIXED_NOW.getTime() + 60_000),
+      ipAddress: null,
+      userAgent: null,
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+
+    await service.disableUser(userId);
+
+    expect(store.staff.get(userId)?.role).toBe("viewer");
+    expect(store.sessions.has("sess_x")).toBe(false);
+  });
+
+  it("refuses to disable the last owner", async () => {
+    const { service, seedUser } = buildService();
+    const userId = seedUser("usr_only");
+    await service.assignRole({
+      authUserId: userId,
+      role: "owner",
+      displayName: "Only",
+    });
+    await expect(service.disableUser(userId)).rejects.toMatchObject({
+      code: "conflict",
+      details: { code: "last_owner_protected" },
+    });
   });
 });

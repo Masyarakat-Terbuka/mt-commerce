@@ -294,14 +294,12 @@ function seedJakartaTree(store: FakeStore): {
 
   store.provinsi.set(provinsiId, {
     id: provinsiId,
-    code: provinsiId,
     name: "DKI Jakarta",
     createdAt: fixedNow(),
   });
   store.kotaKabupaten.set(kotaKabupatenId, {
     id: kotaKabupatenId,
     provinsiId,
-    code: kotaKabupatenId,
     name: "Jakarta Pusat",
     kind: "kota",
     createdAt: fixedNow(),
@@ -309,14 +307,12 @@ function seedJakartaTree(store: FakeStore): {
   store.kecamatan.set(kecamatanId, {
     id: kecamatanId,
     kotaKabupatenId,
-    code: kecamatanId,
     name: "Gambir",
     createdAt: fixedNow(),
   });
   store.kelurahan.set(kelurahanId, {
     id: kelurahanId,
     kecamatanId,
-    code: kelurahanId,
     name: "Gambir",
     postalCode,
     createdAt: fixedNow(),
@@ -332,14 +328,12 @@ function seedJawaBaratTree(store: FakeStore): {
   const kotaKabupatenId = "3273"; // Bandung
   store.provinsi.set(provinsiId, {
     id: provinsiId,
-    code: provinsiId,
     name: "Jawa Barat",
     createdAt: fixedNow(),
   });
   store.kotaKabupaten.set(kotaKabupatenId, {
     id: kotaKabupatenId,
     provinsiId,
-    code: kotaKabupatenId,
     name: "Kota Bandung",
     kind: "kota",
     createdAt: fixedNow(),
@@ -506,7 +500,6 @@ describe("CustomerService.searchPostalCode", () => {
     store.kelurahan.set(otherKelurahanId, {
       id: otherKelurahanId,
       kecamatanId: region.kecamatanId,
-      code: otherKelurahanId,
       name: "Cideng",
       postalCode: region.postalCode,
       createdAt: fixedNow(),

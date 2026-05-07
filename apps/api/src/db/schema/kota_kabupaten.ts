@@ -3,8 +3,9 @@
  * a city; a "kabupaten" is a regency. Both sit immediately under provinsi
  * and are distinguished here by `kind`.
  *
- * Same PK strategy as `provinsi`: the BPS code is the id (e.g. "3171" for
- * Kota Jakarta Pusat). See `provinsi.ts` for the rationale.
+ * Same PK strategy as `provinsi`: the BPS code IS the id (e.g. "3171" for
+ * Kota Jakarta Pusat). See `provinsi.ts` for the rationale and for why
+ * there is no separate `code` column.
  *
  * Index on `provinsi_id` covers the "list children of this province"
  * dropdown query, which is the only access pattern the storefront uses.
@@ -19,7 +20,6 @@ export const kotaKabupaten = pgTable(
     provinsiId: text("provinsi_id")
       .notNull()
       .references(() => provinsi.id),
-    code: text("code").notNull().unique(),
     name: text("name").notNull(),
     /** "kota" (city) or "kabupaten" (regency). Validated at the boundary. */
     kind: text("kind").notNull(),

@@ -51,6 +51,13 @@ export interface AuthService {
     role: Role;
     displayName: string;
   }): Promise<StaffProfile>;
+  /**
+   * Soft-disable a user: downgrades any staff_profile to `viewer` and
+   * revokes every active session so existing cookies stop working on
+   * their next request. Refuses to disable the last `owner` (would
+   * leave the platform ownerless).
+   */
+  disableUser(authUserId: string): Promise<void>;
 
   // Sessions
   listSessions(userId: string): Promise<AuthSession[]>;
@@ -106,23 +113,108 @@ export class AuthServiceImpl implements AuthService {
       });
     }
 
-    // First-staff-must-be-owner rule. Without it, a seed script could quietly
-    // create a non-owner first staff and lock the platform out of every
-    // owner-only operation.
-    const hasAnyStaff = await this.repo.hasAnyStaff();
-    if (!hasAnyStaff && input.role !== "owner") {
-      throw new ValidationError(
-        "The first staff user must have the `owner` role.",
-        { providedRole: input.role },
-      );
+    // The (lock + check + write) sequence below MUST run inside a single
+    // transaction so two concurrent `assignRole` calls cannot both observe
+    // `hasAnyStaff() === false` and both succeed with non-owner roles
+    // (leaving zero owners), and so a last-owner demotion cannot interleave
+    // with another role change that would also remove ownership.
+    //
+    // The advisory lock at the top serializes ALL assignRole work platform-
+    // wide. assignRole is rare (operator-driven), so the contention cost is
+    // negligible compared to the safety it buys.
+    return this.repo.withTransaction(async (tx) => {
+      await tx.lockStaffNamespace();
+
+      // First-staff-must-be-owner rule. Without it, a seed script could
+      // quietly create a non-owner first staff and lock the platform out of
+      // every owner-only operation.
+      const hasAnyStaff = await tx.hasAnyStaff();
+      if (!hasAnyStaff && input.role !== "owner") {
+        throw new ValidationError(
+          "The first staff user must have the `owner` role.",
+          { providedRole: input.role },
+        );
+      }
+
+      // Last-owner-protection rule. If the target user is currently the
+      // sole `owner` and the new role is anything else, the platform would
+      // be left with no owner — which is unrecoverable through the API
+      // (every owner-only mutation, including assigning a new owner, would
+      // start failing with 403). Refuse and ask the caller to promote a
+      // replacement first.
+      if (input.role !== "owner") {
+        const existing = await tx.getStaffProfile(input.authUserId);
+        if (existing?.role === "owner") {
+          const ownerCount = await tx.countStaffByRole("owner");
+          if (ownerCount === 1) {
+            throw new ConflictError(
+              "Cannot remove the last owner. Promote another staff member to owner first.",
+              { code: "last_owner_protected" },
+            );
+          }
+        }
+      }
+
+      const row = await tx.upsertStaffProfile({
+        authUserId: input.authUserId,
+        role: input.role,
+        displayName: input.displayName,
+      });
+      return toStaffProfile(row);
+    });
+  }
+
+  /**
+   * Soft-disable a staff user. Per the auth module README's "soft disable"
+   * choice (no schema change), this:
+   *   1. Downgrades the staff_profile role to `viewer` (the lowest tier
+   *      that still satisfies routes that only want a *staff* identity but
+   *      blocks every mutating role gate the catalog/customer admin routes
+   *      use).
+   *   2. Revokes every active session so the user is logged out everywhere
+   *      on their next request, without waiting for the cookie to expire.
+   *
+   * Both steps must succeed; if revokeAllSessions throws after the role
+   * downgrade, the database has the correct authoritative state (role is
+   * minimal) and the caller can retry session revocation.
+   *
+   * Hard delete (removing the auth_user row) remains an out-of-band
+   * operation — soft disable preserves the audit trail and lets an
+   * accidentally-disabled user be restored without recreating identity.
+   */
+  async disableUser(authUserId: string): Promise<void> {
+    const user = await this.repo.getUserById(authUserId);
+    if (!user) {
+      throw new NotFoundError("Auth user not found.", { authUserId });
+    }
+    const profile = await this.repo.getStaffProfile(authUserId);
+    if (!profile) {
+      // Nothing to downgrade — but still revoke sessions, since a
+      // customer-only auth user could also be disabled this way.
+      await this.repo.deleteSessionsForUser(authUserId);
+      return;
     }
 
-    const row = await this.repo.upsertStaffProfile({
-      authUserId: input.authUserId,
-      role: input.role,
-      displayName: input.displayName,
+    // Reuse the assignRole transactional path so the last-owner guard
+    // applies here too. Disabling the last owner would leave the platform
+    // ownerless; we surface the same `last_owner_protected` error so the
+    // operator promotes a replacement first.
+    if (profile.role === "owner") {
+      const ownerCount = await this.repo.countStaffByRole("owner");
+      if (ownerCount === 1) {
+        throw new ConflictError(
+          "Cannot disable the last owner. Promote another staff member to owner first.",
+          { code: "last_owner_protected" },
+        );
+      }
+    }
+
+    await this.repo.upsertStaffProfile({
+      authUserId,
+      role: "viewer",
+      displayName: profile.displayName,
     });
-    return toStaffProfile(row);
+    await this.repo.deleteSessionsForUser(authUserId);
   }
 
   // ------------------------------------------------------------
@@ -242,13 +334,32 @@ export class AuthServiceImpl implements AuthService {
     const user = await this.repo.getUserById(row.userId);
     if (!user) return null;
 
-    // Best-effort touch — failure to update `last_used_at` should not block
-    // the request. Run it sync since we are already on the request path,
-    // but swallow errors.
+    // The touch is the request's effective revocation barrier: if the row
+    // was revoked between the verify-time fetch and now, `touchApiKey`
+    // returns false (its UPDATE has `AND revoked_at IS NULL` and no row
+    // matches). Treat that as "key revoked" and reject — never stamp
+    // `last_used_at` on a revoked row, which would pollute the audit
+    // trail and falsely confirm the key was usable.
+    //
+    // Trade-off documented on `touchApiKey`: revocation is reflected on
+    // the *next* request after an in-flight verify, not the in-flight
+    // one. The alternative (per-request `FOR UPDATE`) is too costly given
+    // we already pay an Argon2id verify on the path.
+    //
+    // Other failures (network blip, etc.) are swallowed below — failure
+    // to record `last_used_at` for a still-active key should not block
+    // the request. We distinguish "row was revoked" (touched=false) from
+    // "DB threw" (caught) explicitly.
+    let touched = false;
     try {
-      await this.repo.touchApiKey(id);
+      touched = await this.repo.touchApiKey(id);
     } catch {
-      // ignore
+      // Treat opaque failure as "could not update timestamp" — the
+      // request continues. The next request will retry.
+      touched = true;
+    }
+    if (!touched) {
+      return null;
     }
 
     return {

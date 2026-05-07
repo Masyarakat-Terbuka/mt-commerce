@@ -10,7 +10,11 @@
 --     migration will add the FK once both modules are in. See
 --     `apps/api/src/db/schema/customers.ts` for the rationale.
 --   * Region PKs are BPS codes (e.g. provinsi "31" = DKI Jakarta) so address
---     rows survive a future bulk import of the official BPS dataset.
+--     rows survive a future bulk import of the official BPS dataset. There
+--     is no separate `code` column — `id` IS the code; an earlier draft kept
+--     both, but they always carried the same value and the duplication
+--     created a class of "compared the wrong field" bugs without buying
+--     anything.
 
 DO $$ BEGIN
  CREATE TYPE "public"."address_kind" AS ENUM('shipping', 'billing');
@@ -20,39 +24,31 @@ END $$;
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "provinsi" (
 	"id" text PRIMARY KEY NOT NULL,
-	"code" text NOT NULL,
 	"name" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "provinsi_code_unique" UNIQUE("code")
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "kota_kabupaten" (
 	"id" text PRIMARY KEY NOT NULL,
 	"provinsi_id" text NOT NULL,
-	"code" text NOT NULL,
 	"name" text NOT NULL,
 	"kind" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "kota_kabupaten_code_unique" UNIQUE("code")
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "kecamatan" (
 	"id" text PRIMARY KEY NOT NULL,
 	"kota_kabupaten_id" text NOT NULL,
-	"code" text NOT NULL,
 	"name" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "kecamatan_code_unique" UNIQUE("code")
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "kelurahan" (
 	"id" text PRIMARY KEY NOT NULL,
 	"kecamatan_id" text NOT NULL,
-	"code" text NOT NULL,
 	"name" text NOT NULL,
 	"postal_code" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "kelurahan_code_unique" UNIQUE("code")
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "customers" (

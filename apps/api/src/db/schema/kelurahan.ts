@@ -1,6 +1,7 @@
 /**
  * Kelurahan — sub-district, fourth and final level of the Indonesian admin
- * tree. Sits under kecamatan. BPS code is the PK.
+ * tree. Sits under kecamatan. BPS code IS the PK. See `provinsi.ts` for
+ * why there is no separate `code` column.
  *
  * The `postal_code` column lives here (rather than on `kecamatan` or above)
  * because postal codes in Indonesia are kelurahan-level: a single kecamatan
@@ -20,7 +21,6 @@ export const kelurahan = pgTable(
     kecamatanId: text("kecamatan_id")
       .notNull()
       .references(() => kecamatan.id),
-    code: text("code").notNull().unique(),
     name: text("name").notNull(),
     /** Five-digit Indonesian postal code; validated at the HTTP boundary. */
     postalCode: text("postal_code").notNull(),

@@ -155,7 +155,27 @@ export function buildCustomerStorefrontRoutes(
 
   // -------------------------------------------------------------------
   // /regions — public (no auth gate, now or later)
+  //
+  // Region data is platform-managed reference data sourced from BPS
+  // imports — it changes on the order of months. Without a Cache-Control
+  // hint, every storefront page render and every checkout autofill spins
+  // up a fresh round-trip; with `public, max-age=86400` browsers and
+  // shared caches (CDN, reverse proxies) will serve repeats locally for
+  // a day. If we ever push a partial BPS update, bump the deploy and the
+  // cached entries age out within 24h. The middleware below applies the
+  // header to every `/regions/*` GET before the handler runs.
   // -------------------------------------------------------------------
+
+  const REGIONS_CACHE_HEADER = "public, max-age=86400";
+
+  router.use("/regions/*", async (c, next) => {
+    await next();
+    // Only set the header on success — for 4xx (e.g. invalid postal code)
+    // we do not want shared caches to memoize the error.
+    if (c.res.status >= 200 && c.res.status < 300) {
+      c.header("Cache-Control", REGIONS_CACHE_HEADER);
+    }
+  });
 
   router.get("/regions/provinsi", async (c) => {
     const provinces = await service.listProvinsi();

@@ -66,8 +66,14 @@ function buildRepo(): {
     async hasAnyStaff() {
       return staff.size > 0;
     },
+    async lockStaffNamespace() {
+      // No-op for unit tests.
+    },
     async countStaffByRole(role) {
       return [...staff.values()].filter((s) => s.role === role).length;
+    },
+    async withTransaction(fn) {
+      return fn(repo);
     },
     async insertApiKey(row: NewApiKeyRow) {
       const apiKey: ApiKeyRow = {
@@ -96,7 +102,9 @@ function buildRepo(): {
     },
     async touchApiKey(id) {
       const e = apiKeys.get(id);
-      if (e) apiKeys.set(id, { ...e, lastUsedAt: NOW });
+      if (!e || e.revokedAt !== null) return false;
+      apiKeys.set(id, { ...e, lastUsedAt: NOW });
+      return true;
     },
     async revokeApiKey(id) {
       const e = apiKeys.get(id);
@@ -190,5 +198,139 @@ describe("API key lifecycle", () => {
     expect(await service.verifyApiKey("nodothere")).toBeNull();
     expect(await service.verifyApiKey("apik_x.")).toBeNull();
     expect(await service.verifyApiKey(".secret")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B3 — race between an in-flight verifyApiKey and a concurrent revoke.
+// The verify path must NOT succeed if the row is revoked between the
+// initial fetch and the (last-used) touch, and `touchApiKey` must NOT
+// stamp `last_used_at` on a revoked row.
+// ---------------------------------------------------------------------------
+
+describe("API key verify/revoke race", () => {
+  it("rejects a verify whose row was revoked between fetch and touch", async () => {
+    // The fake repo below simulates the race: between the verify-time
+    // fetch (`getActiveApiKeyById`) and the touch, a concurrent revoke
+    // sets `revoked_at`. The production fix uses `RETURNING id` on the
+    // touch with `AND revoked_at IS NULL`; here we simulate by calling
+    // revoke between two repo hooks. Net assertion: verifyApiKey returns
+    // null and the touched row's `last_used_at` stays null.
+    const users = new Map<string, AuthUserRow>();
+    const sessions = new Map<string, AuthSessionRow>();
+    const staff = new Map<string, StaffProfileRow>();
+    const apiKeys = new Map<string, ApiKeyRow>();
+
+    users.set("usr_1", {
+      id: "usr_1",
+      email: "u@example.com",
+      emailVerified: true,
+      name: "U",
+      image: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+
+    let raceTriggered = false;
+    const baseRepo: AuthRepository = {
+      async getUserById(id) {
+        return users.get(id) ?? null;
+      },
+      async getUserByEmail() {
+        return null;
+      },
+      async listSessionsForUser(userId) {
+        return [...sessions.values()].filter((s) => s.userId === userId);
+      },
+      async deleteSession(id) {
+        sessions.delete(id);
+      },
+      async deleteSessionsForUser(userId) {
+        for (const [id, s] of sessions) {
+          if (s.userId === userId) sessions.delete(id);
+        }
+      },
+      async getStaffProfile(authUserId) {
+        return staff.get(authUserId) ?? null;
+      },
+      async upsertStaffProfile() {
+        throw new Error("not used");
+      },
+      async hasAnyStaff() {
+        return staff.size > 0;
+      },
+      async lockStaffNamespace() {
+        // unused
+      },
+      async countStaffByRole() {
+        return 0;
+      },
+      async withTransaction(fn) {
+        return fn(baseRepo);
+      },
+      async insertApiKey(row: NewApiKeyRow) {
+        const apiKey: ApiKeyRow = {
+          id: row.id,
+          userId: row.userId,
+          name: row.name,
+          keyHash: row.keyHash,
+          scopes: (row.scopes as string[] | undefined) ?? [],
+          lastUsedAt: row.lastUsedAt ?? null,
+          createdAt: NOW,
+          revokedAt: null,
+        };
+        apiKeys.set(apiKey.id, apiKey);
+        return apiKey;
+      },
+      async getApiKeyById(id) {
+        return apiKeys.get(id) ?? null;
+      },
+      async getActiveApiKeyById(id) {
+        const row = apiKeys.get(id);
+        if (!row || row.revokedAt !== null) return null;
+        // Right between the verify-time fetch and the eventual touch,
+        // simulate a concurrent revoke landing.
+        if (!raceTriggered) {
+          raceTriggered = true;
+          const e = apiKeys.get(id);
+          if (e) apiKeys.set(id, { ...e, revokedAt: NOW });
+        }
+        return row;
+      },
+      async listApiKeysForUser() {
+        return [];
+      },
+      async touchApiKey(id) {
+        // Production semantic: only update if the row is still active.
+        // Returns false when the row was revoked between fetch and touch.
+        const e = apiKeys.get(id);
+        if (!e || e.revokedAt !== null) return false;
+        apiKeys.set(id, { ...e, lastUsedAt: NOW });
+        return true;
+      },
+      async revokeApiKey(id) {
+        const e = apiKeys.get(id);
+        if (!e || e.revokedAt !== null) return;
+        apiKeys.set(id, { ...e, revokedAt: NOW });
+      },
+    };
+
+    const service = new AuthServiceImpl(baseRepo);
+
+    const created = await service.createApiKey({
+      userId: "usr_1",
+      name: "race",
+      scopes: ["catalog:read"],
+    });
+
+    const result = await service.verifyApiKey(created.plaintext);
+    // Race resolved cleanly — no auth, no thrown exception.
+    expect(result).toBeNull();
+
+    // Audit trail invariant: the row's last_used_at must NOT have been
+    // stamped after revocation.
+    const stored = apiKeys.get(created.apiKey.id);
+    expect(stored?.revokedAt).not.toBeNull();
+    expect(stored?.lastUsedAt).toBeNull();
   });
 });

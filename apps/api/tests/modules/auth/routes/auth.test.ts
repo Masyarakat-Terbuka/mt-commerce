@@ -47,6 +47,9 @@ function makeService(opts: {
       };
       return profile;
     },
+    async disableUser() {
+      return;
+    },
     async listSessions(userId) {
       const session: AuthSession = {
         id: "sess_a",

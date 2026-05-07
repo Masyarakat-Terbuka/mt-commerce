@@ -67,7 +67,6 @@ export function toCustomerAddress(row: CustomerAddressRow): CustomerAddress {
 export function toProvince(row: ProvinsiRow): Province {
   return {
     id: row.id,
-    code: row.code,
     name: row.name,
   };
 }
@@ -76,7 +75,6 @@ export function toCity(row: KotaKabupatenRow): City {
   return {
     id: row.id,
     provinsiId: row.provinsiId,
-    code: row.code,
     name: row.name,
     kind: row.kind,
   };
@@ -86,7 +84,6 @@ export function toDistrict(row: KecamatanRow): District {
   return {
     id: row.id,
     kotaKabupatenId: row.kotaKabupatenId,
-    code: row.code,
     name: row.name,
   };
 }
@@ -95,7 +92,6 @@ export function toSubdistrict(row: KelurahanRow): Subdistrict {
   return {
     id: row.id,
     kecamatanId: row.kecamatanId,
-    code: row.code,
     name: row.name,
     postalCode: row.postalCode,
   };

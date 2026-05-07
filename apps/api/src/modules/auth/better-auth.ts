@@ -7,19 +7,21 @@
  *   - Drizzle adapter pointed at our Postgres pool. The model names
  *     ("user"/"session"/"account"/"verification") map onto our tables
  *     `auth_users`/`auth_sessions`/`auth_accounts`/`auth_verifications` via
- *     the `user`/`session`/`account`/`verification` config blocks. Snake_case
- *     column names are translated through the `fields` mapping; Drizzle camel-
- *     case property names match Better Auth's expectations as is, with one
- *     exception per table that we explicitly map.
+ *     the `user`/`session`/`account`/`verification` config blocks.
+ *     Snake_case column names that do NOT match Better Auth's expected camel-
+ *     case property names (`emailVerified` → `email_verified`, etc.) are
+ *     mapped through explicit `fields:` blocks below. This is defense in
+ *     depth: a future Better Auth release that changes its expected names
+ *     will fail fast instead of silently writing into the wrong column.
  *
  *   - `emailAndPassword.enabled: true` and no social providers — v0.1 is
  *     email/password only. Better Auth uses Argon2id for passwords by
  *     default; we do not override the hashing algorithm.
  *
- *   - `emailVerification.sendVerificationEmail` logs to the console in dev.
- *     Replacing this with a real adapter is a follow-up that lives in the
- *     notification module (per the project's notification-adapter pattern).
- *     Returning a resolved promise keeps the framework's flow happy.
+ *   - `emailVerification.sendVerificationEmail` is dev-only. In production
+ *     the function THROWS unless a notification adapter is wired, because
+ *     logging single-use verification URLs into the application log dumps
+ *     account-takeover material into operator-readable logs.
  *
  *   - Session cookies: HTTP-only by Better Auth default. We control
  *     `sameSite=Lax` and `secure` via `advanced.useSecureCookies` and
@@ -35,6 +37,14 @@
  *     databaseHooks, and Better Auth's defaults are already collision-
  *     resistant. The `auth_users.id` column is `text`, which is type-
  *     compatible with Track B's planned `customers.auth_user_id` FK.
+ *
+ *   - `rateLimit` is OWNED by Better Auth on the `/api/auth/*` prefix. The
+ *     global `rateLimit()` middleware in `app.ts` skips this prefix to
+ *     avoid two competing buckets on the same key. Per-route windows are
+ *     declared in `customRules` — sign-in/email is the brute-force-prone
+ *     surface and gets the tightest budget (5 per 60s per IP); password-
+ *     reset paths get 3 per 5min. The general bucket on the rest of
+ *     /api/auth/* is 30 per 60s.
  */
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -58,7 +68,13 @@ const log = logger.child({ module: "auth" });
  */
 let instance: ReturnType<typeof buildAuth> | undefined;
 
-function buildAuth() {
+/**
+ * Construct a fresh Better Auth instance with the project's configuration.
+ * Tests call this directly when they need an isolated rate-limit bucket
+ * (the default singleton would share state across tests). Production code
+ * should use `getAuth()` instead.
+ */
+export function buildAuth() {
   return betterAuth({
     appName: "mt-commerce",
     secret: env.betterAuthSecret,
@@ -67,9 +83,7 @@ function buildAuth() {
     database: drizzleAdapter(db, {
       provider: "pg",
       // Map Better Auth's logical model names to our actual tables. The
-      // schema block tells the adapter which Drizzle table to use; the
-      // `modelName`/`fields` blocks below remap the *Better Auth* model name
-      // and snake_case column names where they differ.
+      // schema block tells the adapter which Drizzle table to use.
       schema: {
         user: authUsers,
         session: authSessions,
@@ -77,6 +91,63 @@ function buildAuth() {
         verification: authVerifications,
       },
     }),
+    // Explicit `fields:` blocks for columns that don't match Better Auth's
+    // default expected names. Drizzle reflects the camelCase property names
+    // (e.g. `emailVerified`) but our underlying Postgres columns are
+    // snake_case. Better Auth's adapter consults these mappings when it
+    // builds queries — without them, a future framework version that begins
+    // emitting `email_verified` directly would silently write to the wrong
+    // column. Listing them explicitly is the cheapest insurance.
+    user: {
+      fields: {
+        emailVerified: "email_verified",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+    },
+    session: {
+      fields: {
+        userId: "user_id",
+        expiresAt: "expires_at",
+        ipAddress: "ip_address",
+        userAgent: "user_agent",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+      // 7 days is the framework default; explicit here for visibility.
+      expiresIn: 60 * 60 * 24 * 7,
+      // Refresh the cookie if the session is older than ~24h on a
+      // request, so active users do not get bumped at the 7-day mark.
+      updateAge: 60 * 60 * 24,
+      cookieCache: {
+        // Disabled: we want the session middleware to see the database
+        // truth on every request so a `revokeSession()` takes effect
+        // immediately. The cost is one query per authenticated request,
+        // acceptable at v0.1 traffic.
+        enabled: false,
+      },
+    },
+    account: {
+      fields: {
+        userId: "user_id",
+        providerId: "provider_id",
+        accountId: "account_id",
+        accessToken: "access_token",
+        refreshToken: "refresh_token",
+        idToken: "id_token",
+        accessTokenExpiresAt: "access_token_expires_at",
+        refreshTokenExpiresAt: "refresh_token_expires_at",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+    },
+    verification: {
+      fields: {
+        expiresAt: "expires_at",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
+      },
+    },
     emailAndPassword: {
       enabled: true,
       // Email verification is requested but not enforced for sign-in in
@@ -91,31 +162,33 @@ function buildAuth() {
       autoSignInAfterVerification: true,
       // Dev-only console fallback. The production wiring lives in the
       // notification module (a `NotificationChannel` adapter), which lands
-      // in a follow-up. Returning a resolved promise satisfies the
-      // framework contract.
+      // in a follow-up.
+      //
+      // SECURITY: in production we MUST NOT log the verification URL. A
+      // verification link is single-use account-takeover material; anyone
+      // with read access to the application log would be able to claim a
+      // freshly-registered account. Until a real notification adapter is
+      // wired, refuse to send and surface a clear runtime error so the
+      // operator notices on the very first sign-up attempt rather than
+      // through a leaked log line.
       sendVerificationEmail: async ({ user, url }) => {
-        log.info(
+        if (env.nodeEnv === "production") {
+          throw new Error(
+            "Notification adapter not yet wired; configure SMTP or wire " +
+              "the notification module before signing up users in production.",
+          );
+        }
+        // Dev/test: keep the URL discoverable for local development, but
+        // tag it loudly and downgrade to warn so it stands out in the log
+        // stream and never accidentally trips a "looks fine" review.
+        log.warn(
           {
             userId: user.id,
             email: user.email,
             url,
           },
-          "[dev] email verification link",
+          "[DEV ONLY] email verification link — do not deploy without a real notification adapter",
         );
-      },
-    },
-    session: {
-      // 7 days is the framework default; explicit here for visibility.
-      expiresIn: 60 * 60 * 24 * 7,
-      // Refresh the cookie if the session is older than ~24h on a
-      // request, so active users do not get bumped at the 7-day mark.
-      updateAge: 60 * 60 * 24,
-      cookieCache: {
-        // Disabled: we want the session middleware to see the database
-        // truth on every request so a `revokeSession()` takes effect
-        // immediately. The cost is one query per authenticated request,
-        // acceptable at v0.1 traffic.
-        enabled: false,
       },
     },
     advanced: {
@@ -141,10 +214,42 @@ function buildAuth() {
       },
     },
     rateLimit: {
-      // The API has its own rate-limit middleware mounted globally. We let
-      // the global limiter handle this — disabling Better Auth's own
-      // limiter avoids two competing buckets on the same IP.
-      enabled: false,
+      // Better Auth owns the rate-limit bucket on /api/auth/*. The global
+      // `rateLimit()` middleware in app.ts skips this prefix to avoid two
+      // competing buckets on the same key.
+      //
+      // Enabled in every environment, including tests — the bucket is
+      // in-memory (`storage: "memory"`) and per-instance, so tests that
+      // need to verify the 429 contract construct a fresh instance via
+      // the exported `buildAuth()` builder. The default singleton is
+      // never reused across tests.
+      //
+      // `storage: "memory"` is intentional for v0.1: a database-backed
+      // store would require a `rate_limit` table the framework manages
+      // (and a Postgres trip per request). Memory is fine for a single-
+      // process API; when we move to multi-process we will switch to
+      // `secondary-storage` against the existing Redis pool.
+      enabled: true,
+      storage: "memory",
+      // Default bucket for any /api/auth/* route not matched below.
+      // 30 per 60s per IP is generous enough for normal session activity
+      // (get-session, sign-out, etc.) while still blunting volumetric noise.
+      window: 60,
+      max: 30,
+      // Per-route windows. Path keys are the route under basePath (Better
+      // Auth strips `/api/auth` before matching). Tighter buckets on the
+      // brute-force-prone surfaces:
+      //   - sign-in/email: 5 attempts per 60s per IP. Argon2id verify takes
+      //     50–200ms; a higher cap would let an attacker pin a single
+      //     account and exhaust CPU.
+      //   - forget-password / reset-password: 3 per 5min — these are user-
+      //     initiated rare flows and the cost of being wrong is high.
+      customRules: {
+        "/sign-in/email": { window: 60, max: 5 },
+        "/forget-password": { window: 60 * 5, max: 3 },
+        "/reset-password": { window: 60 * 5, max: 3 },
+        "/reset-password/*": { window: 60 * 5, max: 3 },
+      },
     },
   });
 }

@@ -5,11 +5,12 @@
  *   1. requestId      — every other layer references it for correlation
  *   2. logger         — needs the request ID; emits the request line on completion
  *   3. cors           — short-circuits OPTIONS preflights before rate limits
- *   4. better-auth    — must own its own cookie writes; mounted before the
- *                       rate limiter so a successful sign-in can always set
- *                       the session cookie even when a flood of bad
- *                       requests has hit the limiter on the same IP
- *   5. rateLimit      — applied broadly; per-route limits can layer on top
+ *   4. better-auth    — owns its own rate-limit bucket on /api/auth/* (see
+ *                       `modules/auth/better-auth.ts`). The global limiter
+ *                       SKIPS this prefix so the two buckets do not double-
+ *                       count the same IP.
+ *   5. rateLimit      — applied broadly EXCEPT on /api/auth/*; per-route
+ *                       limits can layer on top
  *   6. routes         — the actual handlers
  *   7. errorHandler   — wired via `app.onError`, catches anything thrown above
  *
@@ -41,9 +42,11 @@ export function createApp(): Hono<AppBindings> {
   app.use("*", requestLogger());
   app.use("*", corsMiddleware());
 
-  // Better Auth handler at /api/auth/*. Mounted before the rate limiter so
-  // a sign-in burst from a single IP can still set its session cookie when
-  // the limit kicks in on subsequent unrelated calls.
+  // Better Auth handler at /api/auth/*. Better Auth's own rate-limiter is
+  // configured in `modules/auth/better-auth.ts` (with per-route windows
+  // for sign-in/forget-password/reset-password); the global limiter below
+  // EXCLUDES this prefix so we do not run two competing buckets on the
+  // same key.
   //
   // The handler reads the request and writes its own response; we delegate
   // by handing Better Auth the raw `Request` and returning the `Response`
@@ -54,7 +57,19 @@ export function createApp(): Hono<AppBindings> {
     return auth.handler(c.req.raw);
   });
 
-  app.use("*", rateLimit());
+  // Apply the global limiter to everything OUTSIDE /api/auth/*. We pass the
+  // built middleware through a thin gate that short-circuits on the auth
+  // prefix — a wildcard mount with manual exclusion (rather than separate
+  // `app.use()` calls per non-auth prefix) keeps every other route covered
+  // by default, including future modules.
+  const globalLimiter = rateLimit();
+  app.use("*", async (c, next) => {
+    if (c.req.path.startsWith("/api/auth/")) {
+      await next();
+      return;
+    }
+    await globalLimiter(c, next);
+  });
 
   setupOpenApi(app);
   app.route("/", buildRoutes());
