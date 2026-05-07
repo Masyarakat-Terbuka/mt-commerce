@@ -29,11 +29,22 @@ export interface WireCartItem {
   updatedAt: string;
 }
 
+export interface WireAppliedTaxRate {
+  code: string;
+  basisPoints: number;
+}
+
 export interface WireCartTotals {
   subtotal: MoneyJSON;
   tax: MoneyJSON;
   shipping: MoneyJSON;
   total: MoneyJSON;
+  /**
+   * The tax rate that produced `tax`, when one was supplied. Null when
+   * the env-var fallback was used (e.g. tests / unseeded dev DBs) or
+   * no default rate is configured for the cart's currency.
+   */
+  taxRate: WireAppliedTaxRate | null;
 }
 
 export interface WireCart {
@@ -67,6 +78,9 @@ export function toWireCartTotals(totals: CartTotals): WireCartTotals {
     tax: moneyToJSON(totals.tax),
     shipping: moneyToJSON(totals.shipping),
     total: moneyToJSON(totals.total),
+    taxRate: totals.taxRate
+      ? { code: totals.taxRate.code, basisPoints: totals.taxRate.basisPoints }
+      : null,
   };
 }
 

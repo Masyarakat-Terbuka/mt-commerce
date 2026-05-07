@@ -38,12 +38,42 @@ import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
   type AddItemInput,
+  type AppliedTaxRate,
   type Cart,
   type CartItem,
   type CartTotals,
   type ListCartsQuery,
   type Paginated,
 } from "./types.js";
+
+/**
+ * Optional inputs to `getTotals` so callers can plug in a tax rate fetched
+ * from the dedicated tax module and a shipping amount resolved from the
+ * shipping module — without the cart module taking direct dependencies on
+ * either. Per ADR-0005 (modular monolith), modules talk to each other
+ * through these narrow interfaces, never direct imports.
+ *
+ * - `taxRate` carries the basis-points integer; the cart applies it via
+ *   `multiply(money, basisPoints/10000, halfEven)` so the rounding stays
+ *   exact at the integer level. When omitted (or null), the cart falls
+ *   back to the legacy `env.taxPpnRate` so unit tests and dev seeds
+ *   without a tax_rates row keep working.
+ *
+ * - `shipping` replaces the legacy `zero(currency)` shipping placeholder.
+ *   Currency parity with the cart's currency is asserted; a mismatch is
+ *   a programming error and surfaces as a `CurrencyMismatchError` from
+ *   `Money.add`.
+ */
+export interface GetTotalsOptions {
+  /**
+   * The tax rate to apply. Pass the result of
+   * `taxService.getDefaultRate(cart.currency)` or null to fall back to
+   * the env-var rate.
+   */
+  taxRate?: { code: string; rateBasisPoints: number } | null;
+  /** Resolved shipping amount in the cart's currency. */
+  shipping?: Money;
+}
 
 export interface CartService {
   // Lifecycle
@@ -106,11 +136,22 @@ export interface CartService {
 
   // Pure compute
   /**
-   * Pure compute (no DB round-trip). See file-level docs and the README
-   * for the v0.1 placeholder contract: real tax in the cart's currency
-   * applied at a flat rate; shipping is zero.
+   * Pure compute (no DB round-trip).
+   *
+   * Tax: when `opts.taxRate` is provided, applied via
+   * `subtotal * (basisPoints / 10000)` with halfEven rounding. Otherwise
+   * the cart falls back to `env.taxPpnRate` for environments where the
+   * tax module has not been seeded (unit tests, fresh dev DBs).
+   *
+   * Shipping: when `opts.shipping` is provided, used directly (currency
+   * must match the cart's currency). Otherwise zero.
+   *
+   * The dedicated tax + shipping modules ship as separate concerns; this
+   * function consumes their outputs through `opts` rather than reaching
+   * for them directly, keeping the cart module dependency-free per
+   * ADR-0005.
    */
-  getTotals(cart: Cart): CartTotals;
+  getTotals(cart: Cart, opts?: GetTotalsOptions): CartTotals;
 }
 
 export class CartServiceImpl implements CartService {
@@ -491,40 +532,81 @@ export class CartServiceImpl implements CartService {
    * Pure cart-totals computation. Invoked from cart reads, the future
    * order-creation path, and anywhere a `Cart` needs a money breakdown.
    *
-   * v0.1 contract:
+   * Contract:
    *
    *   subtotal — Σ (unit_price * quantity) across line items, in the cart's
    *              currency. An empty cart yields `zero(currency)`.
    *
-   *   tax      — `subtotal * TAX_PPN_RATE`, rounded `halfEven` (banker's
-   *              rounding per ADR-0007). Default rate is 0.11 (11% PPN).
-   *              TODO: this is a placeholder. The dedicated tax module (see
-   *              docs/v0.1-checklist.md "Tax") will replace this with proper
-   *              per-item / per-region / per-exemption rate selection.
+   *   tax      — When `opts.taxRate` is provided, `subtotal * (basisPoints
+   *              / 10000)` with halfEven rounding. Otherwise the legacy
+   *              `env.taxPpnRate` is applied — this fallback exists so
+   *              tests and unseeded dev DBs continue to produce sensible
+   *              totals while the tax module rolls out.
    *
-   *   shipping — `zero(currency)`. The shipping module will plug in here
-   *              once it lands; this function's signature stays the same.
+   *   shipping — `opts.shipping` when provided (currency-checked against
+   *              the cart). Otherwise `zero(currency)`. The shipping
+   *              module's `quote()` is the canonical source.
    *
    *   total    — `subtotal + tax + shipping`. Throws via `Money.add` if
-   *              currencies somehow disagree (they should not — the
-   *              cart-level lock prevents it).
+   *              currencies disagree (the cart-level lock prevents this
+   *              for the items; the opts.shipping is the only other
+   *              source and is validated below).
+   *
+   *   taxRate  — Echoed from `opts.taxRate` so the wire envelope can
+   *              show clients which rate was applied. Null on the env-var
+   *              fallback path.
    *
    * Performance: all-bigint math; no DB I/O; safe to call in a hot loop
-   * (e.g. listing 100 carts in the admin).
+   * (e.g. listing 100 carts in the admin) — the caller batches the
+   * tax-rate / shipping resolution outside the loop.
    */
-  getTotals(cart: Cart): CartTotals {
+  getTotals(cart: Cart, opts?: GetTotalsOptions): CartTotals {
     const currency = cart.currency;
     const subtotal = computeSubtotal(cart.items, currency);
 
-    // Tax placeholder. `multiply` rounds half-to-even by default, which
-    // matches ADR-0007 and minimizes systemic bias across many carts.
-    const tax = moneyMultiply(subtotal, env.taxPpnRate, {
-      rounding: "halfEven",
-    });
-    const shipping = moneyZero(currency);
+    let tax: Money;
+    let appliedRate: AppliedTaxRate | null = null;
+    if (opts?.taxRate) {
+      // basis_points / 10000 — exact integer-level conversion, rounded
+      // once at the end via halfEven (banker's) per ADR-0007.
+      const factor = opts.taxRate.rateBasisPoints / 10_000;
+      tax = moneyMultiply(subtotal, factor, { rounding: "halfEven" });
+      appliedRate = {
+        code: opts.taxRate.code,
+        basisPoints: opts.taxRate.rateBasisPoints,
+      };
+    } else {
+      // Fallback path: keeps `getTotals` deterministic when no tax module
+      // has been seeded. Documented as a transitional fallback in the
+      // README and in `lib/env.ts` (TAX_PPN_RATE).
+      tax = moneyMultiply(subtotal, env.taxPpnRate, {
+        rounding: "halfEven",
+      });
+    }
+
+    let shipping: Money;
+    if (opts?.shipping) {
+      // Currency parity: the cart locks a single currency. Surface a
+      // mismatch eagerly — a wrong-currency shipping amount would
+      // otherwise blow up at `moneyAdd` later with a less helpful trace.
+      if (opts.shipping.currency !== currency) {
+        throw new ValidationError(
+          "Shipping currency does not match the cart's currency.",
+          {
+            code: "currency_mismatch",
+            cartCurrency: currency,
+            shippingCurrency: opts.shipping.currency,
+          },
+        );
+      }
+      shipping = opts.shipping;
+    } else {
+      shipping = moneyZero(currency);
+    }
+
     const total = moneyAdd(moneyAdd(subtotal, tax), shipping);
 
-    return { subtotal, tax, shipping, total };
+    return { subtotal, tax, shipping, total, taxRate: appliedRate };
   }
 }
 

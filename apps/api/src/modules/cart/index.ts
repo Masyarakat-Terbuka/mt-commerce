@@ -19,6 +19,7 @@ import { cartService } from "./service.js";
 
 export type {
   AddItemInput,
+  AppliedTaxRate,
   Cart,
   CartItem,
   CartStatus,
@@ -29,7 +30,7 @@ export type {
   UpdateItemQuantityInput,
 } from "./types.js";
 
-export type { CartService } from "./service.js";
+export type { CartService, GetTotalsOptions } from "./service.js";
 export { CartServiceImpl } from "./service.js";
 
 export { cartService };

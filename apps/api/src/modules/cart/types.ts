@@ -49,15 +49,33 @@ export interface Cart {
   updatedAt: Date;
 }
 
+/**
+ * Light-weight reference to the rate that produced `tax`. Surfaced on the
+ * totals so storefronts can render "PPN 11%" alongside the amount and so
+ * audit code can recompute the tax later. Null when no rate was applied
+ * (no tax module configured for the cart's currency, or the env-var
+ * fallback path was taken in tests).
+ */
+export interface AppliedTaxRate {
+  code: string;
+  basisPoints: number;
+}
+
 export interface CartTotals {
   /** Sum of `unit_price * quantity` across line items. */
   subtotal: Money;
-  /** PPN placeholder; see `service.ts#getTotals` for the contract. */
+  /** Tax amount in the cart's currency. */
   tax: Money;
-  /** Always zero at v0.1; the shipping module will plug in here. */
+  /** Shipping amount in the cart's currency. Zero when none is supplied. */
   shipping: Money;
   /** `subtotal + tax + shipping`. */
   total: Money;
+  /**
+   * The rate used to compute `tax`, when available. Null when:
+   *   - no default tax rate is configured for the cart's currency, OR
+   *   - the env-var fallback path was taken (tests / unseeded DB).
+   */
+  taxRate?: AppliedTaxRate | null;
 }
 
 export interface Paginated<T> {

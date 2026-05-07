@@ -42,7 +42,8 @@ import type {
   CustomerAddress,
   CustomerService,
 } from "../../../src/modules/customer/index.js";
-import { ConflictError, NotFoundError } from "../../../src/lib/errors.js";
+import type { ShippingService } from "../../../src/modules/shipping/index.js";
+import { ConflictError, NotFoundError, ValidationError } from "../../../src/lib/errors.js";
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -461,6 +462,80 @@ function makeFakeCustomerService(
   };
 }
 
+/**
+ * Minimal fake `ShippingService` for the checkout tests. Implements only
+ * the surface the checkout calls: `quote()` and the lookups it uses for
+ * validation. Returns a deterministic flat IDR rate by default; tests
+ * needing the currency-mismatch path override `quote` to throw a
+ * `ValidationError {code:"currency_mismatch"}`.
+ */
+interface FakeShippingOptions {
+  /** Override the quote behavior for a specific test case. */
+  quote?: ShippingService["quote"];
+}
+
+function makeFakeShippingService(opts: FakeShippingOptions = {}): ShippingService {
+  const fail = (): never => {
+    throw new Error("not implemented in this fake");
+  };
+  return {
+    async listMethods() {
+      return [];
+    },
+    async getById() {
+      return null;
+    },
+    async getByCode(code) {
+      if (code !== "flat" && code !== "MANUAL_FLAT") return null;
+      return {
+        id: "ship_flat",
+        code,
+        name: "Flat",
+        providerKind: "manual",
+        flatRate: { amount: 10_000n, currency: "IDR" },
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      };
+    },
+    quote:
+      opts.quote ??
+      (async ({ methodCode, currency }) => {
+        if (methodCode !== "flat" && methodCode !== "MANUAL_FLAT") {
+          throw new NotFoundError("Shipping method not found.", { methodCode });
+        }
+        // Default fake: flat rate fixed in IDR. A non-IDR request should
+        // surface as a currency_mismatch ValidationError so tests that
+        // probe that path see the expected error code.
+        if (currency !== "IDR") {
+          throw new ValidationError(
+            "Shipping method currency does not match the requested currency.",
+            {
+              code: "currency_mismatch",
+              methodCode,
+              requestedCurrency: currency,
+              methodCurrency: "IDR",
+            },
+          );
+        }
+        return { amount: 10_000n, currency: "IDR" };
+      }),
+    async createMethod() {
+      return fail();
+    },
+    async updateMethod() {
+      return fail();
+    },
+    async deleteMethod() {
+      return fail();
+    },
+    async createFulfillment() {
+      return fail();
+    },
+  };
+}
+
 function makeCustomerAddressDomain(row: CustomerAddressRow): CustomerAddress {
   return {
     id: row.id,
@@ -552,7 +627,13 @@ function buildService(repoOptions: FakeRepoOptions = {}): BuildResult {
   const repo = createFakeRepo(store, repoOptions);
   const cartService = makeFakeCartService(carts);
   const customerService = makeFakeCustomerService(addressesDomain, customers);
-  const service = new CheckoutServiceImpl(repo, cartService, customerService);
+  const shippingService = makeFakeShippingService();
+  const service = new CheckoutServiceImpl(
+    repo,
+    cartService,
+    customerService,
+    shippingService,
+  );
 
   return {
     store,
@@ -658,7 +739,6 @@ describe("setAddresses", () => {
     await service.setAddresses(checkout.id, { shippingAddressId: "adr_ship" });
     await service.setShipping(checkout.id, {
       shippingMethodCode: "flat",
-      shippingAmount: { amount: "10000", currency: "IDR" },
     });
     // Re-set addresses — should bring us back to awaiting_shipping.
     const revised = await service.setAddresses(checkout.id, {
@@ -670,29 +750,30 @@ describe("setAddresses", () => {
 });
 
 describe("setShipping", () => {
-  it("transitions awaiting_shipping → awaiting_payment", async () => {
+  it("transitions awaiting_shipping → awaiting_payment using the shipping module's quote", async () => {
     const { service } = buildService();
     const checkout = await service.startCheckout({ cartId: "cart_test" });
     await service.setAddresses(checkout.id, { shippingAddressId: "adr_ship" });
     const updated = await service.setShipping(checkout.id, {
       shippingMethodCode: "flat",
-      shippingAmount: { amount: "10000", currency: "IDR" },
     });
     expect(updated.state).toBe("awaiting_payment");
     expect(updated.shippingMethodCode).toBe("flat");
+    // The fake shipping service always returns 10_000 IDR for the
+    // canonical "flat" code; checkout captures that on the row.
     expect(updated.shippingAmount?.amount).toBe(10_000n);
+    expect(updated.shippingAmount?.currency).toBe("IDR");
   });
 
-  it("rejects mismatched currencies", async () => {
+  it("rejects an unknown method code with NotFoundError", async () => {
     const { service } = buildService();
     const checkout = await service.startCheckout({ cartId: "cart_test" });
     await service.setAddresses(checkout.id, { shippingAddressId: "adr_ship" });
     await expect(
       service.setShipping(checkout.id, {
-        shippingMethodCode: "flat",
-        shippingAmount: { amount: "10000", currency: "USD" },
+        shippingMethodCode: "DOES_NOT_EXIST",
       }),
-    ).rejects.toThrow(/currency/i);
+    ).rejects.toThrow(NotFoundError);
   });
 });
 
@@ -706,7 +787,6 @@ describe("complete", () => {
     });
     await service.setShipping(checkout.id, {
       shippingMethodCode: "flat",
-      shippingAmount: { amount: "10000", currency: "IDR" },
     });
 
     const captured: string[] = [];
@@ -775,7 +855,6 @@ describe("listEvents", () => {
     await service.setAddresses(checkout.id, { shippingAddressId: "adr_ship" });
     await service.setShipping(checkout.id, {
       shippingMethodCode: "flat",
-      shippingAmount: { amount: "10000", currency: "IDR" },
     });
     const log = await service.listEvents(checkout.id);
     expect(log.map((e) => e.toState)).toEqual([
@@ -797,7 +876,6 @@ async function bringToAwaitingPayment(
   await service.setAddresses(checkout.id, { shippingAddressId: "adr_ship" });
   await service.setShipping(checkout.id, {
     shippingMethodCode: "flat",
-    shippingAmount: { amount: "10000", currency: "IDR" },
   });
   return { checkoutId: checkout.id };
 }

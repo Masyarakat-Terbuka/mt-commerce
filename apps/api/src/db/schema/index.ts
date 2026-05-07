@@ -24,3 +24,6 @@ export * from "./checkouts.js";
 export * from "./checkout_events.js";
 export * from "./order_intents.js";
 export * from "./idempotency_keys.js";
+export * from "./tax_rates.js";
+export * from "./shipping_methods.js";
+export * from "./fulfillments.js";

@@ -164,10 +164,18 @@ export const setAddressesSchema = z
   });
 export type SetAddressesInput = z.infer<typeof setAddressesSchema>;
 
-export const setShippingSchema = z.object({
-  shippingMethodCode: z.string().min(1).max(100),
-  shippingAmount: moneyInputSchema,
-});
+/**
+ * `setShipping` only accepts the `shippingMethodCode` from the client.
+ * The amount is resolved server-side via the shipping module's
+ * `quote(...)` so a buggy or hostile client cannot understate the
+ * shipping charge. The schema intentionally rejects any client-supplied
+ * `shippingAmount` to surface stale callers loudly.
+ */
+export const setShippingSchema = z
+  .object({
+    shippingMethodCode: z.string().min(1).max(100),
+  })
+  .strict();
 export type SetShippingInput = z.infer<typeof setShippingSchema>;
 
 export const completeCheckoutSchema = z.object({

@@ -22,7 +22,6 @@
 import {
   add as moneyAdd,
   multiply as moneyMultiply,
-  zero as moneyZero,
   type Money,
 } from "@mt-commerce/core/money";
 import { id } from "@mt-commerce/core/ulid";
@@ -43,6 +42,10 @@ import {
   customerService as defaultCustomerService,
   type CustomerService,
 } from "../customer/index.js";
+import {
+  shippingService as defaultShippingService,
+  type ShippingService,
+} from "../shipping/index.js";
 import { events, type EventName, type EventPayload } from "./events.js";
 import {
   toCheckout,
@@ -123,6 +126,7 @@ export class CheckoutServiceImpl implements CheckoutService {
     private readonly repo: CheckoutRepository,
     private readonly carts: CartService,
     private readonly customers: CustomerService,
+    private readonly shipping: ShippingService,
   ) {}
 
   /**
@@ -352,7 +356,22 @@ export class CheckoutServiceImpl implements CheckoutService {
         cartId: row.cartId,
       });
     }
-    const shippingAmount = parseMoneyInput(input.shippingAmount);
+
+    // Resolve the amount via the shipping module's `quote()` rather than
+    // trusting the client. The shipping service:
+    //   - 404s if the method code is unknown or soft-deleted
+    //   - 409s if the method exists but is inactive
+    //   - 400 (validation_error / currency_mismatch) when the method's
+    //     currency differs from the cart's currency
+    // All three already wear the standard error envelope; we let them
+    // surface unchanged so callers see consistent error codes.
+    const shippingAmount = await this.shipping.quote({
+      methodCode: input.shippingMethodCode,
+      currency: cart.currency,
+    });
+    // Defense-in-depth: the shipping service asserts currency parity
+    // already, but we re-check at the boundary so a misbehaving provider
+    // cannot smuggle a wrong-currency amount onto the checkout row.
     if (shippingAmount.currency !== cart.currency) {
       throw new ValidationError(
         "Shipping currency does not match the cart's currency.",
@@ -746,10 +765,6 @@ export class CheckoutServiceImpl implements CheckoutService {
 // Helpers
 // ----------------------------------------------------------------------------
 
-function parseMoneyInput(input: { amount: string; currency: string }): Money {
-  return { amount: BigInt(input.amount), currency: input.currency };
-}
-
 /**
  * Replace the placeholder `shipping = zero` produced by the cart's totals
  * computation with the real shipping captured at the `awaiting_payment`
@@ -876,11 +891,13 @@ function clampPageSize(size: number | undefined): number {
 }
 
 /**
- * Default singleton wired to the runtime database and live cart/customer
- * services. Tests construct `CheckoutServiceImpl` directly with fakes.
+ * Default singleton wired to the runtime database and live cart, customer,
+ * and shipping services. Tests construct `CheckoutServiceImpl` directly
+ * with fakes.
  */
 export const checkoutService: CheckoutService = new CheckoutServiceImpl(
   createCheckoutRepository(),
   defaultCartService,
   defaultCustomerService,
+  defaultShippingService,
 );

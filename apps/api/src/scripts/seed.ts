@@ -17,6 +17,8 @@ import { logger } from "../lib/logger.js";
 import * as schema from "../db/schema/index.js";
 import { seedRegions } from "../modules/customer/seed/regions.js";
 import { seedDemoCatalog } from "../modules/catalog/seed/demo-catalog.js";
+import { seedDefaultTaxRates } from "../modules/tax/seed/default-rates.js";
+import { seedDefaultShippingMethods } from "../modules/shipping/seed/default-methods.js";
 
 async function main(): Promise<void> {
   if (!env.databaseUrl) {
@@ -37,6 +39,14 @@ async function main(): Promise<void> {
     log.info("seeding demo catalog");
     const catalogSummary = await seedDemoCatalog(db);
     log.info({ summary: catalogSummary }, "demo catalog seeded");
+
+    log.info("seeding default tax rates");
+    const taxSummary = await seedDefaultTaxRates(db);
+    log.info({ summary: taxSummary }, "tax rates seeded");
+
+    log.info("seeding default shipping methods");
+    const shippingSummary = await seedDefaultShippingMethods(db);
+    log.info({ summary: shippingSummary }, "shipping methods seeded");
 
     log.info("seed complete");
   } finally {

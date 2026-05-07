@@ -132,21 +132,25 @@ cart, which mirrors the typical guest-cart flow shoppers expect.
 
 ## Totals semantics
 
-`getTotals(cart)` is pure (no DB I/O). It computes:
+`getTotals(cart, opts?)` is pure (no DB I/O). It computes:
 
-| Field    | Computation                                                |
-| -------- | ---------------------------------------------------------- |
-| subtotal | Σ (`unit_price * quantity`) across line items              |
-| tax      | `subtotal * TAX_PPN_RATE`, rounded `halfEven`              |
-| shipping | `zero(currency)` (placeholder — shipping module plugs in)  |
-| total    | `subtotal + tax + shipping`                                |
+| Field    | Computation                                                                |
+| -------- | -------------------------------------------------------------------------- |
+| subtotal | Σ (`unit_price * quantity`) across line items                              |
+| tax      | `subtotal * (basisPoints / 10000)` (halfEven) when `opts.taxRate` provided; otherwise `subtotal * TAX_PPN_RATE` (env-var fallback) |
+| shipping | `opts.shipping` when provided (currency-checked); otherwise `zero(currency)` |
+| total    | `subtotal + tax + shipping`                                                |
+| taxRate  | `{ code, basisPoints }` echo of the applied rate, or null on the env-var fallback path |
 
-`TAX_PPN_RATE` defaults to `0.11` (Indonesian PPN, 11%). It lives in the
-environment so operators can dial it without a code change while the proper
-tax module is being built. The dedicated tax module (see
-`docs/v0.1-checklist.md` "Tax") will replace this placeholder with proper
-per-item / per-region / per-exemption rate selection driven by the
-`tax_rates` and `tax_exemptions` tables.
+The cart module no longer reaches for the tax or shipping modules
+directly. Callers fetch the rate (`taxService.getDefaultRate(cart.currency)`)
+and the shipping amount (`shippingService.quote(...)`) outside the cart
+and pass them in via `opts`. Per ADR-0005 this keeps the cart module
+free of cross-module imports.
+
+`TAX_PPN_RATE` (env var) is retained as a fallback for tests and
+unseeded dev DBs. Production deployments seed a `tax_rates` row (see
+the tax module README) so the env-var fallback never fires in practice.
 
 `getTotals` is called from cart reads (admin and storefront) and embedded
 in the response so clients see the breakdown immediately. Future order
