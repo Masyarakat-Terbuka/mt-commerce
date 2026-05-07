@@ -3,6 +3,7 @@ import "@/styles/global.css";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import { resolveLocale, type Locale } from "@/lib/i18n";
+import { buildHreflangPair, jsonLdString, ogLocale } from "@/lib/seo";
 
 export interface Props {
   title: string;
@@ -19,15 +20,51 @@ export interface Props {
    * the catalog remains discoverable.
    */
   noindex?: boolean;
+  /**
+   * Open Graph object type. Defaults to "website" — the right value for
+   * the home, listing, content, and search pages. Product detail pages
+   * pass "product" so social previews and rich-result tooling can pick
+   * up that the page is a buyable item rather than a landing page. See
+   * https://ogp.me/#types for the list of well-known types.
+   */
+  ogType?: string;
+  /**
+   * Optional JSON-LD structured data payload(s). A single object or an
+   * array of objects — the layout serialises and emits them inside a
+   * `<script type="application/ld+json">` element. Pages keep this
+   * concern centralised here so we don't repeat the safe-stringify
+   * dance (`</` escaping) on every call site.
+   */
+  jsonLd?: object | object[];
 }
 
-const { title, description, ogImage, canonical, noindex } = Astro.props;
+const { title, description, ogImage, canonical, noindex, ogType = "website", jsonLd } = Astro.props;
+
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
 const canonicalUrl = canonical ?? new URL(Astro.url.pathname, siteUrl).toString();
 // Brand mark — same asset used in the header. Falls back as the social
 // preview image when callers don't pass one explicitly.
 const resolvedOgImage = ogImage ?? "/logo.png";
+// Resolve the OG image to an absolute URL when it's a path. Open Graph
+// scrapers reject relative URLs in `og:image`, and `twitter:image`
+// inherits the same constraint, so resolving once here keeps both meta
+// tags consistent regardless of what the caller passes.
+const absoluteOgImage = resolvedOgImage.startsWith("http")
+  ? resolvedOgImage
+  : new URL(resolvedOgImage, siteUrl).toString();
+
+// Build the id/en URL pair for hreflang and og:locale:alternate. We
+// derive both from the canonical pathname so a page that overrides
+// `canonical` still emits coherent alternates.
+const canonicalPath = new URL(canonicalUrl).pathname;
+const hreflang = buildHreflangPair(canonicalPath, siteUrl);
+const alternateOgLocale = locale === "id" ? "en_US" : "id_ID";
+
+// Normalise JSON-LD into an array of payloads. A single object is the
+// common case; arrays are used on pages that emit more than one shape
+// (for example PDP: Product + BreadcrumbList).
+const jsonLdPayloads = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [];
 ---
 
 <!doctype html>
@@ -41,12 +78,39 @@ const resolvedOgImage = ogImage ?? "/logo.png";
     <link rel="canonical" href={canonicalUrl} />
     <link rel="icon" type="image/png" href="/logo.png" />
 
-    <meta property="og:type" content="website" />
+    {/*
+      hreflang advertises the id/en pair to search engines. We always emit
+      both locale URLs and an `x-default` pointing at the default locale,
+      per Google's guidance for sites that don't auto-detect language.
+      `@astrojs/sitemap` produces the same alternates inside the sitemap;
+      duplicating here makes the relationship visible to crawlers that
+      don't fetch the sitemap on every page.
+    */}
+    <link rel="alternate" hreflang="id" href={hreflang.id} />
+    <link rel="alternate" hreflang="en" href={hreflang.en} />
+    <link rel="alternate" hreflang="x-default" href={hreflang.xDefault} />
+
+    {/* Open Graph — site-level facets first, then page-specific. */}
+    <meta property="og:site_name" content="mt-commerce" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:title" content={title} />
     {description && <meta property="og:description" content={description} />}
     <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:image" content={resolvedOgImage} />
+    <meta property="og:image" content={absoluteOgImage} />
+    <meta property="og:locale" content={ogLocale(locale)} />
+    <meta property="og:locale:alternate" content={alternateOgLocale} />
+
+    {/*
+      Twitter card. `summary_large_image` is the right card for both
+      content and product pages — Twitter falls back gracefully on the
+      OG fields, but emitting `twitter:title` / `twitter:description` /
+      `twitter:image` explicitly avoids the ambiguity some scrapers
+      have when only OG is present.
+    */}
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    {description && <meta name="twitter:description" content={description} />}
+    <meta name="twitter:image" content={absoluteOgImage} />
 
     {/*
       Geist Variable served from Google Fonts. Hosted, not bundled — keeps
@@ -61,6 +125,19 @@ const resolvedOgImage = ogImage ?? "/logo.png";
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap"
     />
+
+    {/*
+      JSON-LD structured data. Each payload is serialised through
+      `jsonLdString`, which escapes `</` so a stray `</script>` substring
+      inside any product copy or URL cannot break out of the script
+      element. `is:inline` skips Astro's bundler — JSON-LD is data, not
+      a JS module, and must land in the HTML head as-is.
+    */}
+    {
+      jsonLdPayloads.map((payload) => (
+        <script type="application/ld+json" is:inline set:html={jsonLdString(payload)} />
+      ))
+    }
   </head>
   <body class="min-h-screen bg-cream text-fg">
     <Header />

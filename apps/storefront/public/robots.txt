@@ -1,0 +1,15 @@
+# Default robots policy for the mt-commerce reference storefront.
+#
+# Allow everything by default — the storefront is a public catalog and we
+# want it indexed. Operators who want to gate parts of the site (a staging
+# deploy, a private preview) should override this file in their fork or
+# behind a reverse proxy.
+#
+# The Sitemap line below references `sitemap-index.xml`, which the
+# `@astrojs/sitemap` integration writes at build time. The host on the
+# absolute URL is taken from `site` in `astro.config.mjs` and should be
+# overridden via the SITE env var in CI / deploy environments.
+User-agent: *
+Allow: /
+
+Sitemap: https://mt-commerce.example/sitemap-index.xml
