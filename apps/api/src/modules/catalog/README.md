@@ -74,7 +74,10 @@ to JSON-safe strings on the way out.
 | POST    | `/admin/v1/categories`                          | Create                                     |
 | PATCH   | `/admin/v1/categories/:id`                      | Update                                     |
 | DELETE  | `/admin/v1/categories/:id`                      | Hard delete                                |
-| POST    | `/admin/v1/variants/:id/inventory/adjust`       | Body `{ delta: number }`                   |
+| POST    | `/admin/v1/variants/:id/inventory/adjust`       | Body `{ delta, reason? }`; writes an `audit_log` row |
+| GET     | `/admin/v1/variants/:id/inventory`              | Single inventory row (404 when absent)     |
+| GET     | `/admin/v1/inventory/levels`                    | Paginated; `?productId=` narrows           |
+| GET     | `/admin/v1/variants/:id/inventory/audit`        | Paginated audit history, newest first      |
 
 ### Storefront (mounted at `/storefront/v1`)
 
@@ -125,7 +128,7 @@ the catalog you want to walk through with stakeholders.
 ## TODO follow-ups
 
 - `requireRole('admin')` middleware once the auth module ships
-- `audit_log` integration for `adjustInventory` (and product/variant edits)
+- `audit_log` integration for product/variant edits (inventory done)
 - Image upload (separate concern; local disk first)
 - Integration tests against a real Postgres
 - OpenAPI annotations via `@hono/zod-openapi` for both admin and storefront

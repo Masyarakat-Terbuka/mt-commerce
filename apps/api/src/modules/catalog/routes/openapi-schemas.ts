@@ -72,6 +72,30 @@ export const InventoryLevelWire = z
 
 export const PaginatedProductWire = paginated(ProductWire).openapi("PaginatedProduct");
 
+export const PaginatedInventoryLevelWire = paginated(InventoryLevelWire).openapi(
+  "PaginatedInventoryLevel",
+);
+
+export const InventoryAuditEntryWire = z
+  .object({
+    id: z.string(),
+    variantId: z.string(),
+    action: z.string().openapi({ example: "inventory_adjust" }),
+    actorKind: z.enum(["system", "staff", "customer"]),
+    actorId: z.string().nullable(),
+    deltaApplied: z.number().int().nullable(),
+    before: z.number().int().nullable(),
+    after: z.number().int().nullable(),
+    details: z.record(z.string(), z.unknown()),
+    reason: z.string().nullable(),
+    createdAt: z.string(),
+  })
+  .openapi("InventoryAuditEntry");
+
+export const PaginatedInventoryAuditEntryWire = paginated(
+  InventoryAuditEntryWire,
+).openapi("PaginatedInventoryAuditEntry");
+
 export const CategoryListEnvelope = z
   .object({ data: z.array(CategoryWire) })
   .openapi("CategoryList");

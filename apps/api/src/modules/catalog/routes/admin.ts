@@ -29,9 +29,10 @@ import {
   errorResponse,
 } from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
-import { requireAuth, requireRole } from "../../auth/index.js";
+import { getAuthedUser, requireAuth, requireRole } from "../../auth/index.js";
 import {
   toWireCategory,
+  toWireInventoryAuditEntry,
   toWireInventoryLevel,
   toWireProduct,
   toWireVariant,
@@ -40,6 +41,8 @@ import {
   CategoryListEnvelope,
   CategoryWire,
   InventoryLevelWire,
+  PaginatedInventoryAuditEntryWire,
+  PaginatedInventoryLevelWire,
   PaginatedProductWire,
   ProductWire,
   VariantWire,
@@ -49,6 +52,8 @@ import {
   createCategorySchema,
   createProductSchema,
   createVariantSchema,
+  listInventoryAuditQuerySchema,
+  listInventoryLevelsQuerySchema,
   listProductsQuerySchema,
   updateCategorySchema,
   updateProductSchema,
@@ -441,7 +446,7 @@ export function buildCatalogAdminRoutes(
       tags: [TAG],
       summary: "Adjust inventory for a variant",
       description:
-        "Apply a signed `delta` to the variant's available count. Bounded to ±1,000,000 to keep the value safely inside int4.",
+        "Apply a signed `delta` to the variant's available count. Bounded to ±1,000,000 to keep the value safely inside int4. The optional `reason` is persisted to the audit log alongside the actor and the before/after counts.",
       request: {
         params: IdParam,
         body: {
@@ -461,11 +466,132 @@ export function buildCatalogAdminRoutes(
     }),
     async (c) => {
       const input = c.req.valid("json");
+      // The auth middleware already populated `c.var.authUser`; we resolve
+      // it here so the audit row records the staff actor for this change.
+      // API-key callers also surface as `staff` (the key is bound to a
+      // user id) — the audit semantics are "the human or service who
+      // authenticated to make this call," and the auth_user_id captures
+      // that uniformly.
+      const user = getAuthedUser(c);
       const level = await service.adjustInventory(
         c.req.param("id"),
-        input.delta,
+        {
+          delta: input.delta,
+          ...(input.reason !== undefined ? { reason: input.reason } : {}),
+        },
+        { actor: { kind: "staff", userId: user.id } },
       );
       return c.json(toWireInventoryLevel(level), 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/variants/{id}/inventory",
+      tags: [TAG],
+      summary: "Get the inventory level for a variant",
+      description:
+        "Returns the variant's single inventory row (location_id NULL in v0.1). 404 when the variant has no level row yet — every variant gets one on creation, so a 404 here means the variant id itself does not exist.",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: InventoryLevelWire } },
+          description: "Inventory level.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("No inventory row for this variant."),
+      },
+    }),
+    async (c) => {
+      const level = await service.getInventory(c.req.param("id"));
+      if (!level) {
+        throw new NotFoundError("Inventory level not found for variant.", {
+          variantId: c.req.param("id"),
+        });
+      }
+      return c.json(toWireInventoryLevel(level), 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/inventory/levels",
+      tags: [TAG],
+      summary: "List inventory levels",
+      description:
+        "Paginated list of inventory rows. `productId` narrows to one product's variants; without it, every variant is returned. Soft-deleted variants are excluded.",
+      request: { query: listInventoryLevelsQuerySchema },
+      responses: {
+        200: {
+          content: {
+            "application/json": { schema: PaginatedInventoryLevelWire },
+          },
+          description: "Page of inventory levels.",
+        },
+        400: errorResponse("Invalid query."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const result = await service.listInventoryLevels(query);
+      return c.json(
+        {
+          data: result.data.map((level) => toWireInventoryLevel(level)),
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+        },
+        200,
+      );
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/variants/{id}/inventory/audit",
+      tags: [TAG],
+      summary: "List inventory audit history for a variant",
+      description:
+        "Paginated audit_log rows where entity_kind=`inventory` and entity_id matches the variant id. Newest first. Each row carries the actor, the structured details (`deltaApplied`, `before`, `after`), the operator's `reason`, and the timestamp.",
+      request: {
+        params: IdParam,
+        query: listInventoryAuditQuerySchema,
+      },
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              schema: PaginatedInventoryAuditEntryWire,
+            },
+          },
+          description: "Page of audit events.",
+        },
+        400: errorResponse("Invalid query."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+      },
+    }),
+    async (c) => {
+      const query = c.req.valid("query");
+      const result = await service.listInventoryAudit(
+        c.req.param("id"),
+        query,
+      );
+      return c.json(
+        {
+          data: result.data.map((event) => toWireInventoryAuditEntry(event)),
+          total: result.total,
+          page: result.page,
+          pageSize: result.pageSize,
+        },
+        200,
+      );
     },
   );
 

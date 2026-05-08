@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { CatalogServiceImpl } from "../../../src/modules/catalog/service.js";
 import { DEFAULT_LOCALE } from "../../../src/modules/catalog/i18n.js";
 import type {
+  AuditLogRow,
   CategoryRow,
   InventoryLevelRow,
   NewCategoryRow,
@@ -25,6 +26,9 @@ import type {
   ProductVariantRow,
 } from "../../../src/db/schema/index.js";
 import type { CatalogRepository } from "../../../src/modules/catalog/repository.js";
+import type { AuditService } from "../../../src/modules/audit/index.js";
+
+const STAFF_ACTOR = { kind: "staff" as const, userId: "usr_staff" };
 
 // ---------------------------------------------------------------------------
 // In-memory repository
@@ -36,6 +40,7 @@ interface FakeStore {
   categories: Map<string, CategoryRow>;
   productCategories: Map<string, Set<string>>; // productId -> categoryIds
   inventory: Map<string, InventoryLevelRow>; // by inventory level id
+  auditEvents: AuditLogRow[]; // append-only audit trail
 }
 
 function createFakeStore(): FakeStore {
@@ -45,12 +50,13 @@ function createFakeStore(): FakeStore {
     categories: new Map(),
     productCategories: new Map(),
     inventory: new Map(),
+    auditEvents: [],
   };
 }
 
 function createFakeRepository(store: FakeStore): CatalogRepository {
   const now = (): Date => new Date("2026-05-07T12:00:00.000Z");
-  return {
+  const repo: CatalogRepository = {
     async insertProduct(row: NewProductRow): Promise<ProductRow> {
       const product: ProductRow = {
         id: row.id,
@@ -321,7 +327,79 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
       }
       return null;
     },
+    async listInventoryLevels(filters) {
+      // Faithful to the real repository: location_id NULL only, soft-
+      // deleted variants excluded, optional product narrow.
+      let rows = [...store.inventory.values()].filter(
+        (inv) => inv.locationId === null,
+      );
+      if (filters.productId) {
+        const variantIds = new Set(
+          [...store.variants.values()]
+            .filter(
+              (v) => v.productId === filters.productId && v.deletedAt === null,
+            )
+            .map((v) => v.id),
+        );
+        rows = rows.filter((inv) => variantIds.has(inv.variantId));
+      } else {
+        const deleted = new Set(
+          [...store.variants.values()]
+            .filter((v) => v.deletedAt !== null)
+            .map((v) => v.id),
+        );
+        rows = rows.filter((inv) => !deleted.has(inv.variantId));
+      }
+      rows = rows.slice().sort((a, b) => {
+        const tDiff = b.updatedAt.getTime() - a.updatedAt.getTime();
+        if (tDiff !== 0) return tDiff;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+      const total = rows.length;
+      const start = (filters.page - 1) * filters.pageSize;
+      return { rows: rows.slice(start, start + filters.pageSize), total };
+    },
+    async withTransaction(fn) {
+      // No real transaction in the in-memory store. The catalog repo and
+      // the audit repo are both passed; the audit one is a tiny inline
+      // fake that records inserts into the parent store's `auditEvents`
+      // bucket so individual tests can assert on the trail.
+      return fn({
+        catalog: repo,
+        audit: {
+          async insertEvent(row) {
+            const inserted = {
+              id: row.id,
+              entityKind: row.entityKind,
+              entityId: row.entityId,
+              action: row.action,
+              actorKind: row.actorKind,
+              actorId: row.actorId ?? null,
+              details: (row.details ?? {}) as Record<string, unknown>,
+              reason: row.reason ?? null,
+              createdAt: now(),
+            };
+            store.auditEvents.push(inserted);
+            return inserted;
+          },
+          async listForEntity(filters) {
+            const rows = store.auditEvents.filter(
+              (e) =>
+                e.entityKind === filters.entityKind &&
+                e.entityId === filters.entityId,
+            );
+            const ordered = rows.slice().reverse();
+            const start = (filters.page - 1) * filters.pageSize;
+            return {
+              rows: ordered.slice(start, start + filters.pageSize),
+              total: rows.length,
+            };
+          },
+        },
+      });
+    },
   };
+  return repo;
 }
 
 function buildService(): {
@@ -330,7 +408,75 @@ function buildService(): {
 } {
   const store = createFakeStore();
   const repo = createFakeRepository(store);
-  return { service: new CatalogServiceImpl(repo), store };
+  // Inject a tiny audit-service fake that delegates straight to the audit
+  // repo passed in (which is the in-memory one above). This keeps the
+  // test focused on catalog behavior; the audit module has its own tests.
+  const auditServiceFake: AuditService = {
+    async recordEvent(input) {
+      const repo = input.repo!;
+      const row = await repo.insertEvent({
+        id: `aud_${store.auditEvents.length + 1}`,
+        entityKind: input.entityKind,
+        entityId: input.entityId,
+        action: input.action,
+        actorKind:
+          input.actor.kind === "system"
+            ? "system"
+            : input.actor.kind === "staff"
+              ? "staff"
+              : "customer",
+        actorId:
+          input.actor.kind === "staff"
+            ? input.actor.userId
+            : input.actor.kind === "customer"
+              ? input.actor.customerId ?? null
+              : null,
+        details: (input.details ?? {}) as Record<string, unknown>,
+        reason: input.reason ?? null,
+      });
+      return {
+        id: row.id,
+        entityKind: row.entityKind,
+        entityId: row.entityId,
+        action: row.action,
+        actorKind: row.actorKind as "system" | "staff" | "customer",
+        actorId: row.actorId ?? null,
+        details: (row.details ?? {}) as Record<string, unknown>,
+        reason: row.reason ?? null,
+        createdAt: row.createdAt,
+      };
+    },
+    async listForEntity(input) {
+      const result = await repo.withTransaction(({ audit }) =>
+        audit.listForEntity({
+          entityKind: input.entityKind,
+          entityId: input.entityId,
+          page: input.page ?? 1,
+          pageSize: input.pageSize ?? 20,
+        }),
+      );
+      return {
+        data: result.rows.map((row) => ({
+          id: row.id,
+          entityKind: row.entityKind,
+          entityId: row.entityId,
+          action: row.action,
+          actorKind: row.actorKind as "system" | "staff" | "customer",
+          actorId: row.actorId ?? null,
+          details: (row.details ?? {}) as Record<string, unknown>,
+          reason: row.reason ?? null,
+          createdAt: row.createdAt,
+        })),
+        total: result.total,
+        page: input.page ?? 1,
+        pageSize: input.pageSize ?? 20,
+      };
+    },
+  };
+  return {
+    service: new CatalogServiceImpl(repo, auditServiceFake),
+    store,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -472,30 +618,118 @@ describe("CatalogService.adjustInventory", () => {
 
   it("increments available", async () => {
     const { service, variantId } = await setup();
-    const after = await service.adjustInventory(variantId, 7);
+    const after = await service.adjustInventory(
+      variantId,
+      { delta: 7 },
+      { actor: STAFF_ACTOR },
+    );
     expect(after.available).toBe(7);
   });
 
   it("decrements when there is stock", async () => {
     const { service, variantId } = await setup();
-    await service.adjustInventory(variantId, 10);
-    const after = await service.adjustInventory(variantId, -3);
+    await service.adjustInventory(
+      variantId,
+      { delta: 10 },
+      { actor: STAFF_ACTOR },
+    );
+    const after = await service.adjustInventory(
+      variantId,
+      { delta: -3 },
+      { actor: STAFF_ACTOR },
+    );
     expect(after.available).toBe(7);
   });
 
   it("rejects when the result would be negative", async () => {
     const { service, variantId } = await setup();
-    await service.adjustInventory(variantId, 2);
-    await expect(service.adjustInventory(variantId, -5)).rejects.toMatchObject({
+    await service.adjustInventory(
+      variantId,
+      { delta: 2 },
+      { actor: STAFF_ACTOR },
+    );
+    await expect(
+      service.adjustInventory(
+        variantId,
+        { delta: -5 },
+        { actor: STAFF_ACTOR },
+      ),
+    ).rejects.toMatchObject({
       code: "conflict",
     });
   });
 
   it("rejects a delta of zero", async () => {
     const { service, variantId } = await setup();
-    await expect(service.adjustInventory(variantId, 0)).rejects.toMatchObject({
+    await expect(
+      service.adjustInventory(
+        variantId,
+        { delta: 0 },
+        { actor: STAFF_ACTOR },
+      ),
+    ).rejects.toMatchObject({
       code: "validation_error",
     });
+  });
+
+  it("appends an audit_log row with actor, before/after, and reason", async () => {
+    const { service, store, variantId } = await setup();
+    await service.adjustInventory(
+      variantId,
+      { delta: 12, reason: "received from supplier" },
+      { actor: STAFF_ACTOR },
+    );
+    expect(store.auditEvents).toHaveLength(1);
+    const row = store.auditEvents[0]!;
+    expect(row.entityKind).toBe("inventory");
+    expect(row.entityId).toBe(variantId);
+    expect(row.action).toBe("inventory_adjust");
+    expect(row.actorKind).toBe("staff");
+    expect(row.actorId).toBe(STAFF_ACTOR.userId);
+    expect(row.reason).toBe("received from supplier");
+    expect(row.details).toEqual({
+      deltaApplied: 12,
+      before: 0,
+      after: 12,
+    });
+  });
+
+  it("does NOT append an audit row when the adjustment is rejected", async () => {
+    const { service, store, variantId } = await setup();
+    // Doomed adjustment — would drive available below zero. The audit
+    // row must NOT be written; the contract is "audit on completed
+    // change", not "audit on attempt".
+    await expect(
+      service.adjustInventory(
+        variantId,
+        { delta: -1 },
+        { actor: STAFF_ACTOR },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(store.auditEvents).toHaveLength(0);
+  });
+
+  it("listInventoryAudit paginates the audit history newest first", async () => {
+    const { service, variantId } = await setup();
+    for (let i = 1; i <= 3; i++) {
+      await service.adjustInventory(
+        variantId,
+        { delta: 1, reason: `note ${i}` },
+        { actor: STAFF_ACTOR },
+      );
+    }
+    const result = await service.listInventoryAudit(variantId, {
+      page: 1,
+      pageSize: 10,
+    });
+    expect(result.total).toBe(3);
+    expect(result.data).toHaveLength(3);
+    // newest first — note 3, 2, 1
+    expect(result.data.map((e) => e.reason)).toEqual([
+      "note 3",
+      "note 2",
+      "note 1",
+    ]);
   });
 });
 
