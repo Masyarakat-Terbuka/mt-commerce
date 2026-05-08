@@ -44,6 +44,18 @@ export interface NotificationListResult {
 export interface NotificationRepository {
   insert(row: NewNotificationRow): Promise<NotificationRow>;
   getById(id: string): Promise<NotificationRow | null>;
+  /**
+   * Look up the existing row for an `(event_id, kind, channel)` triple.
+   * Used by the service's idempotency guard: if the listener catches a
+   * 23505 from the partial unique index on insert, it falls back to this
+   * read to surface the prior row to the caller. Returns `null` when no
+   * row matches (e.g. the unique violation is on a different constraint).
+   */
+  getByEventTriple(
+    eventId: string,
+    kind: NotificationKind,
+    channel: NotificationChannelId,
+  ): Promise<NotificationRow | null>;
   list(filters: NotificationListFilters): Promise<NotificationListResult>;
   /**
    * Mark the row's terminal status. We only ever transition `pending` →
@@ -74,6 +86,29 @@ export function createNotificationRepository(
         .select()
         .from(notifications)
         .where(eq(notifications.id, id))
+        .limit(1);
+      return row ?? null;
+    },
+
+    async getByEventTriple(
+      eventId: string,
+      kind: NotificationKind,
+      channel: NotificationChannelId,
+    ): Promise<NotificationRow | null> {
+      // Three-column equality select. The partial unique index on the same
+      // triple makes this an index-only seek when a duplicate exists; for
+      // misses (the common case under low duplicate-event volume) the
+      // planner still uses the index thanks to the leading `event_id` column.
+      const [row] = await db
+        .select()
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.eventId, eventId),
+            eq(notifications.kind, kind),
+            eq(notifications.channel, channel),
+          ),
+        )
         .limit(1);
       return row ?? null;
     },

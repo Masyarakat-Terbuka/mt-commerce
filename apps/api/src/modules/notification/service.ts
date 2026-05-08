@@ -36,6 +36,20 @@ import { env } from "../../lib/env.js";
 import { childLogger } from "../../lib/logger.js";
 import { ConflictError } from "../../lib/errors.js";
 import { events as checkoutEvents } from "../checkout/events.js";
+// IMPORTANT: only `type`-level imports from sibling modules. The
+// notification module is reached at module-evaluation time by the auth
+// module (`auth/better-auth.ts` imports `getNotificationService` for the
+// verification-email path). The orders / customer / shipping module
+// chains depend on the auth middleware. Eagerly importing their value
+// surfaces here would close a cycle and break middleware resolution at
+// boot — the runtime singletons resolve LAZILY inside `subscribeToEvents`
+// instead, when every module has finished evaluating.
+import type { CustomerService } from "../customer/service.js";
+import { events as orderEvents } from "../orders/events.js";
+import type { OrderService } from "../orders/service.js";
+import type { Order } from "../orders/types.js";
+import { events as paymentEvents } from "../payments/events.js";
+import { events as fulfillmentEvents } from "../shipping/events.js";
 import type { NotificationChannel } from "./channels/types.js";
 import { ConsoleEmailChannel } from "./channels/console.js";
 import { createEmailChannel } from "./channels/smtp.js";
@@ -54,14 +68,20 @@ import {
   type RenderedTemplate,
 } from "./templates/index.js";
 import {
+  DEFAULT_NOTIFICATION_LOCALE,
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
   type ListNotificationsQuery,
   type Notification,
+  type NotificationAddress,
   type NotificationChannelId,
+  type NotificationLineItem,
   type NotificationLocale,
+  type NotificationMoney,
   type NotificationPayload,
   type NotificationResult,
+  type NotificationTotals,
+  type OrderConfirmationPayload,
   type Paginated,
   type SendInput,
 } from "./types.js";
@@ -119,6 +139,24 @@ export interface NotificationServiceOptions {
    * whatsapp-stub).
    */
   channels?: Map<NotificationChannelId, NotificationChannel>;
+  /**
+   * Order/customer services used by the event listeners to resolve full
+   * order details + customer contact info. Defaults to LAZY resolution
+   * of the runtime singletons inside the listener body — see
+   * `resolveOrderService` / `resolveCustomerService`. Tests pass
+   * concrete fakes here so listener wiring can be exercised without
+   * standing up the orders / customer modules' DB layers.
+   *
+   * Why lazy: the auth module imports `getNotificationService` at
+   * module-evaluation time. If this constructor eagerly imported
+   * `orderService` / `customerService` from those modules, the eval-time
+   * dependency graph would close a cycle through the shipping/customer
+   * route builders → auth middleware → back into notification. Pushing
+   * resolution to call time avoids the cycle without introducing any
+   * runtime cost (the resolver caches after the first lookup).
+   */
+  orderService?: OrderService;
+  customerService?: CustomerService;
 }
 
 export class NotificationServiceImpl implements NotificationService {
@@ -131,11 +169,46 @@ export class NotificationServiceImpl implements NotificationService {
    * letting them introduce wholly new channel ids.
    */
   private readonly pluginChannels = new Map<string, PluginNotificationChannel>();
+  /**
+   * Lazily-resolved order/customer service handles. `undefined` means
+   * "fall through to the runtime singleton at first use". Tests inject a
+   * concrete value via the constructor; production lets the listener
+   * resolve through the dynamic-import helpers below to avoid the
+   * module-evaluation cycle described on `NotificationServiceOptions`.
+   */
+  private orderServiceOverride: OrderService | undefined;
+  private customerServiceOverride: CustomerService | undefined;
+  private cachedOrderService: OrderService | undefined;
+  private cachedCustomerService: CustomerService | undefined;
   private subscribed = false;
 
   constructor(options: NotificationServiceOptions = {}) {
     this.repo = options.repository ?? createNotificationRepository();
     this.channels = options.channels ?? buildDefaultChannels();
+    this.orderServiceOverride = options.orderService;
+    this.customerServiceOverride = options.customerService;
+  }
+
+  /**
+   * Resolve the OrderService at listener invocation time. Cached after the
+   * first call so we do not pay the dynamic-import cost on every event.
+   * Tests that inject via the constructor short-circuit the dynamic
+   * import entirely.
+   */
+  private async resolveOrderService(): Promise<OrderService> {
+    if (this.orderServiceOverride) return this.orderServiceOverride;
+    if (this.cachedOrderService) return this.cachedOrderService;
+    const mod = await import("../orders/service.js");
+    this.cachedOrderService = mod.orderService;
+    return this.cachedOrderService;
+  }
+
+  private async resolveCustomerService(): Promise<CustomerService> {
+    if (this.customerServiceOverride) return this.customerServiceOverride;
+    if (this.cachedCustomerService) return this.cachedCustomerService;
+    const mod = await import("../customer/service.js");
+    this.cachedCustomerService = mod.customerService;
+    return this.cachedCustomerService;
   }
 
   registerChannel(channel: PluginNotificationChannel): void {
@@ -167,6 +240,13 @@ export class NotificationServiceImpl implements NotificationService {
    * the two public methods; we keep them as separate names because the
    * call sites read very differently ("send and forget" vs "send or
    * fail the request").
+   *
+   * Idempotency: when `input.eventId` is set, the INSERT may collide on the
+   * partial unique index `notifications_event_kind_channel_uniq`. We catch
+   * the 23505, look up the existing row, and return it without dispatching
+   * to the channel a second time. This is the at-least-once guard for the
+   * event-listener path — the bus may re-deliver, an upstream webhook may
+   * retry, and we MUST NOT email a customer twice on a duplicate event.
    */
   private async sendInternal(
     input: SendInput,
@@ -183,22 +263,62 @@ export class NotificationServiceImpl implements NotificationService {
     const rendered = render(input.message, input.locale);
 
     const auditId = id("notif");
-    // INSERT first so a process crash mid-send still leaves a row. The
-    // row carries the rendered subject (not the body — bodies are large
-    // and re-derivable) plus the template variables for replay/debug.
-    const initial = await this.repo.insert({
-      id: auditId,
-      channel: channelId,
-      kind: input.message.kind,
-      recipient: input.recipient,
-      subject: rendered.subject,
-      // Discriminated payload narrows on `kind`; persisting it in the
-      // jsonb `payload` column requires the loose Record shape. Cast via
-      // `unknown` because the payload's structural type does not include
-      // a string index signature.
-      payload: input.message.payload as unknown as Record<string, unknown>,
-      status: "pending",
-    });
+    let initial;
+    try {
+      // INSERT first so a process crash mid-send still leaves a row. The
+      // row carries the rendered subject (not the body — bodies are large
+      // and re-derivable) plus the template variables for replay/debug.
+      initial = await this.repo.insert({
+        id: auditId,
+        channel: channelId,
+        kind: input.message.kind,
+        recipient: input.recipient,
+        subject: rendered.subject,
+        // Discriminated payload narrows on `kind`; persisting it in the
+        // jsonb `payload` column requires the loose Record shape. Cast via
+        // `unknown` because the payload's structural type does not include
+        // a string index signature.
+        payload: input.message.payload as unknown as Record<string, unknown>,
+        status: "pending",
+        ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
+      });
+    } catch (err) {
+      // Duplicate event delivery: the partial unique index rejected the
+      // insert. Surface the existing row instead of dispatching a second
+      // time. The `rethrow` flag does NOT apply here — duplicate suppression
+      // is by design for both the fire-and-forget and request-path callers
+      // (a request-path caller that hands us an `eventId` is opting in
+      // explicitly to the same idempotency contract).
+      if (
+        input.eventId !== undefined &&
+        isPostgresUniqueViolation(
+          err,
+          "notifications_event_kind_channel_uniq",
+        )
+      ) {
+        const existing = await this.repo.getByEventTriple(
+          input.eventId,
+          input.message.kind,
+          channelId,
+        );
+        if (existing) {
+          log.info(
+            {
+              eventId: input.eventId,
+              kind: input.message.kind,
+              channel: channelId,
+              existingId: existing.id,
+              existingStatus: existing.status,
+            },
+            "notification suppressed — duplicate event delivery",
+          );
+          return { notification: toNotification(existing) };
+        }
+        // Race the index won but the row vanished (e.g. an admin DELETE
+        // mid-flight): fall through and surface the original error.
+      }
+      throw err;
+    }
 
     if (!channel) {
       // No registered channel for this id. Mark failed; do not throw on
@@ -267,38 +387,307 @@ export class NotificationServiceImpl implements NotificationService {
     if (this.subscribed) return;
     this.subscribed = true;
 
-    // checkout.completed → order_confirmation email.
-    //
-    // The event payload carries `checkoutId` and `orderIntentId`; this
-    // listener does NOT yet have a fully-realized order to inspect (the
-    // Order module materializes from order_intents in Track 3). For v0.1
-    // we send a minimal "pesanan diterima" confirmation keyed on the
-    // order_intent id, with empty items/totals. Track 3's order-emit
-    // event will replace this listener; flagged as TODO so the swap is
-    // visible during integration.
+    // checkout.completed remains a logging-only listener — the orders
+    // module is the canonical emitter for "an order was placed". Keeping
+    // the subscriber here so an operator searching for "checkout.completed"
+    // in code sees the explicit no-op rather than wondering whether the
+    // hook ever existed.
     checkoutEvents.on("checkout.completed", async (payload) => {
-      // The bus runs listeners under the post-commit emit; a failure
-      // here MUST NOT propagate (the bus already catches, but we also
-      // call `send`, which never throws). Future work: enrich payload
-      // with order rows when Track 3's order events ship.
-      log.info(
+      log.debug(
         {
           checkoutId: payload.checkoutId,
           orderIntentId: payload.orderIntentId,
         },
-        "checkout.completed received — minimal v0.1 listener (Track 3 will replace)",
+        "checkout.completed observed (no notification — order.placed drives the email)",
       );
-      // We intentionally do NOT call `send` here for v0.1 — we don't
-      // have the buyer's email or order details on this event payload
-      // alone. Track 3 emits an `order.placed` event with the resolved
-      // recipient + items; this listener becomes a thin pass-through
-      // when that lands.
     });
 
-    // TODO Track payment: subscribe to `payment.captured` once the
-    //   payment module emits it; send `payment_received` to the buyer.
-    // TODO Track fulfillment: subscribe to `fulfillment.shipped` and
-    //   send `shipping_update` with the tracking code.
+    // order.placed → order_confirmation. Fired by the orders module after
+    // the order materialises from an order_intent (post-commit). The
+    // listener loads the full order to render line items, totals, and the
+    // shipping address — those fields are not on the event payload
+    // because the bus's purpose is to broadcast a fact, not a full
+    // snapshot.
+    orderEvents.on("order.placed", async (payload) => {
+      await this.handleEvent(
+        eventIdFor("order.placed", payload.orderId),
+        () => this.dispatchOrderConfirmation(payload),
+        { event: "order.placed", orderId: payload.orderId },
+      );
+    });
+
+    // payment.captured → payment_received. Same shape as above; we look
+    // up the order to read the payment method label (the event carries
+    // the provider code, which is too low-level for a customer-facing
+    // body) plus the email recipient.
+    paymentEvents.on("payment.captured", async (payload) => {
+      await this.handleEvent(
+        eventIdFor("payment.captured", payload.paymentId),
+        () => this.dispatchPaymentReceived(payload),
+        {
+          event: "payment.captured",
+          orderId: payload.orderId,
+          paymentId: payload.paymentId,
+        },
+      );
+    });
+
+    // fulfillment.shipped → shipping_update. Carries the tracking code
+    // (nullable — operators can mark shipped before the courier returns
+    // a code).
+    fulfillmentEvents.on("fulfillment.shipped", async (payload) => {
+      await this.handleEvent(
+        eventIdFor("fulfillment.shipped", payload.fulfillmentId),
+        () => this.dispatchShippingUpdate(payload),
+        {
+          event: "fulfillment.shipped",
+          orderId: payload.orderId,
+          fulfillmentId: payload.fulfillmentId,
+        },
+      );
+    });
+  }
+
+  // -------------------------------------------------------------------
+  // Listener internals
+  // -------------------------------------------------------------------
+
+  /**
+   * Wrap a listener body so a thrown exception is caught + logged and
+   * never propagates. The originating bus already catches per-listener
+   * throws (see `events.ts`), but we double-belt-and-suspenders here:
+   *
+   *   - The bus runs under the post-commit `emitPending` of the upstream
+   *     domain operation (orders/payments/shipping). The order is already
+   *     written; a notification glitch MUST NOT crash the emit loop or
+   *     prevent another listener (analytics, audit) from running.
+   *
+   *   - A `logger.error` on the notification side gives operators a
+   *     direct grep target ("notification listener failed event=...") that
+   *     is more specific than the generic bus error line.
+   */
+  private async handleEvent(
+    _eventId: string,
+    body: () => Promise<void>,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await body();
+    } catch (err) {
+      log.error(
+        { err, ...context },
+        "notification listener failed (suppressed; upstream commit retained)",
+      );
+    }
+  }
+
+  /**
+   * Build the `order_confirmation` payload from the full order row and
+   * dispatch via email (and, best-effort, WhatsApp). A guest checkout
+   * (`customerId === null`) falls back to the order's email + the
+   * shipping address phone.
+   */
+  private async dispatchOrderConfirmation(payload: {
+    orderId: string;
+    customerId: string | null;
+    email: string;
+  }): Promise<void> {
+    const orderService = await this.resolveOrderService();
+    const order = await orderService.getOrderById(payload.orderId);
+    if (!order) {
+      // Order disappeared between event emit and listener run — a deletion
+      // race that should not happen in v0.1 (orders are not hard-deleted)
+      // but logging the gap surfaces it cleanly.
+      log.warn(
+        { orderId: payload.orderId },
+        "order.placed received but order not found — skipping notification",
+      );
+      return;
+    }
+
+    const contact = await this.resolveContact(order, payload);
+    const message = buildOrderConfirmationPayload(order);
+
+    await this.send({
+      channel: "email",
+      recipient: contact.email,
+      locale: contact.locale,
+      message: { kind: "order_confirmation", payload: message },
+      eventId: eventIdFor("order.placed", order.id),
+    });
+
+    // Best-effort WhatsApp dispatch. Skipped when the customer has no
+    // phone or the registered WhatsApp channel is the v0.1 stub (the stub
+    // throws and we'd burn an audit row on every order). A plugin-loaded
+    // WhatsApp channel will register over the stub via `registerChannel`.
+    if (contact.phone && this.hasNonStubWhatsappChannel()) {
+      await this.send({
+        channel: "whatsapp",
+        recipient: contact.phone,
+        locale: contact.locale,
+        message: { kind: "order_confirmation", payload: message },
+        eventId: eventIdFor("order.placed", order.id),
+      });
+    }
+  }
+
+  private async dispatchPaymentReceived(payload: {
+    orderId: string;
+    paymentId: string;
+  }): Promise<void> {
+    const orderService = await this.resolveOrderService();
+    const order = await orderService.getOrderById(payload.orderId);
+    if (!order) {
+      log.warn(
+        { orderId: payload.orderId, paymentId: payload.paymentId },
+        "payment.captured received but order not found — skipping notification",
+      );
+      return;
+    }
+
+    const contact = await this.resolveContact(order, {
+      customerId: order.customerId,
+      email: order.email,
+    });
+
+    await this.send({
+      channel: "email",
+      recipient: contact.email,
+      locale: contact.locale,
+      message: {
+        kind: "payment_received",
+        payload: {
+          orderId: order.orderNumber,
+          amount: moneyToTemplate(order.total),
+          // `paymentMethod` on the order is the operator-facing label the
+          // customer chose at checkout (e.g. "manual_transfer", or the
+          // provider code stored verbatim). We pass it through; templates
+          // do not editorialise.
+          paymentMethod: order.paymentMethod,
+        },
+      },
+      eventId: eventIdFor("payment.captured", payload.paymentId),
+    });
+  }
+
+  private async dispatchShippingUpdate(payload: {
+    fulfillmentId: string;
+    orderId: string;
+    trackingCode: string | null;
+  }): Promise<void> {
+    const orderService = await this.resolveOrderService();
+    const order = await orderService.getOrderById(payload.orderId);
+    if (!order) {
+      log.warn(
+        { orderId: payload.orderId, fulfillmentId: payload.fulfillmentId },
+        "fulfillment.shipped received but order not found — skipping notification",
+      );
+      return;
+    }
+
+    const contact = await this.resolveContact(order, {
+      customerId: order.customerId,
+      email: order.email,
+    });
+
+    await this.send({
+      channel: "email",
+      recipient: contact.email,
+      locale: contact.locale,
+      message: {
+        kind: "shipping_update",
+        payload: {
+          orderId: order.orderNumber,
+          trackingCode: payload.trackingCode,
+          // The fulfillment lifecycle is `pending → shipped → delivered`;
+          // this listener fires on the `shipped` transition, so the wire
+          // status is fixed here. Localised label resolution lives in the
+          // template.
+          status: "shipped",
+          estimatedDelivery: null,
+        },
+      },
+      eventId: eventIdFor("fulfillment.shipped", payload.fulfillmentId),
+    });
+  }
+
+  /**
+   * Resolve the customer's contact channels and locale.
+   *
+   * Resolution order:
+   *
+   *   1. If the order has a `customerId`, look up the customer record for
+   *      `phone` (and, in the future, `locale`). The customer's email is
+   *      the system of record for account holders.
+   *   2. Guest checkouts (`customerId === null`) use the email captured on
+   *      the order and the shipping address's phone — neither field can
+   *      be back-filled from a customer row.
+   *   3. Locale defaults to `id` (the project default per
+   *      `DEFAULT_NOTIFICATION_LOCALE`). The `Customer` row does not yet
+   *      carry a `locale` column; the brief flagged it as a future
+   *      addition. Threading it through the listener now keeps the
+   *      template arg honest the day the column lands.
+   */
+  private async resolveContact(
+    order: Order,
+    payload: { customerId: string | null; email: string },
+  ): Promise<{ email: string; phone: string | null; locale: NotificationLocale }> {
+    let phone: string | null = null;
+    let locale: NotificationLocale = DEFAULT_NOTIFICATION_LOCALE;
+
+    if (payload.customerId) {
+      try {
+        const customerService = await this.resolveCustomerService();
+        const customer = await customerService.getCustomerById(
+          payload.customerId,
+        );
+        if (customer) {
+          phone = customer.phone ?? null;
+          // Forward-compat: read `locale` off the Customer if/when the
+          // column is added. The cast keeps the property-access defensive
+          // — today it is always undefined.
+          const candidate = (customer as unknown as { locale?: string })
+            .locale;
+          locale = normaliseLocale(candidate);
+        }
+      } catch (err) {
+        // A customer-lookup failure should NOT prevent the notification:
+        // we still have the order's email (for account holders, the same
+        // value the customer record would yield) and we fall back to the
+        // shipping address phone for WhatsApp. Logged so the operator can
+        // see the lookup gap.
+        log.warn(
+          { err, customerId: payload.customerId, orderId: order.id },
+          "customer lookup failed — falling back to order-side contact info",
+        );
+      }
+    }
+
+    // Guest fallback / customer-without-phone fallback — pull the phone
+    // from the shipping address snapshot. Always present on the order
+    // (the snapshot is captured at order materialisation).
+    if (!phone) {
+      phone = order.shippingAddressSnapshot?.phone ?? null;
+    }
+
+    return {
+      email: payload.email,
+      phone,
+      locale,
+    };
+  }
+
+  /**
+   * Returns true when the registered `whatsapp` channel is something
+   * other than the v0.1 stub (i.e. a plugin actually wired delivery).
+   * The default registry installs `WhatsappStubChannel`, which throws on
+   * every send — attempting WhatsApp dispatch with the stub installed
+   * would burn a `failed` audit row for every order placed. We treat
+   * that as "feature not configured" and skip silently.
+   */
+  private hasNonStubWhatsappChannel(): boolean {
+    const registered = this.channels.get("whatsapp");
+    return Boolean(registered) && !(registered instanceof WhatsappStubChannel);
   }
 }
 
@@ -381,6 +770,119 @@ function clampPageSize(size: number | undefined): number {
   if (!size || size < 1) return DEFAULT_PAGE_SIZE;
   if (size > MAX_PAGE_SIZE) return MAX_PAGE_SIZE;
   return Math.floor(size);
+}
+
+/**
+ * Build the deterministic event-driven idempotency key. The format is
+ * `event:<bus-event-name>:<primary-id>` — so a duplicate `order.placed`
+ * delivery for `ord_abc` resolves to the same key on every retry.
+ *
+ * We use the order id (not the order number) because the id is the
+ * canonical primary key and never reissued; the order number is also
+ * unique but it is a customer-facing handle we'd rather keep out of
+ * internal idempotency keys.
+ */
+function eventIdFor(eventName: string, primaryId: string): string {
+  return `event:${eventName}:${primaryId}`;
+}
+
+/**
+ * Reshape a domain `Order` into the `OrderConfirmationPayload` the
+ * template renderer accepts. We use the customer-facing `orderNumber`
+ * (not the internal `id`) for the body — that is what the customer
+ * pastes into a support email — and we strip `Money` instances down to
+ * `{ amount, currency }` strings on the wire (`bigint` does not survive
+ * jsonb persistence cleanly, and the template formatter expects a
+ * decimal-string contract).
+ */
+function buildOrderConfirmationPayload(order: Order): OrderConfirmationPayload {
+  const items: NotificationLineItem[] = order.items.map((item) => ({
+    name: item.title || item.sku,
+    quantity: item.quantity,
+    unitPrice: moneyToTemplate(item.unitPrice),
+  }));
+
+  const totals: NotificationTotals = {
+    subtotal: moneyToTemplate(order.subtotal),
+    tax: moneyToTemplate(order.tax),
+    shipping: moneyToTemplate(order.shipping),
+    total: moneyToTemplate(order.total),
+  };
+
+  const a = order.shippingAddressSnapshot;
+  const shippingAddress: NotificationAddress = {
+    recipientName: a.recipientName,
+    phone: a.phone,
+    addressLine1: a.addressLine1,
+    addressLine2: a.addressLine2 ?? null,
+    // Prefer the resolved region NAME captured at order time (the
+    // snapshot is self-contained per ADR-0010); fall back to the BPS
+    // code when the snapshot pre-dates the name-capture rollout.
+    city: a.kotaKabupatenName ?? a.kotaKabupatenId,
+    province: a.provinsiName ?? a.provinsiId,
+    postalCode: a.postalCode,
+  };
+
+  return {
+    orderId: order.orderNumber,
+    items,
+    totals,
+    shippingAddress,
+  };
+}
+
+/**
+ * Convert the `Money` value object (bigint amount) to the template's
+ * wire-shape (`{ amount: string, currency: string }`). The template's
+ * formatter operates on the decimal string — passing a bigint would
+ * require it to know about bigints, which would leak the storage
+ * representation across a layer boundary.
+ */
+function moneyToTemplate(money: { amount: bigint; currency: string }): NotificationMoney {
+  return { amount: money.amount.toString(), currency: money.currency };
+}
+
+/**
+ * Coerce an arbitrary string (or undefined) into a known
+ * `NotificationLocale`, falling back to the project default. The
+ * customer record may eventually carry a locale that drifts from the two
+ * we ship templates for — defaulting to `id` rather than throwing keeps
+ * the listener path robust against schema changes upstream.
+ */
+function normaliseLocale(candidate: string | undefined): NotificationLocale {
+  if (candidate === "en" || candidate === "id") return candidate;
+  return DEFAULT_NOTIFICATION_LOCALE;
+}
+
+/**
+ * Narrow on the postgres-js (and node-postgres) `code` SQLSTATE field.
+ * `23505` is `unique_violation`. When a constraint name is provided we
+ * also match `constraint_name`, which postgres-js exposes alongside the
+ * code. Used to detect duplicate event delivery on the partial unique
+ * index `notifications_event_kind_channel_uniq` so we can return the
+ * existing row rather than re-dispatching.
+ *
+ * Mirror of the helper in `checkout/service.ts`. Kept module-local
+ * (rather than promoted to a shared lib) until at least three modules
+ * need it — premature abstraction here would couple unrelated modules to
+ * a single import.
+ */
+function isPostgresUniqueViolation(
+  err: unknown,
+  constraintName?: string,
+): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const candidate = err as {
+    code?: unknown;
+    constraint_name?: unknown;
+    constraint?: unknown;
+  };
+  if (candidate.code !== "23505") return false;
+  if (!constraintName) return true;
+  return (
+    candidate.constraint_name === constraintName ||
+    candidate.constraint === constraintName
+  );
 }
 
 /**

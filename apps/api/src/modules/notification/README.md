@@ -70,19 +70,69 @@ Two public methods on the service:
 ## Event wiring
 
 `subscribeToEvents()` is called once from `app.ts` after construction.
-v0.1 wires:
+The notification module subscribes to three cross-module events:
 
-- `checkout.completed` — currently a logging-only listener; Track 3's
-  Order module emits a richer `order.placed` event with the resolved
-  recipient and items, which this listener will pick up.
+| Event                  | Bus              | Template             | Channels                                            |
+| ---------------------- | ---------------- | -------------------- | --------------------------------------------------- |
+| `order.placed`         | orders           | `order_confirmation` | email, plus WhatsApp best-effort if a non-stub channel is registered and the customer has a phone |
+| `payment.captured`     | payments         | `payment_received`   | email                                               |
+| `fulfillment.shipped`  | shipping         | `shipping_update`    | email                                               |
 
-Future events that emit notifications:
+Each event payload carries IDs only — the listener loads the full order
+through `orderService.getOrderById` to render line items, totals, and
+the shipping address. Customer contact + locale come from
+`customerService.getCustomerById` when the order has a `customerId`;
+guest checkouts (`customerId === null`) fall back to the order's
+`email` and the shipping-address phone.
 
-- `payment.captured` → `payment_received`
-- `fulfillment.shipped` → `shipping_update`
+`checkout.completed` remains as a debug-level no-op subscriber so an
+operator searching for the event in code finds the explicit decision
+("the orders module emits the canonical placed event").
 
-These are TODO-flagged in `service.ts` so the wiring goes in alongside
-the emitting module.
+### Cross-module dependency wiring
+
+The notification module is reached at module-evaluation time by the auth
+module (`auth/better-auth.ts` resolves `getNotificationService` for the
+verification-email path). To avoid closing a cycle through the
+shipping/customer route builders → auth middleware → notification, the
+service resolves `orderService` / `customerService` LAZILY (dynamic
+import) on the first listener invocation. Tests inject concrete fakes
+through the constructor and skip the dynamic import entirely.
+
+## Idempotency
+
+The `notifications` table carries an `event_id` column with a partial
+unique index on `(event_id, kind, channel) WHERE event_id IS NOT NULL`.
+Event-driven sends pass a deterministic id of the form
+`event:<event-name>:<primary-id>` (e.g. `event:order.placed:ord_abc`),
+so a duplicate event delivery hits the index and the second insert
+raises 23505. The service catches that, looks up the existing row, and
+returns it without dispatching to the channel a second time.
+
+This is the at-least-once guard for the event-listener path. Rationale
+for the partial-unique-index choice over a service-level pre-check:
+
+- A pre-check has a TOCTOU window between the SELECT and the INSERT;
+  two concurrent listener invocations can both see "no row" and both
+  insert. The partial unique index is the only race-free guarantee.
+- Non-event sends (`email_verification`, `password_reset`) write rows
+  with `event_id = NULL` and remain free to send the same kind to the
+  same recipient repeatedly (a customer can request a second
+  verification email).
+
+## Channel-failure handling
+
+Channel dispatch can throw (SMTP unreachable, WhatsApp template
+unapproved). The listener wrapper:
+
+- Logs the failure at warn/error level with the event name and IDs.
+- Records a `failed` notification row via `markStatus`.
+- Does NOT crash the order/payment/shipping flow — the upstream domain
+  operation already committed before the event fired, and the bus
+  swallows per-listener exceptions.
+
+No retry queue in v0.1 — failed notifications are surfaced through the
+admin endpoint at `GET /admin/v1/notifications`.
 
 ## Tables
 
@@ -98,7 +148,11 @@ the emitting module.
 | `payload`       | jsonb NOT NULL  | Template variables — NOT the rendered body     |
 | `status`        | text NOT NULL   | `'pending' \| 'sent' \| 'failed'`              |
 | `error_message` | text NULL       | Set when `status='failed'`                     |
+| `event_id`      | text NULL       | Deterministic key for event-driven sends; null for non-event sends. See "Idempotency" above. |
 | `created_at`    | timestamptz     | Indexed; admin recent-list and TTL sweep       |
 | `updated_at`    | timestamptz     |                                                |
 
-Indexes: `created_at`, `(channel, status)`.
+Indexes:
+- `created_at`
+- `(channel, status)`
+- `(event_id, kind, channel)` UNIQUE WHERE `event_id IS NOT NULL` — see "Idempotency".
