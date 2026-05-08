@@ -133,7 +133,10 @@ if (seoListing.items.length > 0) {
     */
     }
     <h2 class="sr-only">{t("products.list.title")}</h2>
-    {/* Grid — 3 columns desktop, 2 columns mobile, massive gap. */}
+    {
+      /* Grid — 4 columns lg, 3 tablet, 2 mobile. Tighter rhythm than the
+        prior 3-up to feel more like Muji's product browse. */
+    }
     <ProductGrid
       client:load
       apiUrl={apiUrl}

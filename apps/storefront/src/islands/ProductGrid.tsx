@@ -24,9 +24,10 @@
  *     price sit below the image in calm `t-body` weight 400 — the price is
  *     muted on cards because the photo and title carry the visual hierarchy.
  *
- *   - The grid runs 3 columns at desktop with a massive gap (lg:gap-x-12,
- *     lg:gap-y-16) — Saturdays NYC's editorial spacing. Mobile drops to 2
- *     columns with a smaller but still generous gap.
+ *   - The grid runs 4 columns at desktop, 3 at tablet, 2 on mobile —
+ *     Muji's denser browse rhythm. The horizontal gap tightens at lg
+ *     (`gap-x-8`) so 4-up cards don't feel cramped while keeping vertical
+ *     `gap-y-20` so rows still breathe.
  *
  *   - Loading state mirrors the live grid template: matching skeleton
  *     cells with very subtle pulse so the page reads as "settling in"
@@ -182,10 +183,12 @@ function querySignature(
   return parts.join("|");
 }
 
-// 3 columns desktop, 2 columns mobile. Massive gap (12/16 desktop) — the
-// negative space between cards is the design element here.
+// 4 columns desktop (lg), 3 columns tablet (md), 2 columns mobile.
+// Horizontal gap tightens at md/lg (`gap-x-8`) so the denser 4-up rhythm
+// doesn't feel cramped; vertical gap stays generous (`gap-y-20`) so the
+// rows breathe — the negative space between rows is what keeps this calm.
 const GRID_CLASSES =
-  "grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-3 md:gap-x-10 md:gap-y-16 lg:gap-x-12 lg:gap-y-20";
+  "grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-3 md:gap-x-8 md:gap-y-16 lg:grid-cols-4 lg:gap-x-8 lg:gap-y-20";
 
 export default function ProductGrid({
   apiUrl,
@@ -231,10 +234,10 @@ export default function ProductGrid({
     () => new Set(),
   );
 
-  // Memoize once — the grid layout is consistent across product counts now
-  // that the redesign locks columns at 3 desktop / 2 mobile. The previous
-  // "compact mode" branch was needed because the layout was 4-up and
-  // tended to leave orphan rows; 3-up tolerates any count gracefully.
+  // Memoize once — the grid layout is fixed at 4 desktop / 3 tablet / 2
+  // mobile across all product counts. Page-level call sites pick a
+  // `pageSize` that fills rows cleanly (e.g. listing uses 8 or 12); the
+  // grid itself stays agnostic.
   const gridClasses = useMemo(() => GRID_CLASSES, []);
 
   // Skip-the-first-fetch ref. When `initialData` was used to seed state,
@@ -369,9 +372,11 @@ export default function ProductGrid({
         {state.products.map((p, idx) => {
           const price = lowestPrice(p);
           const compareAt = p.variants[0]?.compareAtPrice ?? null;
-          // Eager-load the first three (one full row at desktop) so the
-          // LCP isn't deferred. Lazy after.
-          const loading = idx < 3 ? "eager" : "lazy";
+          // Eager-load the first four (one full row at desktop, lg+) so
+          // the LCP isn't deferred. Lazy after. Mobile/tablet show fewer
+          // cards above the fold but eager-loading a couple of extras is
+          // cheap and avoids a flash if the user is on a wide screen.
+          const loading = idx < 4 ? "eager" : "lazy";
           const altText = p.imageAlt ?? p.title;
           return (
             <a
