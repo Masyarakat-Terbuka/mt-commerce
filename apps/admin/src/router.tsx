@@ -34,7 +34,9 @@ import { CustomerDetailPage } from "@/pages/CustomerDetailPage";
 import {
   OrdersPage,
   ORDER_LIST_STATUS_OPTIONS,
+  ORDERS_SEARCH_KIND_OPTIONS,
   type OrdersListSearch,
+  type OrdersSearchKind,
 } from "@/pages/OrdersPage";
 import { OrderDetailPage } from "@/pages/OrderDetailPage";
 import { ComingSoonPage } from "@/pages/ComingSoonPage";
@@ -168,15 +170,40 @@ const ordersRoute = createRoute({
       : "all";
     const rawPage = Number(raw.page);
     const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+    // Unknown `searchKind` values are dropped (treated as "default") so
+    // a stale link cannot pin the page to an unrenderable mode.
+    const rawSearchKind = typeof raw.searchKind === "string" ? raw.searchKind : "";
+    const searchKind: OrdersSearchKind | undefined = (
+      ORDERS_SEARCH_KIND_OPTIONS as readonly string[]
+    ).includes(rawSearchKind)
+      ? (rawSearchKind as OrdersSearchKind)
+      : undefined;
     const email =
       typeof raw.email === "string" && raw.email.trim().length > 0
         ? raw.email.trim()
+        : undefined;
+    const orderNumber =
+      typeof raw.orderNumber === "string" && raw.orderNumber.trim().length > 0
+        ? raw.orderNumber.trim()
         : undefined;
     const from =
       typeof raw.from === "string" && raw.from.length > 0 ? raw.from : undefined;
     const to =
       typeof raw.to === "string" && raw.to.length > 0 ? raw.to : undefined;
-    return { status, page, email, from, to };
+    const customerId =
+      typeof raw.customerId === "string" && raw.customerId.trim().length > 0
+        ? raw.customerId.trim()
+        : undefined;
+    return {
+      status,
+      page,
+      ...(searchKind !== undefined ? { searchKind } : {}),
+      email,
+      orderNumber,
+      from,
+      to,
+      customerId,
+    };
   },
   component: OrdersPage,
 });
