@@ -46,6 +46,18 @@ export interface CustomerAddress {
   kotaKabupatenId: string;
   kecamatanId: string;
   kelurahanId: string | null;
+  /**
+   * Resolved region names — surfaced as siblings of the BPS code fields so
+   * existing readers that only know the codes are unaffected. Populated by
+   * the repository layer via a LEFT JOIN on the four region tables; any
+   * level may be `undefined` if the region row is missing (a stale
+   * customer address pointing at a region that has since been removed).
+   * UI callers render `<idField> ?? <nameField>` for graceful fall-back.
+   */
+  provinsiName?: string;
+  kotaKabupatenName?: string;
+  kecamatanName?: string;
+  kelurahanName?: string;
   postalCode: string;
   notes: string | null;
   createdAt: Date;

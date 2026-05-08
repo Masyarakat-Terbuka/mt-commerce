@@ -22,6 +22,7 @@ import {
   toCity,
   toCustomer,
   toCustomerAddress,
+  toCustomerAddressWithRegions,
   toDistrict,
   toProvince,
   toSubdistrict,
@@ -235,12 +236,12 @@ export class CustomerServiceImpl implements CustomerService {
     const row = await this.repo.getAddressById(addressId);
     if (!row) return null;
     if (row.deletedAt !== null) return null;
-    return toCustomerAddress(row);
+    return toCustomerAddressWithRegions(row);
   }
 
   async listAddresses(customerId: string): Promise<CustomerAddress[]> {
     const rows = await this.repo.listAddressesForCustomer(customerId);
-    return rows.map((row) => toCustomerAddress(row));
+    return rows.map((row) => toCustomerAddressWithRegions(row));
   }
 
   async createAddress(

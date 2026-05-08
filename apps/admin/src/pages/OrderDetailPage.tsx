@@ -724,6 +724,18 @@ export function OrderDetailPage() {
 // ----------------------------------------------------------------------------
 
 function AddressBlock({ address }: { address: OrderAddressSnapshot }) {
+  // Snapshot semantics: the region names are captured AT WRITE TIME by
+  // the orders service and stored in the JSONB blob. Rendering
+  // `<level>Name ?? <level>Id` keeps the audit-grade behaviour intact:
+  // a later region rename in the BPS dataset does NOT alter what we
+  // show here — we display the name as it was the day the order was
+  // placed. The id fall-back covers orders placed before the
+  // snapshot-enrichment landed (no name in the blob → BPS code shown).
+  const kotaLabel = address.kotaKabupatenName ?? address.kotaKabupatenId;
+  const provinsiLabel = address.provinsiName ?? address.provinsiId;
+  const kecamatanLabel = address.kecamatanName ?? address.kecamatanId;
+  const kelurahanLabel = address.kelurahanName ?? address.kelurahanId ?? null;
+
   return (
     <address className="not-italic text-sm">
       <p className="font-medium">{address.recipientName}</p>
@@ -732,11 +744,12 @@ function AddressBlock({ address }: { address: OrderAddressSnapshot }) {
           .filter(Boolean)
           .join(", ")}
       </p>
-      {/* Region IDs render as raw codes — the catalog lookup module is the
-          right place to resolve names; the audit/snapshot is intentionally
-          ID-only so a later region rename doesn't rewrite history. */}
       <p className="text-muted-foreground">
-        {address.kotaKabupatenId} · {address.postalCode}
+        {kelurahanLabel ? `${kelurahanLabel}, ` : ""}
+        {kecamatanLabel}
+      </p>
+      <p className="text-muted-foreground">
+        {kotaLabel}, {provinsiLabel} · {address.postalCode}
       </p>
       <p className="text-muted-foreground">{address.phone}</p>
       {address.notes ? (

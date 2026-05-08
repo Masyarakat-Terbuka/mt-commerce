@@ -430,6 +430,17 @@ export interface WireCustomerAddress {
   kotaKabupatenId: string;
   kecamatanId: string;
   kelurahanId: string | null;
+  /**
+   * Resolved region names — sibling-of-id, optional. Surfaced by the API
+   * when a JOIN against the region tables succeeds; the storefront and
+   * admin UIs render `<level>Name ?? <level>Id` so an older API that
+   * does not yet populate these fields still renders cleanly (the BPS
+   * code shows up). See the API customer module for the read-time JOIN.
+   */
+  provinsiName?: string;
+  kotaKabupatenName?: string;
+  kecamatanName?: string;
+  kelurahanName?: string;
   postalCode: string;
   notes: string | null;
   createdAt: string;
@@ -451,6 +462,11 @@ export interface CustomerAddress {
   kotaKabupatenId: string;
   kecamatanId: string;
   kelurahanId: string | null;
+  /** See `WireCustomerAddress.provinsiName` — same semantics. */
+  provinsiName?: string;
+  kotaKabupatenName?: string;
+  kecamatanName?: string;
+  kelurahanName?: string;
   postalCode: string;
   notes: string | null;
   createdAt: Date;
@@ -713,6 +729,17 @@ export interface OrderAddressSnapshot {
   kotaKabupatenId: string;
   kecamatanId: string;
   kelurahanId: string | null;
+  /**
+   * Resolved region names captured AT WRITE TIME on the API side — the
+   * snapshot is self-contained, so a later region rename does not
+   * rewrite past orders. Optional because orders placed before the
+   * snapshot-enrichment change have no names in their JSON blob; UI
+   * clients fall back to the BPS code via `provinsiName ?? provinsiId`.
+   */
+  provinsiName?: string;
+  kotaKabupatenName?: string;
+  kecamatanName?: string;
+  kelurahanName?: string;
   postalCode: string;
   notes: string | null;
 }

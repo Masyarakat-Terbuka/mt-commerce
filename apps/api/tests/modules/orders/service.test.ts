@@ -36,6 +36,12 @@ interface FakeStore {
   history: OrderStatusHistoryRow[];
   intents: Map<string, OrderIntentRow>;
   variants: Map<string, VariantWithProduct>;
+  /**
+   * In-memory stand-in for the four region tables. The orders service
+   * resolves names against this map at write time so the snapshot is
+   * self-contained — same shape as the production query.
+   */
+  regionNames: Map<string, string>;
   sequence: number;
   clock: number;
 }
@@ -52,6 +58,7 @@ function createStore(): FakeStore {
     history: [],
     intents: new Map(),
     variants: new Map(),
+    regionNames: new Map(),
     sequence: 100000,
     clock: 0,
   };
@@ -301,6 +308,19 @@ function createFakeRepo(store: FakeStore): OrdersRepository {
       }
       return out;
     },
+    async resolveRegionNames(input) {
+      // Stand-in for the four-LEFT-JOIN read; an unseeded id resolves to
+      // `null`, matching the production behaviour for a stale FK.
+      return {
+        provinsiName: store.regionNames.get(input.provinsiId) ?? null,
+        kotaKabupatenName:
+          store.regionNames.get(input.kotaKabupatenId) ?? null,
+        kecamatanName: store.regionNames.get(input.kecamatanId) ?? null,
+        kelurahanName: input.kelurahanId
+          ? store.regionNames.get(input.kelurahanId) ?? null
+          : null,
+      };
+    },
     async withTransaction(fn) {
       // No real transactional semantics in the fake — the orders
       // service relies on the repo for isolation; tests assert at the
@@ -320,6 +340,13 @@ function buildService(): BuildResult {
   const store = createStore();
   store.variants.set("var_1", makeVariant("var_1", "prod_1"));
   store.variants.set("var_2", makeVariant("var_2", "prod_2"));
+
+  // Region names for the canonical Jakarta address used by the default
+  // intent fixture. The orders service resolves these at write time and
+  // freezes them into the order's JSONB snapshot.
+  store.regionNames.set("31", "DKI Jakarta");
+  store.regionNames.set("3171", "Jakarta Pusat");
+  store.regionNames.set("317101", "Gambir");
 
   // Seed an order intent the tests use as the canonical input.
   const intent = makeIntent({ id: "oint_1", checkoutId: "chk_1" });
@@ -393,6 +420,105 @@ describe("createFromIntent", () => {
         actorKind: "customer",
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Snapshot region-name enrichment
+//
+// Names are resolved AT WRITE TIME (immutable history). The frozen blob
+// keeps the names that were valid the day the order was placed even if
+// the BPS dataset later renames a region.
+// ---------------------------------------------------------------------------
+
+describe("address snapshot region-name enrichment", () => {
+  it("populates the four region names alongside the BPS ids on the shipping snapshot", async () => {
+    const { service, store } = buildService();
+    // Add a kelurahan id to the canonical intent and seed its name.
+    const intent = makeIntent({
+      id: "oint_named",
+      checkoutId: "chk_named",
+      shippingAddressSnapshot: {
+        id: "adr_ship_named",
+        customerId: "cust_a",
+        kind: "shipping",
+        recipientName: "Sari",
+        phone: "+6281234567890",
+        addressLine1: "Jl. Mawar 1",
+        addressLine2: null,
+        provinsiId: "31",
+        kotaKabupatenId: "3171",
+        kecamatanId: "317101",
+        kelurahanId: "3171011001",
+        postalCode: "10110",
+        notes: null,
+      },
+    });
+    store.intents.set(intent.id, intent);
+    store.regionNames.set("3171011001", "Gambir");
+
+    const order = await service.createFromIntent(intent.id, {
+      actorKind: "customer",
+    });
+
+    expect(order.shippingAddressSnapshot.provinsiName).toBe("DKI Jakarta");
+    expect(order.shippingAddressSnapshot.kotaKabupatenName).toBe(
+      "Jakarta Pusat",
+    );
+    expect(order.shippingAddressSnapshot.kecamatanName).toBe("Gambir");
+    expect(order.shippingAddressSnapshot.kelurahanName).toBe("Gambir");
+    // BPS ids remain alongside the names.
+    expect(order.shippingAddressSnapshot.provinsiId).toBe("31");
+    expect(order.shippingAddressSnapshot.kotaKabupatenId).toBe("3171");
+  });
+
+  it("omits the kelurahan name when the source snapshot has no kelurahan id", async () => {
+    // The default intent fixture omits kelurahan — exercise that path.
+    const { service } = buildService();
+    const order = await service.createFromIntent("oint_1", {
+      actorKind: "customer",
+    });
+
+    expect(order.shippingAddressSnapshot.provinsiName).toBe("DKI Jakarta");
+    expect(order.shippingAddressSnapshot.kelurahanName).toBeUndefined();
+    expect(order.shippingAddressSnapshot.kelurahanId).toBeNull();
+  });
+
+  it("omits a single name when its region row is unknown without dropping the others", async () => {
+    const { service, store } = buildService();
+    // Override one id (kecamatan) to point at a region the seed does not
+    // know — the orders service should still capture the other three names.
+    const intent = makeIntent({
+      id: "oint_partial",
+      checkoutId: "chk_partial",
+      shippingAddressSnapshot: {
+        id: "adr_ship_partial",
+        customerId: "cust_a",
+        kind: "shipping",
+        recipientName: "Anonymous",
+        phone: "+6281234567890",
+        addressLine1: "Jl. Stale 1",
+        addressLine2: null,
+        provinsiId: "31",
+        kotaKabupatenId: "3171",
+        kecamatanId: "999999",
+        kelurahanId: null,
+        postalCode: "10110",
+        notes: null,
+      },
+    });
+    store.intents.set(intent.id, intent);
+
+    const order = await service.createFromIntent(intent.id, {
+      actorKind: "customer",
+    });
+
+    expect(order.shippingAddressSnapshot.provinsiName).toBe("DKI Jakarta");
+    expect(order.shippingAddressSnapshot.kotaKabupatenName).toBe(
+      "Jakarta Pusat",
+    );
+    expect(order.shippingAddressSnapshot.kecamatanName).toBeUndefined();
+    expect(order.shippingAddressSnapshot.kecamatanId).toBe("999999");
   });
 });
 

@@ -31,6 +31,24 @@ export type OrderActorKind = "system" | "staff" | "customer";
  * Address shape captured at order time. Mirrors the
  * `OrderIntentAddress` shape from the checkout module so a snapshot can
  * be lifted across the boundary unchanged.
+ *
+ * Region names (`provinsiName` / `kotaKabupatenName` / `kecamatanName` /
+ * `kelurahanName`) are SNAPSHOTTED AT WRITE TIME — when the orders
+ * service materialises an order, it resolves the four region names
+ * once and stores them in the JSONB blob alongside the BPS ids. This
+ * preserves the audit-grade "the address as it was when the customer
+ * placed the order" property: a later region rename in the BPS dataset
+ * does not retroactively rewrite past orders.
+ *
+ * The fields are optional because:
+ *
+ *   - Orders created BEFORE this change have no names in their JSON
+ *     blob; the wire layer surfaces them as `undefined` and the UI
+ *     falls back to the BPS code via `provinsiName ?? provinsiId`.
+ *
+ *   - A region row missing at write time (a stale FK on the source
+ *     address) leaves the corresponding name out rather than fabricating
+ *     one. The other levels still get populated.
  */
 export interface OrderAddressSnapshot {
   id: string;
@@ -44,6 +62,10 @@ export interface OrderAddressSnapshot {
   kotaKabupatenId: string;
   kecamatanId: string;
   kelurahanId: string | null;
+  provinsiName?: string;
+  kotaKabupatenName?: string;
+  kecamatanName?: string;
+  kelurahanName?: string;
   postalCode: string;
   notes: string | null;
 }

@@ -37,6 +37,12 @@ function snapshotAsAddress(raw: unknown): OrderAddressSnapshot {
   // (orders service) is the single producer and always emits the full
   // shape. A malformed snapshot would surface as a programming error in
   // tests rather than a silent runtime gap.
+  //
+  // Region-name fields (`provinsiName`, ...) were added after the
+  // initial release. For an order written before that change, the JSON
+  // blob simply has no key; the cast leaves the property `undefined`
+  // and the wire layer omits it — wire callers that fall back to the
+  // BPS id render correctly without any backfill.
   return raw as OrderAddressSnapshot;
 }
 

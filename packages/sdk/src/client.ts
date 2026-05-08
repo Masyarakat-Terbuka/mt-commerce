@@ -303,6 +303,20 @@ function toCustomerAddress(w: WireCustomerAddress): CustomerAddress {
     kotaKabupatenId: w.kotaKabupatenId,
     kecamatanId: w.kecamatanId,
     kelurahanId: w.kelurahanId,
+    // Pass-through of resolved region names. Optional on both sides, so
+    // we omit the field entirely when the wire payload lacks it; that
+    // keeps `addr.provinsiName ?? addr.provinsiId` clean at the call
+    // site.
+    ...(w.provinsiName !== undefined ? { provinsiName: w.provinsiName } : {}),
+    ...(w.kotaKabupatenName !== undefined
+      ? { kotaKabupatenName: w.kotaKabupatenName }
+      : {}),
+    ...(w.kecamatanName !== undefined
+      ? { kecamatanName: w.kecamatanName }
+      : {}),
+    ...(w.kelurahanName !== undefined
+      ? { kelurahanName: w.kelurahanName }
+      : {}),
     postalCode: w.postalCode,
     notes: w.notes,
     createdAt: new Date(w.createdAt),

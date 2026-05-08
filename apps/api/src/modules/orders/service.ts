@@ -231,6 +231,23 @@ export class OrderServiceImpl implements OrderService {
       const variantIds = snapshot.cartSnapshot.map((line) => line.variantId);
       const variantsById = await loadVariantsById(tx, variantIds);
 
+      // Enrich the address snapshots with resolved region names AT WRITE
+      // TIME. Storing the names alongside the BPS ids in the JSONB blob
+      // makes the snapshot self-contained — a later region rename in the
+      // BPS dataset cannot retroactively rewrite past orders. This is the
+      // audit-grade choice: accept one extra read per order placement
+      // (cheap, four PK lookups) so reads never need a join.
+      const shippingSnapshot = await enrichSnapshotWithRegionNames(
+        tx,
+        snapshot.shippingAddressSnapshot,
+      );
+      const billingSnapshot = snapshot.billingAddressSnapshot
+        ? await enrichSnapshotWithRegionNames(
+            tx,
+            snapshot.billingAddressSnapshot,
+          )
+        : null;
+
       const orderId = id("ord");
       const sequenceValue = await tx.nextOrderNumber();
       const orderNumber = formatOrderNumber(sequenceValue, new Date());
@@ -253,10 +270,9 @@ export class OrderServiceImpl implements OrderService {
         shippingAmount: shipping.amount,
         shippingMethodCode: intent.shippingMethodCode,
         totalAmount: total.amount,
-        shippingAddressSnapshot:
-          snapshot.shippingAddressSnapshot as unknown as object,
-        billingAddressSnapshot: snapshot.billingAddressSnapshot
-          ? (snapshot.billingAddressSnapshot as unknown as object)
+        shippingAddressSnapshot: shippingSnapshot as unknown as object,
+        billingAddressSnapshot: billingSnapshot
+          ? (billingSnapshot as unknown as object)
           : null,
         paymentMethod: intent.paymentMethod,
       });
@@ -668,6 +684,41 @@ async function loadVariantsById(
     map.set(row.variant.id, row);
   }
   return map;
+}
+
+/**
+ * Resolve the four region names for a snapshot's BPS ids and produce a
+ * new snapshot value that carries both ids AND names. Any name that the
+ * region tables cannot resolve is OMITTED from the result (rather than
+ * stored as `null`) so the JSONB blob stays compact and the wire shape
+ * surfaces the field as `undefined` — UI clients then fall back to the
+ * id field via `provinsiName ?? provinsiId`.
+ */
+async function enrichSnapshotWithRegionNames(
+  repo: OrdersRepository,
+  snapshot: OrderAddressSnapshot,
+): Promise<OrderAddressSnapshot> {
+  const names = await repo.resolveRegionNames({
+    provinsiId: snapshot.provinsiId,
+    kotaKabupatenId: snapshot.kotaKabupatenId,
+    kecamatanId: snapshot.kecamatanId,
+    kelurahanId: snapshot.kelurahanId,
+  });
+  return {
+    ...snapshot,
+    ...(names.provinsiName !== null
+      ? { provinsiName: names.provinsiName }
+      : {}),
+    ...(names.kotaKabupatenName !== null
+      ? { kotaKabupatenName: names.kotaKabupatenName }
+      : {}),
+    ...(names.kecamatanName !== null
+      ? { kecamatanName: names.kecamatanName }
+      : {}),
+    ...(names.kelurahanName !== null
+      ? { kelurahanName: names.kelurahanName }
+      : {}),
+  };
 }
 
 /**
