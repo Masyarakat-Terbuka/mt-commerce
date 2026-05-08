@@ -39,6 +39,11 @@ import {
 } from "../../lib/errors.js";
 import { childLogger } from "../../lib/logger.js";
 import { DEFAULT_LOCALE } from "../catalog/i18n.js";
+import {
+  shippingService as defaultShippingService,
+  type Fulfillment,
+  type ShippingService,
+} from "../shipping/index.js";
 import { events, type EventName, type EventPayload } from "./events.js";
 import { toOrder, toOrderStatusEvent } from "./mappers.js";
 import {
@@ -173,7 +178,17 @@ interface OrderIntentSnapshotShape {
 }
 
 export class OrderServiceImpl implements OrderService {
-  constructor(private readonly repo: OrdersRepository) {}
+  /**
+   * `shippingService` defaults to the runtime singleton; tests inject a
+   * fake to assert the create-on-paid hook without standing up the
+   * shipping module's full surface. The dependency is opt-out via the
+   * default — the orders module's own tests construct it without ever
+   * touching the shipping side.
+   */
+  constructor(
+    private readonly repo: OrdersRepository,
+    private readonly shippingService: ShippingService = defaultShippingService,
+  ) {}
 
   // -------------------------------------------------------------------
   // Public API
@@ -186,7 +201,7 @@ export class OrderServiceImpl implements OrderService {
     const actorKind = opts.actorKind ?? "system";
     const actorId = opts.actorId ?? null;
 
-    const { result, pending } = await this.repo.withTransaction(async (tx) => {
+    const { result, pending } = await this.repo.withTransaction(async ({ orders: tx }) => {
       const intent = await tx.getOrderIntentById(orderIntentId);
       if (!intent) {
         throw new NotFoundError("Order intent not found.", { orderIntentId });
@@ -360,7 +375,9 @@ export class OrderServiceImpl implements OrderService {
       ];
 
       return {
-        result: toOrder(orderRow, insertedItems, DEFAULT_LOCALE),
+        // No fulfillments at creation time — they are materialised on
+        // the `pending_payment → paid` transition.
+        result: toOrder(orderRow, insertedItems, [], DEFAULT_LOCALE),
         pending: pendingEvents,
       };
     });
@@ -374,8 +391,11 @@ export class OrderServiceImpl implements OrderService {
   ): Promise<Order | null> {
     const row = await this.repo.getOrderById(orderId);
     if (!row) return null;
-    const items = await this.repo.listItemsForOrder(orderId);
-    return toOrder(row, items, opts.locale ?? DEFAULT_LOCALE);
+    const [items, fulfillments] = await Promise.all([
+      this.repo.listItemsForOrder(orderId),
+      this.shippingService.listFulfillmentsByOrderId(orderId),
+    ]);
+    return toOrder(row, items, fulfillments, opts.locale ?? DEFAULT_LOCALE);
   }
 
   async getOrderByNumber(
@@ -384,8 +404,11 @@ export class OrderServiceImpl implements OrderService {
   ): Promise<Order | null> {
     const row = await this.repo.getOrderByNumber(orderNumber);
     if (!row) return null;
-    const items = await this.repo.listItemsForOrder(row.id);
-    return toOrder(row, items, opts.locale ?? DEFAULT_LOCALE);
+    const [items, fulfillments] = await Promise.all([
+      this.repo.listItemsForOrder(row.id),
+      this.shippingService.listFulfillmentsByOrderId(row.id),
+    ]);
+    return toOrder(row, items, fulfillments, opts.locale ?? DEFAULT_LOCALE);
   }
 
   async getOrderByCheckoutId(
@@ -394,8 +417,11 @@ export class OrderServiceImpl implements OrderService {
   ): Promise<Order | null> {
     const row = await this.repo.getOrderByCheckoutId(checkoutId);
     if (!row) return null;
-    const items = await this.repo.listItemsForOrder(row.id);
-    return toOrder(row, items, opts.locale ?? DEFAULT_LOCALE);
+    const [items, fulfillments] = await Promise.all([
+      this.repo.listItemsForOrder(row.id),
+      this.shippingService.listFulfillmentsByOrderId(row.id),
+    ]);
+    return toOrder(row, items, fulfillments, opts.locale ?? DEFAULT_LOCALE);
   }
 
   async listOrders(
@@ -421,10 +447,19 @@ export class OrderServiceImpl implements OrderService {
     });
 
     const orderIds = rows.map((row) => row.id);
-    const items = await this.repo.listItemsForOrders(orderIds);
+    const [items, fulfillments] = await Promise.all([
+      this.repo.listItemsForOrders(orderIds),
+      this.shippingService.listFulfillmentsForOrders(orderIds),
+    ]);
     const itemsByOrder = groupBy(items, (it) => it.orderId);
+    const fulfillmentsByOrder = groupBy(fulfillments, (f) => f.orderId);
     const data = rows.map((row) =>
-      toOrder(row, itemsByOrder.get(row.id) ?? [], locale),
+      toOrder(
+        row,
+        itemsByOrder.get(row.id) ?? [],
+        fulfillmentsByOrder.get(row.id) ?? [],
+        locale,
+      ),
     );
     return { data, total, page, pageSize };
   }
@@ -444,10 +479,19 @@ export class OrderServiceImpl implements OrderService {
       pageSize,
     );
     const orderIds = rows.map((row) => row.id);
-    const items = await this.repo.listItemsForOrders(orderIds);
+    const [items, fulfillments] = await Promise.all([
+      this.repo.listItemsForOrders(orderIds),
+      this.shippingService.listFulfillmentsForOrders(orderIds),
+    ]);
     const itemsByOrder = groupBy(items, (it) => it.orderId);
+    const fulfillmentsByOrder = groupBy(fulfillments, (f) => f.orderId);
     const data = rows.map((row) =>
-      toOrder(row, itemsByOrder.get(row.id) ?? [], locale),
+      toOrder(
+        row,
+        itemsByOrder.get(row.id) ?? [],
+        fulfillmentsByOrder.get(row.id) ?? [],
+        locale,
+      ),
     );
     return { data, total, page, pageSize };
   }
@@ -465,78 +509,132 @@ export class OrderServiceImpl implements OrderService {
       });
     }
 
-    const { result, pending } = await this.repo.withTransaction(async (tx) => {
-      const fresh = await tx.getOrderByIdForUpdate(orderId);
-      if (!fresh) {
-        throw new NotFoundError("Order not found.", { orderId });
-      }
-      const fromStatus = fresh.status as OrderStatus;
-      if (isTerminal(fromStatus)) {
-        throw new ConflictError("Order is in a terminal status.", {
-          code: "invalid_transition",
-          from: fromStatus,
-          to: toStatus,
-        });
-      }
-      if (!canTransition(fromStatus, toStatus)) {
-        throw new ConflictError("Invalid order status transition.", {
-          code: "invalid_transition",
-          from: fromStatus,
-          to: toStatus,
-        });
-      }
+    const { result, pending } = await this.repo.withTransaction(
+      async ({ orders: tx, shipping: shippingTxRepo }) => {
+        const fresh = await tx.getOrderByIdForUpdate(orderId);
+        if (!fresh) {
+          throw new NotFoundError("Order not found.", { orderId });
+        }
+        const fromStatus = fresh.status as OrderStatus;
+        if (isTerminal(fromStatus)) {
+          throw new ConflictError("Order is in a terminal status.", {
+            code: "invalid_transition",
+            from: fromStatus,
+            to: toStatus,
+          });
+        }
+        if (!canTransition(fromStatus, toStatus)) {
+          throw new ConflictError("Invalid order status transition.", {
+            code: "invalid_transition",
+            from: fromStatus,
+            to: toStatus,
+          });
+        }
 
-      const now = new Date();
-      const tsColumn = timestampColumnFor(toStatus);
-      const patch: OrderUpdatePatch = { status: toStatus };
-      if (tsColumn) {
-        patch[tsColumn] = now;
-      }
+        const now = new Date();
+        const tsColumn = timestampColumnFor(toStatus);
+        const patch: OrderUpdatePatch = { status: toStatus };
+        if (tsColumn) {
+          patch[tsColumn] = now;
+        }
 
-      const updated = await tx.updateOrder(orderId, patch);
-      if (!updated) {
-        // The row vanished between the FOR UPDATE select and the
-        // update — should not happen under READ COMMITTED + row lock,
-        // but surface as a clean 404 if it does.
-        throw new NotFoundError("Order not found.", { orderId });
-      }
+        const updated = await tx.updateOrder(orderId, patch);
+        if (!updated) {
+          // The row vanished between the FOR UPDATE select and the
+          // update — should not happen under READ COMMITTED + row lock,
+          // but surface as a clean 404 if it does.
+          throw new NotFoundError("Order not found.", { orderId });
+        }
 
-      await tx.insertStatusHistory({
-        id: id("osh"),
-        orderId,
-        fromStatus,
-        toStatus,
-        actorKind: opts.actorKind,
-        actorId: opts.actorId ?? null,
-        details: opts.details ?? {},
-      });
-
-      const items = await tx.listItemsForOrder(orderId);
-
-      const typed = statusEventFor(
-        updated.id,
-        updated.orderNumber,
-        toStatus,
-        opts.actorKind,
-      );
-      const pendingEvents: PendingEvent[] = [];
-      if (typed) pendingEvents.push(typed);
-      pendingEvents.push({
-        name: "order.status_changed",
-        payload: {
-          orderId: updated.id,
-          orderNumber: updated.orderNumber,
+        await tx.insertStatusHistory({
+          id: id("osh"),
+          orderId,
           fromStatus,
           toStatus,
           actorKind: opts.actorKind,
-        },
-      });
+          actorId: opts.actorId ?? null,
+          details: opts.details ?? {},
+        });
 
-      return {
-        result: toOrder(updated, items, locale),
-        pending: pendingEvents,
-      };
-    });
+        // Auto-create the fulfillment on `pending_payment → paid`. This
+        // happens INSIDE the same transaction as the order update — a
+        // failure here rolls the order back, so we never leave a `paid`
+        // order without a fulfillment row.
+        //
+        // Skip silently when the order has no shipping method (digital
+        // goods, future). The `shipping_method_code` column is currently
+        // notNull at the schema level, so this is a forward-compat
+        // guard rather than a v0.1 reachable branch.
+        const pendingEvents: PendingEvent[] = [];
+        if (toStatus === "paid" && updated.shippingMethodCode) {
+          const fulfillment =
+            await this.shippingService.createFulfillmentForOrder(
+              updated.id,
+              { methodCode: updated.shippingMethodCode },
+              shippingTxRepo,
+            );
+          // The shipping service skips its own emit when given a `repo`
+          // (it cannot fire mid-transaction). We re-issue from the
+          // post-commit pending list below so listeners see the row.
+          pendingEvents.push({
+            name: "order.status_changed",
+            payload: {
+              orderId: updated.id,
+              orderNumber: updated.orderNumber,
+              fromStatus,
+              toStatus,
+              actorKind: opts.actorKind,
+            },
+          });
+          // Stash the fulfillment id on the typed event for downstream
+          // listeners (notifications) that want to thread it.
+          const typed = statusEventFor(
+            updated.id,
+            updated.orderNumber,
+            toStatus,
+            opts.actorKind,
+          );
+          if (typed) pendingEvents.unshift(typed);
+
+          const items = await tx.listItemsForOrder(orderId);
+          return {
+            result: toOrder(updated, items, [fulfillment], locale),
+            pending: pendingEvents,
+          };
+        }
+
+        const items = await tx.listItemsForOrder(orderId);
+        // For non-paid transitions, fulfillments are read alongside the
+        // items so the wire shape stays consistent. The list is empty
+        // for orders that have not reached `paid` yet.
+        const fulfillments = await this.shippingService.listFulfillmentsByOrderId(
+          orderId,
+        );
+
+        const typed = statusEventFor(
+          updated.id,
+          updated.orderNumber,
+          toStatus,
+          opts.actorKind,
+        );
+        if (typed) pendingEvents.push(typed);
+        pendingEvents.push({
+          name: "order.status_changed",
+          payload: {
+            orderId: updated.id,
+            orderNumber: updated.orderNumber,
+            fromStatus,
+            toStatus,
+            actorKind: opts.actorKind,
+          },
+        });
+
+        return {
+          result: toOrder(updated, items, fulfillments, locale),
+          pending: pendingEvents,
+        };
+      },
+    );
     await this.emitPending(pending);
     return result;
   }
@@ -550,76 +648,87 @@ export class OrderServiceImpl implements OrderService {
       ? opts.reason.trim()
       : null;
 
-    const { result, pending } = await this.repo.withTransaction(async (tx) => {
-      const fresh = await tx.getOrderByIdForUpdate(orderId);
-      if (!fresh) {
-        throw new NotFoundError("Order not found.", { orderId });
-      }
-      const fromStatus = fresh.status as OrderStatus;
-      if (isTerminal(fromStatus)) {
-        throw new ConflictError("Order is in a terminal status.", {
-          code: "invalid_transition",
-          from: fromStatus,
-          to: "cancelled",
+    const { result, pending } = await this.repo.withTransaction(
+      async ({ orders: tx }) => {
+        const fresh = await tx.getOrderByIdForUpdate(orderId);
+        if (!fresh) {
+          throw new NotFoundError("Order not found.", { orderId });
+        }
+        const fromStatus = fresh.status as OrderStatus;
+        if (isTerminal(fromStatus)) {
+          throw new ConflictError("Order is in a terminal status.", {
+            code: "invalid_transition",
+            from: fromStatus,
+            to: "cancelled",
+          });
+        }
+        if (!canTransition(fromStatus, "cancelled")) {
+          throw new ConflictError(
+            "Order cannot be cancelled from this status.",
+            {
+              code: "invalid_transition",
+              from: fromStatus,
+              to: "cancelled",
+            },
+          );
+        }
+
+        const now = new Date();
+        const updated = await tx.updateOrder(orderId, {
+          status: "cancelled",
+          cancelledAt: now,
+          cancellationReason: reason,
         });
-      }
-      if (!canTransition(fromStatus, "cancelled")) {
-        throw new ConflictError("Order cannot be cancelled from this status.", {
-          code: "invalid_transition",
-          from: fromStatus,
-          to: "cancelled",
+        if (!updated) {
+          throw new NotFoundError("Order not found.", { orderId });
+        }
+
+        await tx.insertStatusHistory({
+          id: id("osh"),
+          orderId,
+          fromStatus,
+          toStatus: "cancelled",
+          actorKind: opts.actorKind,
+          actorId: opts.actorId ?? null,
+          details: { ...(opts.details ?? {}), reason },
         });
-      }
 
-      const now = new Date();
-      const updated = await tx.updateOrder(orderId, {
-        status: "cancelled",
-        cancelledAt: now,
-        cancellationReason: reason,
-      });
-      if (!updated) {
-        throw new NotFoundError("Order not found.", { orderId });
-      }
+        const items = await tx.listItemsForOrder(orderId);
+        // Cancelling an order does NOT auto-cancel its fulfillment(s) —
+        // a paid-but-not-shipped cancel may still want the operator to
+        // explicitly mark the fulfillment cancelled (and capture a
+        // separate reason for the courier-side audit trail).
+        const fulfillments =
+          await this.shippingService.listFulfillmentsByOrderId(orderId);
 
-      await tx.insertStatusHistory({
-        id: id("osh"),
-        orderId,
-        fromStatus,
-        toStatus: "cancelled",
-        actorKind: opts.actorKind,
-        actorId: opts.actorId ?? null,
-        details: { ...(opts.details ?? {}), reason },
-      });
-
-      const items = await tx.listItemsForOrder(orderId);
-
-      const pendingEvents: PendingEvent[] = [
-        {
-          name: "order.cancelled",
-          payload: {
-            orderId: updated.id,
-            orderNumber: updated.orderNumber,
-            reason,
-            actorKind: opts.actorKind,
+        const pendingEvents: PendingEvent[] = [
+          {
+            name: "order.cancelled",
+            payload: {
+              orderId: updated.id,
+              orderNumber: updated.orderNumber,
+              reason,
+              actorKind: opts.actorKind,
+            },
           },
-        },
-        {
-          name: "order.status_changed",
-          payload: {
-            orderId: updated.id,
-            orderNumber: updated.orderNumber,
-            fromStatus,
-            toStatus: "cancelled",
-            actorKind: opts.actorKind,
+          {
+            name: "order.status_changed",
+            payload: {
+              orderId: updated.id,
+              orderNumber: updated.orderNumber,
+              fromStatus,
+              toStatus: "cancelled",
+              actorKind: opts.actorKind,
+            },
           },
-        },
-      ];
+        ];
 
-      return {
-        result: toOrder(updated, items, locale),
-        pending: pendingEvents,
-      };
-    });
+        return {
+          result: toOrder(updated, items, fulfillments, locale),
+          pending: pendingEvents,
+        };
+      },
+    );
     await this.emitPending(pending);
     return result;
   }

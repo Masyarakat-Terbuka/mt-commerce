@@ -16,26 +16,66 @@
  *     `buildShippingStorefrontRoutes`) plus pre-built singletons.
  */
 import { buildShippingAdminRoutes } from "./routes/admin.js";
+import { buildShippingAdminFulfillmentRoutes } from "./routes/admin-fulfillments.js";
 import { buildShippingStorefrontRoutes } from "./routes/storefront.js";
 import { shippingService } from "./service.js";
 
 export type {
+  CancelFulfillmentInput,
   CreateShippingMethodInput,
   Fulfillment,
+  FulfillmentActorKind,
   FulfillmentStatus,
+  ListFulfillmentsQuery,
   ListShippingMethodsQuery,
+  MarkFulfillmentDeliveredInput,
+  MarkFulfillmentShippedInput,
   QuoteShippingInput,
+  SetFulfillmentTrackingInput,
   ShippingMethod,
   ShippingProviderKind,
   UpdateShippingMethodInput,
 } from "./types.js";
 
-export type { ShippingService } from "./service.js";
+export type {
+  CancelFulfillmentOptions,
+  CreateFulfillmentForOrderInput,
+  FulfillmentTransitionOptions,
+  MarkFulfillmentShippedOptions,
+  SetFulfillmentTrackingOptions,
+  ShippingService,
+} from "./service.js";
 export { ShippingServiceImpl } from "./service.js";
 export type { ShippingProvider } from "./providers/types.js";
 
+export {
+  ALL_FULFILLMENT_STATUSES,
+  canTransition as canTransitionFulfillment,
+  isTerminal as isTerminalFulfillment,
+  transitionsFor as fulfillmentTransitionsFor,
+} from "./state.js";
+
+export { events as fulfillmentEvents } from "./events.js";
+export type {
+  EventName as FulfillmentEventName,
+  EventPayload as FulfillmentEventPayload,
+  FulfillmentEventMap,
+} from "./events.js";
+
 export { shippingService };
-export { buildShippingAdminRoutes, buildShippingStorefrontRoutes };
+export {
+  buildShippingAdminRoutes,
+  buildShippingAdminFulfillmentRoutes,
+  buildShippingStorefrontRoutes,
+};
 
 export const adminRoutes = buildShippingAdminRoutes(shippingService);
 export const storefrontRoutes = buildShippingStorefrontRoutes(shippingService);
+/**
+ * Fulfillment admin routes are built at the route registrar
+ * (`apps/api/src/routes/index.ts`) rather than here so the shipping
+ * module does not import the orders module — that would create a
+ * circular dependency, since the orders service injects the shipping
+ * service for the create-on-paid hook. The registrar passes both
+ * singletons to the builder when mounting under `/admin/v1`.
+ */

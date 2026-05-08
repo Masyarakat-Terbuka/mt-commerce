@@ -110,6 +110,7 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     billingAddressSnapshot: overrides.billingAddressSnapshot ?? null,
     paymentMethod: overrides.paymentMethod ?? "manual_bank_transfer",
     items: overrides.items ?? [],
+    fulfillments: overrides.fulfillments ?? [],
     paidAt: overrides.paidAt ?? null,
     fulfilledAt: overrides.fulfilledAt ?? null,
     cancelledAt: overrides.cancelledAt ?? null,

@@ -17,7 +17,12 @@
  */
 import { z } from "zod";
 import type { Money } from "@mt-commerce/core/money";
+import type { Fulfillment } from "../shipping/types.js";
 import { ALL_ORDER_STATUSES, type OrderStatus } from "./state.js";
+
+// Re-export so callers wiring against the orders module can pick up the
+// embedded `fulfillments` shape from one place.
+export type { Fulfillment };
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -107,6 +112,13 @@ export interface Order {
   billingAddressSnapshot: OrderAddressSnapshot | null;
   paymentMethod: string;
   items: OrderItem[];
+  /**
+   * Fulfillments attached to this order. v0.1 expects exactly one (created
+   * automatically on the `pending_payment → paid` transition); the array
+   * shape leaves room for split shipments later without a wire-shape
+   * breaking change. Empty when the order has not yet reached `paid`.
+   */
+  fulfillments: Fulfillment[];
   paidAt: Date | null;
   fulfilledAt: Date | null;
   cancelledAt: Date | null;

@@ -532,7 +532,28 @@ function makeFakeShippingService(opts: FakeShippingOptions = {}): ShippingServic
     async deleteMethod() {
       return fail();
     },
-    async createFulfillment() {
+    async createFulfillmentForOrder() {
+      return fail();
+    },
+    async getFulfillmentById() {
+      return fail();
+    },
+    async listFulfillmentsByOrderId() {
+      return [];
+    },
+    async listFulfillmentsForOrders() {
+      return [];
+    },
+    async setTracking() {
+      return fail();
+    },
+    async markShipped() {
+      return fail();
+    },
+    async markDelivered() {
+      return fail();
+    },
+    async cancel() {
       return fail();
     },
   };

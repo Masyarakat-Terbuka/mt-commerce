@@ -18,7 +18,23 @@ import { KNOWN_CURRENCIES, type Money } from "@mt-commerce/core/money";
 // ---------------------------------------------------------------------------
 
 export type ShippingProviderKind = "manual" | "plugin";
-export type FulfillmentStatus = "pending" | "fulfilled" | "cancelled";
+/**
+ * Fulfillment v0.1 lifecycle:
+ *
+ *   pending ──► shipped ──► delivered
+ *           ↘           ↘
+ *             cancelled    cancelled
+ *
+ * `delivered` and `cancelled` are terminal. The state machine lives in
+ * `state.ts` so the service cannot diverge from the documented diagram.
+ */
+export type FulfillmentStatus =
+  | "pending"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
+
+export type FulfillmentActorKind = "system" | "staff" | "customer";
 
 export interface ShippingMethod {
   id: string;
@@ -36,10 +52,14 @@ export interface ShippingMethod {
 
 export interface Fulfillment {
   id: string;
-  orderIntentId: string;
+  orderId: string;
   shippingMethodId: string;
   status: FulfillmentStatus;
   trackingCode: string | null;
+  /** Set when status transitions to `shipped`. */
+  trackedAt: Date | null;
+  /** Set when status transitions to `delivered`. */
+  deliveredAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -160,3 +180,68 @@ export const quoteShippingSchema = z.object({
   currency: currencySchema,
 });
 export type QuoteShippingInput = z.infer<typeof quoteShippingSchema>;
+
+// ---------------------------------------------------------------------------
+// Fulfillment input schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Tracking code: free-text courier reference. Length-bounded so a stray
+ * paste of an entire email cannot land in the column. Trimmed at the
+ * service boundary; a whitespace-only value folds to null.
+ */
+const trackingCodeSchema = z
+  .string()
+  .min(1, { message: "trackingCode must not be empty" })
+  .max(120, { message: "trackingCode must be <= 120 characters" });
+
+export const setFulfillmentTrackingSchema = z.object({
+  /** Pass null to clear an existing code. */
+  trackingCode: trackingCodeSchema.nullable(),
+});
+export type SetFulfillmentTrackingInput = z.infer<
+  typeof setFulfillmentTrackingSchema
+>;
+
+/**
+ * `mark-shipped` accepts an optional tracking code so the operator can
+ * supply it in the same request rather than splitting the action into
+ * two calls — this matches how courier hand-off actually works.
+ */
+export const markFulfillmentShippedSchema = z.object({
+  trackingCode: trackingCodeSchema.optional(),
+});
+export type MarkFulfillmentShippedInput = z.infer<
+  typeof markFulfillmentShippedSchema
+>;
+
+/** `mark-delivered` carries no body in v0.1; a sibling schema is kept for shape parity. */
+export const markFulfillmentDeliveredSchema = z.object({}).strict();
+export type MarkFulfillmentDeliveredInput = z.infer<
+  typeof markFulfillmentDeliveredSchema
+>;
+
+export const cancelFulfillmentSchema = z.object({
+  /** Free-text reason; trimmed and folded to null when only whitespace. */
+  reason: z
+    .string()
+    .max(500)
+    .nullable()
+    .optional()
+    .transform((value) => {
+      if (value === undefined || value === null) return null;
+      const trimmed = value.trim();
+      return trimmed.length === 0 ? null : trimmed;
+    }),
+});
+export type CancelFulfillmentInput = z.infer<typeof cancelFulfillmentSchema>;
+
+export const listFulfillmentsQuerySchema = z.object({
+  /**
+   * Currently the only supported filter. The route requires it (one
+   * fulfillment per order in v0.1; "list everything" is not a meaningful
+   * call yet) — Zod treats it as required and the route surfaces 400.
+   */
+  orderId: z.string().min(1).max(100),
+});
+export type ListFulfillmentsQuery = z.infer<typeof listFulfillmentsQuerySchema>;

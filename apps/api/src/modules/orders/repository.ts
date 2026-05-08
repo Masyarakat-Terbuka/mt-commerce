@@ -45,6 +45,10 @@ import {
   type ProductVariantRow,
 } from "../../db/schema/index.js";
 import type * as schema from "../../db/schema/index.js";
+import {
+  createShippingRepository,
+  type ShippingRepository,
+} from "../shipping/repository.js";
 import type { OrderStatus } from "./state.js";
 
 type Schema = typeof schema;
@@ -172,7 +176,22 @@ export interface OrdersRepository {
     kelurahanName: string | null;
   }>;
 
-  withTransaction<T>(fn: (tx: OrdersRepository) => Promise<T>): Promise<T>;
+  /**
+   * Run `fn` inside a single Postgres transaction. The callback receives
+   * a tx-scoped orders repo AND a tx-scoped shipping repo so the
+   * `paid` transition's fulfillment insert lands in the same unit of work
+   * as the order update — partial failure cannot leave an order `paid`
+   * without a fulfillment row, or vice versa. The shipping repo is
+   * provided here rather than reached for at the call site so the
+   * cross-module bounded context (ADR-0005) stays explicit at the
+   * type level.
+   */
+  withTransaction<T>(
+    fn: (deps: {
+      orders: OrdersRepository;
+      shipping: ShippingRepository;
+    }) => Promise<T>,
+  ): Promise<T>;
 }
 
 export function createOrdersRepository(db: Db = defaultDb): OrdersRepository {
@@ -471,11 +490,18 @@ export function createOrdersRepository(db: Db = defaultDb): OrdersRepository {
     },
 
     async withTransaction<T>(
-      fn: (tx: OrdersRepository) => Promise<T>,
+      fn: (deps: {
+        orders: OrdersRepository;
+        shipping: ShippingRepository;
+      }) => Promise<T>,
     ): Promise<T> {
-      return db.transaction(async (tx) =>
-        fn(createOrdersRepository(tx as unknown as Db)),
-      );
+      return db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        return fn({
+          orders: createOrdersRepository(txDb),
+          shipping: createShippingRepository(txDb),
+        });
+      });
     },
   };
 }

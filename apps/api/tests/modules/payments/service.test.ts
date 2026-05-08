@@ -217,6 +217,7 @@ function createFakeOrderService(state: FakeOrderState): {
     billingAddressSnapshot: null,
     paymentMethod: "manual_bank_transfer",
     items: [],
+    fulfillments: [],
     paidAt: null,
     fulfilledAt: null,
     cancelledAt: null,

@@ -23,6 +23,7 @@ import type {
   OrderStatusHistoryRow,
 } from "../../db/schema/index.js";
 import { DEFAULT_LOCALE, resolveTranslations } from "../catalog/i18n.js";
+import type { Fulfillment } from "../shipping/types.js";
 import type {
   Order,
   OrderActorKind,
@@ -86,6 +87,7 @@ export function toOrderItem(
 export function toOrder(
   row: OrderRow,
   items: OrderItemRow[],
+  fulfillments: Fulfillment[] = [],
   locale: string = DEFAULT_LOCALE,
 ): Order {
   return {
@@ -108,6 +110,7 @@ export function toOrder(
       : null,
     paymentMethod: row.paymentMethod,
     items: items.map((it) => toOrderItem(it, locale)),
+    fulfillments,
     paidAt: row.paidAt ?? null,
     fulfilledAt: row.fulfilledAt ?? null,
     cancelledAt: row.cancelledAt ?? null,

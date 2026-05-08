@@ -156,18 +156,41 @@ function createFakeService(opts: { initial?: ShippingMethod[] } = {}): ShippingS
       if (!existing) throw new NotFoundError("Shipping method not found.");
       methods.set(id, makeMethod({ ...existing, deletedAt: NOW, isActive: false }));
     },
-    async createFulfillment(orderIntentId, methodCode) {
-      const m = await this.getByCode(methodCode);
+    async createFulfillmentForOrder(orderId, input) {
+      const m = await this.getByCode(input.methodCode);
       if (!m) throw new NotFoundError("Shipping method not found.");
       return {
         id: "ful_test",
-        orderIntentId,
+        orderId,
         shippingMethodId: m.id,
         status: "pending",
         trackingCode: null,
+        trackedAt: null,
+        deliveredAt: null,
         createdAt: NOW,
         updatedAt: NOW,
       };
+    },
+    async getFulfillmentById() {
+      return null;
+    },
+    async listFulfillmentsByOrderId() {
+      return [];
+    },
+    async listFulfillmentsForOrders() {
+      return [];
+    },
+    async setTracking() {
+      throw new Error("not implemented in this routes test");
+    },
+    async markShipped() {
+      throw new Error("not implemented in this routes test");
+    },
+    async markDelivered() {
+      throw new Error("not implemented in this routes test");
+    },
+    async cancel() {
+      throw new Error("not implemented in this routes test");
     },
   };
 }

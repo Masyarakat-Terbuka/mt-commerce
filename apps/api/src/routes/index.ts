@@ -23,9 +23,18 @@ import { adminRoutes as customerAdminRoutes, storefrontRoutes as customerStorefr
 import { adminRoutes as cartAdminRoutes, storefrontRoutes as cartStorefrontRoutes } from "../modules/cart/index.js";
 import { adminRoutes as checkoutAdminRoutes, storefrontRoutes as checkoutStorefrontRoutes } from "../modules/checkout/index.js";
 import { adminRoutes as taxAdminRoutes, storefrontRoutes as taxStorefrontRoutes } from "../modules/tax/index.js";
-import { adminRoutes as shippingAdminRoutes, storefrontRoutes as shippingStorefrontRoutes } from "../modules/shipping/index.js";
+import {
+  adminRoutes as shippingAdminRoutes,
+  buildShippingAdminFulfillmentRoutes,
+  shippingService,
+  storefrontRoutes as shippingStorefrontRoutes,
+} from "../modules/shipping/index.js";
 import { buildAdminRoutes as buildNotificationAdminRoutesLazy } from "../modules/notification/wire.js";
-import { adminRoutes as ordersAdminRoutes, storefrontRoutes as ordersStorefrontRoutes } from "../modules/orders/index.js";
+import {
+  adminRoutes as ordersAdminRoutes,
+  orderService,
+  storefrontRoutes as ordersStorefrontRoutes,
+} from "../modules/orders/index.js";
 import {
   adminRoutes as paymentsAdminRoutes,
   storefrontRoutes as paymentsStorefrontRoutes,
@@ -59,6 +68,15 @@ export function buildRoutes(): OpenAPIHono<AppBindings> {
   router.route("/admin/v1", taxAdminRoutes);
   router.route("/storefront/v1", taxStorefrontRoutes);
   router.route("/admin/v1", shippingAdminRoutes);
+  // Fulfillment routes are constructed here (not in the shipping module's
+  // index) because they need the orders service injected for the
+  // delivered → order.fulfilled cross-module nudge. Building at the
+  // registrar avoids the orders ↔ shipping circular import that would
+  // otherwise show up at module load.
+  router.route(
+    "/admin/v1",
+    buildShippingAdminFulfillmentRoutes(shippingService, orderService),
+  );
   router.route("/storefront/v1", shippingStorefrontRoutes);
   router.route("/admin/v1", buildNotificationAdminRoutesLazy());
   router.route("/admin/v1", ordersAdminRoutes);
