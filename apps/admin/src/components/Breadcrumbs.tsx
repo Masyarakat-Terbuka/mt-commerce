@@ -23,6 +23,7 @@ import * as React from "react";
 const SEGMENT_LABELS: Record<string, string> = {
   produk: "nav.produk",
   baru: "products.new_button",
+  kategori: "nav.kategori",
   pesanan: "nav.pesanan",
   pelanggan: "nav.pelanggan",
   pengaturan: "nav.pengaturan",
