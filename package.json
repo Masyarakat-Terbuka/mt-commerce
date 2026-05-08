@@ -18,12 +18,10 @@
     "lint:staged": "lint-staged",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "commitlint": "bunx commitlint",
+    "commitlint": "./scripts/check-commit-msg.sh",
     "prepare": "simple-git-hooks"
   },
   "devDependencies": {
-    "@commitlint/cli": "^19.5.0",
-    "@commitlint/config-conventional": "^19.5.0",
     "@mt-commerce/eslint-config": "workspace:*",
     "@mt-commerce/prettier-config": "workspace:*",
     "lint-staged": "^15.2.10",
@@ -34,7 +32,7 @@
   },
   "simple-git-hooks": {
     "pre-commit": "bun run lint:staged",
-    "commit-msg": "bunx commitlint --edit $1"
+    "commit-msg": "./scripts/check-commit-msg.sh $1"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,astro}": [
