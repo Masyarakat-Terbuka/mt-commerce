@@ -158,6 +158,22 @@
         "@mt-commerce/core": "workspace:*",
       },
     },
+    "packages/plugins/shipping-biteship": {
+      "name": "@mt-commerce/plugin-shipping-biteship",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@eslint/js": "^9.39.4",
+        "@mt-commerce/core": "workspace:*",
+        "@types/bun": "^1.2.0",
+        "eslint": "^9.39.4",
+        "typescript": "~5.9.3",
+        "typescript-eslint": "^8.57.1",
+        "vitest": "^2.1.0",
+      },
+      "peerDependencies": {
+        "@mt-commerce/core": "workspace:*",
+      },
+    },
     "packages/sdk": {
       "name": "@mt-commerce/sdk",
       "version": "0.0.1",
@@ -496,6 +512,8 @@
     "@mt-commerce/plugin-example": ["@mt-commerce/plugin-example@workspace:packages/plugins/example"],
 
     "@mt-commerce/plugin-payment-midtrans": ["@mt-commerce/plugin-payment-midtrans@workspace:packages/plugins/payment-midtrans"],
+
+    "@mt-commerce/plugin-shipping-biteship": ["@mt-commerce/plugin-shipping-biteship@workspace:packages/plugins/shipping-biteship"],
 
     "@mt-commerce/sdk": ["@mt-commerce/sdk@workspace:packages/sdk"],
 
