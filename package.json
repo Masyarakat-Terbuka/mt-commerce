@@ -15,6 +15,37 @@
     "build": "bun --filter '*' build",
     "typecheck": "bun --filter '*' typecheck",
     "lint": "bun --filter '*' lint",
-    "format": "bun --filter '*' format"
-  }
+    "lint:staged": "lint-staged",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "commitlint": "commitlint",
+    "prepare": "simple-git-hooks"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "@mt-commerce/eslint-config": "workspace:*",
+    "@mt-commerce/prettier-config": "workspace:*",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.8.1",
+    "prettier-plugin-astro": "^0.14.1",
+    "prettier-plugin-tailwindcss": "^0.7.2",
+    "simple-git-hooks": "^2.11.1"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "bun run lint:staged",
+    "commit-msg": "bun commitlint --edit $1"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,astro}": [
+      "bunx prettier --write",
+      "bunx eslint --fix --max-warnings=0"
+    ],
+    "*.{json,md,css,yml,yaml}": [
+      "bunx prettier --write"
+    ]
+  },
+  "trustedDependencies": [
+    "simple-git-hooks"
+  ]
 }

@@ -78,6 +78,10 @@ const PAGE_SIZE = 20;
  * absence of the query parameter on the wire, but kept as a sentinel in
  * the UI to make the Select binding straightforward.
  */
+// `as const` array exports defeat react-refresh's constant-export detector,
+// but moving the tuple to a sibling file would scatter route-shape constants
+// across the page module. Disabling here is the smaller cost.
+// eslint-disable-next-line react-refresh/only-export-components
 export const ORDER_LIST_STATUS_OPTIONS = [
   "all",
   "pending_payment",
@@ -95,6 +99,7 @@ export type OrdersListStatus = (typeof ORDER_LIST_STATUS_OPTIONS)[number];
  * `searchKind` before this change, and a missing param therefore maps
  * back to the historical contract.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export const ORDERS_SEARCH_KIND_OPTIONS = ["email", "orderNumber"] as const;
 export type OrdersSearchKind = (typeof ORDERS_SEARCH_KIND_OPTIONS)[number];
 
@@ -233,8 +238,9 @@ export function OrdersPage() {
 
   // If the URL value changes from the outside (back/forward, kind
   // switch), keep the input in sync so the field never disagrees with
-  // the URL.
+  // the URL. Functional updater bails out when the value is unchanged.
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearchInput((current) => {
       const next = activeUrlValue;
       return current === next ? current : next;

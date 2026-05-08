@@ -1,0 +1,19 @@
+node_modules
+dist
+build
+.astro
+.output
+.next
+.vite
+.turbo
+coverage
+drizzle
+bun.lock
+CHANGELOG.md
+*.tsbuildinfo
+
+# Generated
+apps/admin/src/routeTree.gen.ts
+
+# Vendored / bulk data
+apps/api/src/data/regions

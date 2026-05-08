@@ -8,7 +8,6 @@
  */
 import { describe, expect, it } from "vitest";
 import { AuthServiceImpl } from "../../../src/modules/auth/service.js";
-import { verifySecret } from "../../../src/modules/auth/hash.js";
 import type { AuthRepository } from "../../../src/modules/auth/repository.js";
 import type {
   ApiKeyRow,

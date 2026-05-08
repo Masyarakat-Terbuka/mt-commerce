@@ -10,10 +10,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Transporter } from "nodemailer";
-import {
-  SmtpEmailChannel,
-  createEmailChannel,
-} from "../../../../src/modules/notification/channels/smtp.js";
+import { SmtpEmailChannel } from "../../../../src/modules/notification/channels/smtp.js";
 
 vi.mock("nodemailer", () => {
   // Module mock so calls to `nodemailer.createTransport(...)` inside

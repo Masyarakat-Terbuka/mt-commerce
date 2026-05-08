@@ -309,6 +309,11 @@ export function SettingsPage() {
       const next = toFormState(updated);
       setForm(next);
       baselineRef.current = next;
+      // Intentional: writing the ref here keeps the stale-refetch guard in
+      // sync with the row we just saved. The effect at the top of the
+      // component reads the same ref for the same purpose, but the write
+      // happens in a mutation success callback, not during render.
+      // eslint-disable-next-line react-hooks/immutability
       baselineSnapshotTimeRef.current = updated.updatedAt.getTime();
       setErrors({});
       toast.success(t("settings.success"));

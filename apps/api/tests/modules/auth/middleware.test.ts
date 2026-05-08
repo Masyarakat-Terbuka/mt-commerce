@@ -16,7 +16,6 @@ import type { AppBindings } from "../../../src/lib/types.js";
 import type { AuthService } from "../../../src/modules/auth/service.js";
 import type {
   ApiKey,
-  AuthSession,
   AuthUser,
   Role,
   Scope,

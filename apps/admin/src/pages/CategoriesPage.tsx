@@ -187,7 +187,10 @@ export function CategoriesPage() {
     queryFn: () => api.admin.categories.list(),
   });
 
-  const categories = data ?? [];
+  // Wrap in useMemo so the empty-array fallback is stable across renders;
+  // the downstream useMemos depend on this and would otherwise re-run on
+  // every render whenever `data` is undefined.
+  const categories = React.useMemo(() => data ?? [], [data]);
 
   // Filter on debounced lowercase search. We match either the localized
   // name or the slug — both are short fields the operator might recall.

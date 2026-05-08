@@ -23,6 +23,10 @@ import { describe, expect, it, vi } from "vitest";
 // in `where()`. We re-export everything else (`and`, `sql`, etc.) from
 // the actual module so unrelated imports keep working.
 vi.mock("drizzle-orm", async (importOriginal) => {
+  // `importOriginal<typeof import(...)>()` is vitest's idiomatic way to
+  // type the unmocked module — switching to a top-level type import would
+  // pull the real module's types eagerly and defeat the lazy resolution.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   const actual = await importOriginal<typeof import("drizzle-orm")>();
   return {
     ...actual,
@@ -99,6 +103,11 @@ class FakeStore {
   }
 
   insert(table: unknown) {
+    // `store` aliases `this` so the inner object literal — which acts as
+    // Drizzle's chained query builder — can reach the FakeDb instance from
+    // its method bodies. `this` inside those methods refers to the
+    // builder object, not the class.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const store = this;
     let pendingRows: AnyRow[] = [];
     let conflict: ConflictRule | undefined;
@@ -165,6 +174,8 @@ class FakeStore {
   }
 
   select(_columns?: Record<string, unknown>) {
+    // See comment on `insert` above — same reason.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const store = this;
     let currentTable: unknown;
     let predicate: EqCondition | undefined;

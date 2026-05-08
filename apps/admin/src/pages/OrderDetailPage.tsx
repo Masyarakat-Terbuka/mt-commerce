@@ -868,6 +868,7 @@ function FulfillmentSection({
   // followed by a refetch). React 19's `useEffect` is fine here; the
   // dependency is the canonical server value.
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTrackingDraft(fulfillment?.trackingCode ?? "");
   }, [fulfillment?.trackingCode]);
 
@@ -890,6 +891,7 @@ function FulfillmentSection({
   // input.
   React.useEffect(() => {
     if (shippedOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShippedTracking(fulfillment?.trackingCode ?? "");
       setShippedError(null);
     }
