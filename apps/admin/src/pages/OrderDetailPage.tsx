@@ -79,6 +79,8 @@ import {
 import {
   api,
   ApiError,
+  type Fulfillment,
+  type FulfillmentStatus,
   type OrderActorKind,
   type OrderAddressSnapshot,
   type OrderStatus,
@@ -125,6 +127,43 @@ const TRANSITIONS: Readonly<Record<OrderStatus, ReadonlyArray<OrderStatus>>> = {
 const CANCELLABLE_FROM: ReadonlySet<OrderStatus> = new Set([
   "pending_payment",
   "paid",
+]);
+
+const FULFILLMENT_STATUS_LABEL_KEYS: Record<FulfillmentStatus, string> = {
+  pending: "orders.detail.fulfillment.status.pending",
+  shipped: "orders.detail.fulfillment.status.shipped",
+  delivered: "orders.detail.fulfillment.status.delivered",
+  cancelled: "orders.detail.fulfillment.status.cancelled",
+};
+
+const FULFILLMENT_STATUS_BADGE_VARIANT: Record<
+  FulfillmentStatus,
+  "default" | "secondary" | "outline" | "destructive"
+> = {
+  pending: "secondary",
+  shipped: "default",
+  delivered: "default",
+  cancelled: "destructive",
+};
+
+/**
+ * Mirrors `apps/api/src/modules/shipping/state.ts`. Kept here so the UI
+ * never offers a transition the API would reject; the server is still
+ * authoritative.
+ */
+const FULFILLMENT_TRANSITIONS: Readonly<
+  Record<FulfillmentStatus, ReadonlyArray<FulfillmentStatus>>
+> = {
+  pending: ["shipped"],
+  shipped: ["delivered"],
+  delivered: [],
+  cancelled: [],
+};
+
+/** States from which `→ cancelled` is allowed by the fulfillment state machine. */
+const FULFILLMENT_CANCELLABLE_FROM: ReadonlySet<FulfillmentStatus> = new Set([
+  "pending",
+  "shipped",
 ]);
 
 const ACTOR_LABEL_KEYS: Record<OrderActorKind, string> = {
@@ -392,6 +431,14 @@ export function OrderDetailPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* Fulfillment --------------------------------------------------- */}
+      <FulfillmentSection
+        order={order}
+        onChanged={refetchAll}
+        t={t}
+        locale={locale}
+      />
 
       {/* Customer + addresses ------------------------------------------ */}
       <div className="grid gap-4 md:grid-cols-2">
@@ -779,6 +826,519 @@ function TotalsRow({
       <span>{label}</span>
       <span className="tabular-nums">{value}</span>
     </div>
+  );
+}
+
+/**
+ * Fulfillment status block.
+ *
+ * Renders the embedded `order.fulfillments[0]` (v0.1 emits exactly one
+ * per order). Provides:
+ *   - status badge + lifecycle timestamps
+ *   - inline tracking-code editor (PATCH /tracking)
+ *   - mark-shipped (with optional inline tracking code in the dialog)
+ *   - mark-delivered
+ *   - cancel-fulfillment with optional reason
+ *
+ * Each mutation is gated by an AlertDialog. The Empty state renders when
+ * the order has not yet reached `paid` (no fulfillment row exists).
+ */
+function FulfillmentSection({
+  order,
+  onChanged,
+  t,
+  locale,
+}: {
+  order: { id: string; fulfillments: Fulfillment[] };
+  onChanged: () => Promise<void> | void;
+  t: (key: string) => string;
+  locale: "id" | "en";
+}) {
+  // v0.1 expects at most one fulfillment per order. If/when split shipments
+  // arrive, this block becomes a `.map(fulfillment => ...)` — the wire shape
+  // is already an array.
+  const fulfillment = order.fulfillments[0] ?? null;
+
+  // Tracking code editor — local form state separate from the server
+  // value so a typed-but-not-saved value isn't lost on refetch.
+  const [trackingDraft, setTrackingDraft] = React.useState<string>(
+    fulfillment?.trackingCode ?? "",
+  );
+  // Re-sync when the server value changes (e.g. after a successful save
+  // followed by a refetch). React 19's `useEffect` is fine here; the
+  // dependency is the canonical server value.
+  React.useEffect(() => {
+    setTrackingDraft(fulfillment?.trackingCode ?? "");
+  }, [fulfillment?.trackingCode]);
+
+  const [shippedOpen, setShippedOpen] = React.useState(false);
+  const [shippedTracking, setShippedTracking] = React.useState("");
+  const [shippedError, setShippedError] = React.useState<string | null>(null);
+  const [deliveredOpen, setDeliveredOpen] = React.useState(false);
+  const [deliveredError, setDeliveredError] = React.useState<string | null>(
+    null,
+  );
+  const [cancelOpen, setCancelOpen] = React.useState(false);
+  const [cancelReason, setCancelReason] = React.useState("");
+  const [cancelError, setCancelError] = React.useState<string | null>(null);
+  const [trackingError, setTrackingError] = React.useState<string | null>(
+    null,
+  );
+
+  // Reset the dialog form values whenever the dialog opens for a fresh
+  // interaction. Keeps a stale value from a previous session out of the
+  // input.
+  React.useEffect(() => {
+    if (shippedOpen) {
+      setShippedTracking(fulfillment?.trackingCode ?? "");
+      setShippedError(null);
+    }
+  }, [shippedOpen, fulfillment?.trackingCode]);
+
+  const trackingMutation = useMutation({
+    mutationFn: async (code: string | null) => {
+      if (!fulfillment) throw new Error("missing_fulfillment");
+      return api.admin.fulfillments.setTracking(fulfillment.id, {
+        trackingCode: code,
+      });
+    },
+    onSuccess: async () => {
+      await onChanged();
+      toast.success(t("orders.detail.fulfillment.success.tracking"));
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.message) {
+        setTrackingError(err.message);
+        return;
+      }
+      setTrackingError(t("orders.detail.fulfillment.error.tracking"));
+    },
+  });
+
+  const shippedMutation = useMutation({
+    mutationFn: async (code: string | null) => {
+      if (!fulfillment) throw new Error("missing_fulfillment");
+      return api.admin.fulfillments.markShipped(
+        fulfillment.id,
+        // Forward only when the operator typed something — empty/whitespace
+        // means "use the existing code, don't blank it out".
+        code && code.trim().length > 0
+          ? { trackingCode: code.trim() }
+          : undefined,
+      );
+    },
+    onSuccess: async () => {
+      await onChanged();
+      toast.success(t("orders.detail.fulfillment.success.shipped"));
+      setShippedOpen(false);
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.message) {
+        setShippedError(err.message);
+        return;
+      }
+      setShippedError(t("orders.detail.fulfillment.error.transition"));
+    },
+  });
+
+  const deliveredMutation = useMutation({
+    mutationFn: async () => {
+      if (!fulfillment) throw new Error("missing_fulfillment");
+      return api.admin.fulfillments.markDelivered(fulfillment.id);
+    },
+    onSuccess: async () => {
+      await onChanged();
+      toast.success(t("orders.detail.fulfillment.success.delivered"));
+      setDeliveredOpen(false);
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.message) {
+        setDeliveredError(err.message);
+        return;
+      }
+      setDeliveredError(t("orders.detail.fulfillment.error.transition"));
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
+      if (!fulfillment) throw new Error("missing_fulfillment");
+      const trimmed = cancelReason.trim();
+      return api.admin.fulfillments.cancel(fulfillment.id, {
+        reason: trimmed.length > 0 ? trimmed : null,
+      });
+    },
+    onSuccess: async () => {
+      await onChanged();
+      toast.success(t("orders.detail.fulfillment.success.cancelled"));
+      setCancelOpen(false);
+      setCancelReason("");
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.message) {
+        setCancelError(err.message);
+        return;
+      }
+      setCancelError(t("orders.detail.fulfillment.error.transition"));
+    },
+  });
+
+  if (!fulfillment) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            {t("orders.detail.fulfillment")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            {t("orders.detail.fulfillment.empty")}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const allowedTransitions = FULFILLMENT_TRANSITIONS[fulfillment.status];
+  const canCancel = FULFILLMENT_CANCELLABLE_FROM.has(fulfillment.status);
+  const canEditTracking = fulfillment.status !== "cancelled";
+  const dtFormat = intlLocale(locale);
+  const isProcessing =
+    trackingMutation.isPending ||
+    shippedMutation.isPending ||
+    deliveredMutation.isPending ||
+    cancelMutation.isPending;
+
+  const trackingChanged =
+    trackingDraft.trim() !== (fulfillment.trackingCode ?? "");
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">
+          {t("orders.detail.fulfillment")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Badge variant={FULFILLMENT_STATUS_BADGE_VARIANT[fulfillment.status]}>
+            {t(FULFILLMENT_STATUS_LABEL_KEYS[fulfillment.status])}
+          </Badge>
+          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+            {fulfillment.trackedAt ? (
+              <span>
+                {t("orders.detail.fulfillment.shipped_at")}:{" "}
+                {shortDateTime(fulfillment.trackedAt, dtFormat)}
+              </span>
+            ) : null}
+            {fulfillment.deliveredAt ? (
+              <span>
+                {t("orders.detail.fulfillment.delivered_at")}:{" "}
+                {shortDateTime(fulfillment.deliveredAt, dtFormat)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Tracking code editor */}
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor="fulfillment-tracking"
+            className="text-sm text-muted-foreground"
+          >
+            {t("orders.detail.fulfillment.tracking_code")}
+          </label>
+          <div className="flex gap-2">
+            <Input
+              id="fulfillment-tracking"
+              value={trackingDraft}
+              onChange={(e) => {
+                setTrackingError(null);
+                setTrackingDraft(e.target.value);
+              }}
+              placeholder={t(
+                "orders.detail.fulfillment.tracking_code_placeholder",
+              )}
+              maxLength={120}
+              disabled={isProcessing || !canEditTracking}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!trackingChanged || isProcessing || !canEditTracking}
+              onClick={() => {
+                setTrackingError(null);
+                const trimmed = trackingDraft.trim();
+                trackingMutation.mutate(trimmed.length > 0 ? trimmed : null);
+              }}
+            >
+              {t("orders.detail.fulfillment.tracking_code_save")}
+            </Button>
+            {fulfillment.trackingCode ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isProcessing || !canEditTracking}
+                onClick={() => {
+                  setTrackingError(null);
+                  setTrackingDraft("");
+                  trackingMutation.mutate(null);
+                }}
+              >
+                {t("orders.detail.fulfillment.tracking_code_clear")}
+              </Button>
+            ) : null}
+          </div>
+          {trackingError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{trackingError}</AlertDescription>
+            </Alert>
+          ) : null}
+        </div>
+
+        {/* Action buttons */}
+        {allowedTransitions.length > 0 || canCancel ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {allowedTransitions.includes("shipped") ? (
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                disabled={isProcessing}
+                onClick={() => {
+                  setShippedError(null);
+                  setShippedOpen(true);
+                }}
+              >
+                {t("orders.detail.fulfillment.mark_shipped")}
+              </Button>
+            ) : null}
+            {allowedTransitions.includes("delivered") ? (
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                disabled={isProcessing}
+                onClick={() => {
+                  setDeliveredError(null);
+                  setDeliveredOpen(true);
+                }}
+              >
+                {t("orders.detail.fulfillment.mark_delivered")}
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isProcessing}
+                onClick={() => {
+                  setCancelError(null);
+                  setCancelOpen(true);
+                }}
+              >
+                <HugeiconsIcon icon={Cancel01Icon} data-icon />
+                <span>{t("orders.detail.fulfillment.cancel")}</span>
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </CardContent>
+
+      {/* Confirm-shipped dialog */}
+      <AlertDialog
+        open={shippedOpen}
+        onOpenChange={(open) => {
+          if (!open) setShippedOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("orders.detail.fulfillment.confirm_shipped.title")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("orders.detail.fulfillment.confirm_shipped.body")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="ship-tracking"
+              className="text-sm text-muted-foreground"
+            >
+              {t("orders.detail.fulfillment.tracking_code")}
+            </label>
+            <Input
+              id="ship-tracking"
+              value={shippedTracking}
+              onChange={(e) => setShippedTracking(e.target.value)}
+              placeholder={t(
+                "orders.detail.fulfillment.tracking_code_placeholder",
+              )}
+              maxLength={120}
+              disabled={shippedMutation.isPending}
+            />
+          </div>
+          {shippedError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{shippedError}</AlertDescription>
+            </Alert>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={shippedMutation.isPending}>
+              {t("orders.detail.fulfillment.confirm_shipped.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                setShippedError(null);
+                shippedMutation.mutate(shippedTracking);
+              }}
+              disabled={shippedMutation.isPending}
+            >
+              {shippedMutation.isPending ? (
+                <>
+                  <HugeiconsIcon
+                    icon={Loading03Icon}
+                    data-icon
+                    className="animate-spin"
+                  />
+                  <span>{t("orders.detail.action_in_progress")}</span>
+                </>
+              ) : (
+                t("orders.detail.fulfillment.confirm_shipped.confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm-delivered dialog */}
+      <AlertDialog
+        open={deliveredOpen}
+        onOpenChange={(open) => {
+          if (!open) setDeliveredOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("orders.detail.fulfillment.confirm_delivered.title")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("orders.detail.fulfillment.confirm_delivered.body")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deliveredError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{deliveredError}</AlertDescription>
+            </Alert>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deliveredMutation.isPending}>
+              {t("orders.detail.fulfillment.confirm_delivered.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                setDeliveredError(null);
+                deliveredMutation.mutate();
+              }}
+              disabled={deliveredMutation.isPending}
+            >
+              {deliveredMutation.isPending ? (
+                <>
+                  <HugeiconsIcon
+                    icon={Loading03Icon}
+                    data-icon
+                    className="animate-spin"
+                  />
+                  <span>{t("orders.detail.action_in_progress")}</span>
+                </>
+              ) : (
+                t("orders.detail.fulfillment.confirm_delivered.confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm-cancel dialog */}
+      <AlertDialog
+        open={cancelOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancelOpen(false);
+            setCancelError(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("orders.detail.fulfillment.confirm_cancel.title")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("orders.detail.fulfillment.confirm_cancel.body")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="fulfillment-cancel-reason"
+              className="text-sm text-muted-foreground"
+            >
+              {t("orders.detail.fulfillment.cancel_reason_label")}
+            </label>
+            <Input
+              id="fulfillment-cancel-reason"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder={t(
+                "orders.detail.fulfillment.cancel_reason_placeholder",
+              )}
+              maxLength={500}
+              disabled={cancelMutation.isPending}
+            />
+          </div>
+          {cancelError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{cancelError}</AlertDescription>
+            </Alert>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelMutation.isPending}>
+              {t("orders.detail.fulfillment.confirm_cancel.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={(event) => {
+                event.preventDefault();
+                setCancelError(null);
+                cancelMutation.mutate();
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              {cancelMutation.isPending ? (
+                <>
+                  <HugeiconsIcon
+                    icon={Loading03Icon}
+                    data-icon
+                    className="animate-spin"
+                  />
+                  <span>{t("orders.detail.action_in_progress")}</span>
+                </>
+              ) : (
+                t("orders.detail.fulfillment.confirm_cancel.confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Card>
   );
 }
 

@@ -27,6 +27,10 @@ import type {
   ProductVariantRow,
 } from "../../../src/db/schema/index.js";
 import { ConflictError, NotFoundError } from "../../../src/lib/errors.js";
+import type {
+  Fulfillment,
+  ShippingService,
+} from "../../../src/modules/shipping/index.js";
 
 const NOW = new Date("2026-05-07T12:00:00.000Z");
 
@@ -324,8 +328,12 @@ function createFakeRepo(store: FakeStore): OrdersRepository {
     async withTransaction(fn) {
       // No real transactional semantics in the fake — the orders
       // service relies on the repo for isolation; tests assert at the
-      // orchestration level.
-      return fn(repo);
+      // orchestration level. The shipping repo dependency is satisfied
+      // by an inline minimal stub that the orders service tests do not
+      // currently exercise (the fulfillment-on-paid path is covered in
+      // the dedicated test in this file via a fake ShippingService).
+      const noopShipping: unknown = {};
+      return fn({ orders: repo, shipping: noopShipping as never });
     },
   };
   return repo;
@@ -334,6 +342,79 @@ function createFakeRepo(store: FakeStore): OrdersRepository {
 interface BuildResult {
   store: FakeStore;
   service: OrderServiceImpl;
+  /** Captured fulfillment store for assertions on the create-on-paid hook. */
+  fulfillmentsByOrder: Map<string, Fulfillment[]>;
+}
+
+/**
+ * Minimal in-memory shipping service. Only the surface the orders service
+ * uses is implemented (`createFulfillmentForOrder`,
+ * `listFulfillmentsByOrderId`, `listFulfillmentsForOrders`); everything
+ * else throws so a regression in the orders module that grew a new
+ * dependency would fail loudly rather than silently.
+ */
+function createFakeShippingService(
+  fulfillmentsByOrder: Map<string, Fulfillment[]>,
+): ShippingService {
+  let counter = 0;
+  const make = (orderId: string): Fulfillment => {
+    counter += 1;
+    return {
+      id: `ful_${counter}`,
+      orderId,
+      shippingMethodId: "ship_test",
+      status: "pending",
+      trackingCode: null,
+      trackedAt: null,
+      deliveredAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  };
+  return {
+    listMethods: async () => [],
+    getById: async () => null,
+    getByCode: async () => null,
+    quote: async () => {
+      throw new Error("not implemented in test fake");
+    },
+    createMethod: async () => {
+      throw new Error("not implemented in test fake");
+    },
+    updateMethod: async () => {
+      throw new Error("not implemented in test fake");
+    },
+    deleteMethod: async () => undefined,
+    getFulfillmentById: async () => null,
+    listFulfillmentsByOrderId: async (orderId) =>
+      fulfillmentsByOrder.get(orderId) ?? [],
+    listFulfillmentsForOrders: async (orderIds) => {
+      const out: Fulfillment[] = [];
+      for (const id of orderIds) {
+        out.push(...(fulfillmentsByOrder.get(id) ?? []));
+      }
+      return out;
+    },
+    createFulfillmentForOrder: async (orderId) => {
+      const f = make(orderId);
+      const existing = fulfillmentsByOrder.get(orderId) ?? [];
+      existing.push(f);
+      fulfillmentsByOrder.set(orderId, existing);
+      return f;
+    },
+    setTracking: async () => {
+      throw new Error("not implemented in test fake");
+    },
+    markShipped: async () => {
+      throw new Error("not implemented in test fake");
+    },
+    markDelivered: async () => {
+      throw new Error("not implemented in test fake");
+    },
+    cancel: async () => {
+      throw new Error("not implemented in test fake");
+    },
+  };
 }
 
 function buildService(): BuildResult {
@@ -353,8 +434,12 @@ function buildService(): BuildResult {
   store.intents.set(intent.id, intent);
 
   const repo = createFakeRepo(store);
-  const service = new OrderServiceImpl(repo);
-  return { store, service };
+  const fulfillmentsByOrder = new Map<string, Fulfillment[]>();
+  const service = new OrderServiceImpl(
+    repo,
+    createFakeShippingService(fulfillmentsByOrder),
+  );
+  return { store, service, fulfillmentsByOrder };
 }
 
 beforeEach(() => {
@@ -557,6 +642,25 @@ describe("transitionStatus", () => {
 
     expect(fired).toContain(order.id);
     expect(fired).toContain("changed:paid");
+  });
+
+  it("auto-creates a fulfillment when the order transitions pending_payment → paid", async () => {
+    const { service, fulfillmentsByOrder } = buildService();
+    const order = await service.createFromIntent("oint_1", {
+      actorKind: "customer",
+    });
+    expect(fulfillmentsByOrder.get(order.id) ?? []).toHaveLength(0);
+
+    const updated = await service.transitionStatus(order.id, "paid", {
+      actorKind: "system",
+    });
+    const created = fulfillmentsByOrder.get(order.id) ?? [];
+    expect(created).toHaveLength(1);
+    expect(created[0]!.status).toBe("pending");
+    expect(created[0]!.orderId).toBe(order.id);
+    // The transition response embeds the freshly-created fulfillment.
+    expect(updated.fulfillments).toHaveLength(1);
+    expect(updated.fulfillments[0]!.id).toBe(created[0]!.id);
   });
 
   it("rejects an invalid transition with invalid_transition", async () => {

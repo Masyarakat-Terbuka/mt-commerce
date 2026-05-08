@@ -558,6 +558,70 @@ export interface ShippingMethod {
 }
 
 // ----------------------------------------------------------------------------
+// Fulfillment wire + domain shapes — mirror
+// `apps/api/src/modules/shipping/routes/wire.ts`. Embedded on `Order` and
+// surfaced by the `client.admin.fulfillments.*` surface.
+// ----------------------------------------------------------------------------
+
+export type FulfillmentStatus =
+  | "pending"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
+
+export interface WireFulfillment {
+  id: string;
+  orderId: string;
+  shippingMethodId: string;
+  status: FulfillmentStatus;
+  trackingCode: string | null;
+  trackedAt: string | null;
+  deliveredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Fulfillment {
+  id: string;
+  orderId: string;
+  shippingMethodId: string;
+  status: FulfillmentStatus;
+  trackingCode: string | null;
+  /** Set when status transitions to `shipped`. */
+  trackedAt: Date | null;
+  /** Set when status transitions to `delivered`. */
+  deliveredAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// ----------------------------------------------------------------------------
+// Admin fulfillment inputs
+// ----------------------------------------------------------------------------
+
+export interface SetFulfillmentTrackingInput {
+  /** Pass `null` to clear an existing tracking code. */
+  trackingCode: string | null;
+}
+
+export interface MarkFulfillmentShippedInput {
+  /**
+   * Optional tracking code applied in the same operation as the
+   * status transition. Omit to leave any existing code unchanged.
+   */
+  trackingCode?: string;
+}
+
+export interface CancelFulfillmentInput {
+  reason?: string | null;
+}
+
+export interface ListFulfillmentsQuery {
+  /** Required: the only meaningful filter at v0.1. */
+  orderId: string;
+}
+
+// ----------------------------------------------------------------------------
 // Checkout wire shapes — mirror
 // `apps/api/src/modules/checkout/routes/wire.ts`. The state machine is
 // re-declared as a string union to keep the SDK independent of the API
@@ -774,6 +838,13 @@ export interface WireOrder {
   billingAddressSnapshot: OrderAddressSnapshot | null;
   paymentMethod: string;
   items: WireOrderItem[];
+  /**
+   * Fulfillments embedded on the order. v0.1 emits exactly one per order
+   * (created on `pending_payment → paid`); the array shape leaves room
+   * for split shipments later. Empty when the order has not yet reached
+   * `paid`.
+   */
+  fulfillments: WireFulfillment[];
   paidAt: string | null;
   fulfilledAt: string | null;
   cancelledAt: string | null;
@@ -824,6 +895,12 @@ export interface Order {
   billingAddressSnapshot: OrderAddressSnapshot | null;
   paymentMethod: string;
   items: OrderItem[];
+  /**
+   * Fulfillments embedded on the order. v0.1 emits exactly one per order
+   * (created on `pending_payment → paid`); the array shape leaves room
+   * for split shipments later.
+   */
+  fulfillments: Fulfillment[];
   paidAt: Date | null;
   fulfilledAt: Date | null;
   cancelledAt: Date | null;

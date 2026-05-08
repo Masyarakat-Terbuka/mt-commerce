@@ -7,6 +7,7 @@
  */
 import { z } from "@hono/zod-openapi";
 import { MoneyJson, paginated } from "../../../lib/openapi-shared.js";
+import { FulfillmentWire } from "../../shipping/routes/openapi-schemas.js";
 
 const OrderStatusEnum = z.enum([
   "pending_payment",
@@ -77,6 +78,7 @@ export const OrderWire = z
     billingAddressSnapshot: OrderAddressSnapshotWire.nullable(),
     paymentMethod: z.string(),
     items: z.array(OrderItemWire),
+    fulfillments: z.array(FulfillmentWire),
     paidAt: z.string().nullable(),
     fulfilledAt: z.string().nullable(),
     cancelledAt: z.string().nullable(),

@@ -45,6 +45,7 @@ import type {
   AuthMe,
   AuthSession,
   CancelCheckoutInput,
+  CancelFulfillmentInput,
   CancelOrderAdminInput,
   Cart,
   CartItem,
@@ -63,8 +64,10 @@ import type {
   CustomerAddress,
   CustomerWithAddresses,
   District,
+  Fulfillment,
   InventoryAuditEntry,
   InventoryLevel,
+  ListFulfillmentsQuery,
   ListKecamatanQuery,
   ListKelurahanQuery,
   ListKotaKabupatenQuery,
@@ -72,6 +75,7 @@ import type {
   ListProductsQuery,
   ListShippingMethodsQuery,
   LocaleQuery,
+  MarkFulfillmentShippedInput,
   MoneyAmountInput,
   Order,
   OrderIntent,
@@ -80,6 +84,7 @@ import type {
   OrderItem,
   OrderStatusEvent,
   Paginated,
+  SetFulfillmentTrackingInput,
   Product,
   SetDefaultAddressInput,
   SignUpInput,
@@ -113,6 +118,7 @@ import type {
   WireCustomerAddress,
   WireCustomerWithAddresses,
   WireDistrict,
+  WireFulfillment,
   WireInventoryAuditEntry,
   WireInventoryLevel,
   WireListEnvelope,
@@ -418,11 +424,29 @@ function toOrder(w: WireOrder): Order {
     billingAddressSnapshot: w.billingAddressSnapshot,
     paymentMethod: w.paymentMethod,
     items: w.items.map(toOrderItem),
+    // Older API deployments may not yet emit `fulfillments` on the wire.
+    // Coalesce to `[]` so callers always see the field defined; the
+    // bigint/Date conversion happens via `toFulfillment`.
+    fulfillments: (w.fulfillments ?? []).map(toFulfillment),
     paidAt: w.paidAt ? new Date(w.paidAt) : null,
     fulfilledAt: w.fulfilledAt ? new Date(w.fulfilledAt) : null,
     cancelledAt: w.cancelledAt ? new Date(w.cancelledAt) : null,
     refundedAt: w.refundedAt ? new Date(w.refundedAt) : null,
     cancellationReason: w.cancellationReason,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toFulfillment(w: WireFulfillment): Fulfillment {
+  return {
+    id: w.id,
+    orderId: w.orderId,
+    shippingMethodId: w.shippingMethodId,
+    status: w.status,
+    trackingCode: w.trackingCode,
+    trackedAt: w.trackedAt ? new Date(w.trackedAt) : null,
+    deliveredAt: w.deliveredAt ? new Date(w.deliveredAt) : null,
     createdAt: new Date(w.createdAt),
     updatedAt: new Date(w.updatedAt),
   };
@@ -1193,6 +1217,61 @@ export interface AdminInventoryApi {
   ): Promise<Paginated<InventoryAuditEntry>>;
 }
 
+/**
+ * Admin-side fulfillment lifecycle controls.
+ *
+ * Surfaced as a sibling of `admin.orders` (rather than nested under it)
+ * so the SDK shape mirrors the API: fulfillments are their own resource
+ * with their own URLs. The API embeds `fulfillments` on the `Order`
+ * response shape, so callers reading order details usually do NOT need
+ * to call `list()` separately — the embed is the common path.
+ */
+export interface AdminFulfillmentsApi {
+  /** GET /admin/v1/fulfillments?orderId= — typically returns one row per order at v0.1. */
+  list(
+    query: ListFulfillmentsQuery,
+    options?: RequestOptions,
+  ): Promise<Fulfillment[]>;
+  /** GET /admin/v1/fulfillments/{id} — detail. */
+  byId(id: string, options?: RequestOptions): Promise<Fulfillment>;
+  /**
+   * PATCH /admin/v1/fulfillments/{id}/tracking — set or clear the tracking
+   * code without changing status. Pass `trackingCode: null` to clear.
+   */
+  setTracking(
+    id: string,
+    input: SetFulfillmentTrackingInput,
+    options?: RequestOptions,
+  ): Promise<Fulfillment>;
+  /**
+   * POST /admin/v1/fulfillments/{id}/mark-shipped — transitions
+   * `pending → shipped` and stamps `tracked_at`. The optional `trackingCode`
+   * is applied in the same operation.
+   */
+  markShipped(
+    id: string,
+    input?: MarkFulfillmentShippedInput,
+    options?: RequestOptions,
+  ): Promise<Fulfillment>;
+  /**
+   * POST /admin/v1/fulfillments/{id}/mark-delivered — transitions
+   * `shipped → delivered` and stamps `delivered_at`. The API also nudges
+   * the parent order from `paid → fulfilled` best-effort; the SDK does
+   * not need to refetch the order separately for that side effect.
+   */
+  markDelivered(id: string, options?: RequestOptions): Promise<Fulfillment>;
+  /**
+   * POST /admin/v1/fulfillments/{id}/cancel — transitions to `cancelled`
+   * with an optional reason captured on the audit row. Does NOT cancel
+   * the parent order.
+   */
+  cancel(
+    id: string,
+    input?: CancelFulfillmentInput,
+    options?: RequestOptions,
+  ): Promise<Fulfillment>;
+}
+
 export interface AdminApi {
   auth: AdminAuthApi;
   products: AdminProductsApi;
@@ -1200,6 +1279,7 @@ export interface AdminApi {
   customers: AdminCustomersApi;
   orders: AdminOrdersApi;
   inventory: AdminInventoryApi;
+  fulfillments: AdminFulfillmentsApi;
 }
 
 export interface MtCommerceClient {
@@ -2301,6 +2381,72 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           page: wire.page,
           pageSize: wire.pageSize,
         };
+      },
+    },
+    fulfillments: {
+      async list(query, requestOptions) {
+        const qs = buildQuery({ orderId: query.orderId });
+        const wire = await request<WireListEnvelope<WireFulfillment>>(
+          adminCtx,
+          `/admin/v1/fulfillments${qs}`,
+          requestOptions,
+        );
+        return wire.data.map(toFulfillment);
+      },
+      async byId(id, requestOptions) {
+        const wire = await request<WireFulfillment>(
+          adminCtx,
+          `/admin/v1/fulfillments/${encodeURIComponent(id)}`,
+          requestOptions,
+        );
+        return toFulfillment(wire);
+      },
+      async setTracking(id, input, requestOptions) {
+        const wire = await request<WireFulfillment>(
+          adminCtx,
+          `/admin/v1/fulfillments/${encodeURIComponent(id)}/tracking`,
+          {
+            ...(requestOptions ?? {}),
+            method: "PATCH",
+            // Forward `null` literally — clearing the code is meaningful.
+            body: { trackingCode: input.trackingCode },
+          },
+        );
+        return toFulfillment(wire);
+      },
+      async markShipped(id, input, requestOptions) {
+        const body =
+          input?.trackingCode !== undefined
+            ? { trackingCode: input.trackingCode }
+            : {};
+        const wire = await request<WireFulfillment>(
+          adminCtx,
+          `/admin/v1/fulfillments/${encodeURIComponent(id)}/mark-shipped`,
+          { ...(requestOptions ?? {}), method: "POST", body },
+        );
+        return toFulfillment(wire);
+      },
+      async markDelivered(id, requestOptions) {
+        const wire = await request<WireFulfillment>(
+          adminCtx,
+          `/admin/v1/fulfillments/${encodeURIComponent(id)}/mark-delivered`,
+          { ...(requestOptions ?? {}), method: "POST", body: {} },
+        );
+        return toFulfillment(wire);
+      },
+      async cancel(id, input, requestOptions) {
+        // Only send `{ reason }` when the caller supplied one; the API
+        // tolerates both an empty body and `{ reason: null }`.
+        const body =
+          input && input.reason !== undefined && input.reason !== null
+            ? { reason: input.reason }
+            : {};
+        const wire = await request<WireFulfillment>(
+          adminCtx,
+          `/admin/v1/fulfillments/${encodeURIComponent(id)}/cancel`,
+          { ...(requestOptions ?? {}), method: "POST", body },
+        );
+        return toFulfillment(wire);
       },
     },
   };

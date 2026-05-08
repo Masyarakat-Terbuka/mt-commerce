@@ -7,6 +7,10 @@
  *   - Optional fields render as `null`, never absent
  */
 import { toJSON as moneyToJSON, type MoneyJSON } from "@mt-commerce/core/money";
+import {
+  toWireFulfillment,
+  type WireFulfillment,
+} from "../../shipping/routes/wire.js";
 import type {
   Order,
   OrderActorKind,
@@ -46,6 +50,13 @@ export interface WireOrder {
   billingAddressSnapshot: OrderAddressSnapshot | null;
   paymentMethod: string;
   items: WireOrderItem[];
+  /**
+   * Fulfillments attached to this order. v0.1 emits exactly one per order
+   * (created on `pending_payment → paid`); the array shape leaves room
+   * for split shipments later. Empty when the order has not yet reached
+   * `paid`. Mirrors `OrderRepresentation.fulfillments` in the SDK.
+   */
+  fulfillments: WireFulfillment[];
   paidAt: string | null;
   fulfilledAt: string | null;
   cancelledAt: string | null;
@@ -99,6 +110,7 @@ export function toWireOrder(order: Order): WireOrder {
     billingAddressSnapshot: order.billingAddressSnapshot,
     paymentMethod: order.paymentMethod,
     items: order.items.map(toWireItem),
+    fulfillments: order.fulfillments.map(toWireFulfillment),
     paidAt: order.paidAt ? order.paidAt.toISOString() : null,
     fulfilledAt: order.fulfilledAt ? order.fulfilledAt.toISOString() : null,
     cancelledAt: order.cancelledAt ? order.cancelledAt.toISOString() : null,

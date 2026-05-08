@@ -47,10 +47,12 @@ export function toShippingMethod(row: ShippingMethodRow): ShippingMethod {
 export function toFulfillment(row: FulfillmentRow): Fulfillment {
   return {
     id: row.id,
-    orderIntentId: row.orderIntentId,
+    orderId: row.orderId,
     shippingMethodId: row.shippingMethodId,
     status: row.status as FulfillmentStatus,
     trackingCode: row.trackingCode ?? null,
+    trackedAt: row.trackedAt ?? null,
+    deliveredAt: row.deliveredAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

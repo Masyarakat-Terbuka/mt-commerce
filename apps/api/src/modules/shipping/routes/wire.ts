@@ -27,10 +27,12 @@ export interface WireShippingMethod {
 
 export interface WireFulfillment {
   id: string;
-  orderIntentId: string;
+  orderId: string;
   shippingMethodId: string;
   status: FulfillmentStatus;
   trackingCode: string | null;
+  trackedAt: string | null;
+  deliveredAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -54,10 +56,16 @@ export function toWireShippingMethod(
 export function toWireFulfillment(fulfillment: Fulfillment): WireFulfillment {
   return {
     id: fulfillment.id,
-    orderIntentId: fulfillment.orderIntentId,
+    orderId: fulfillment.orderId,
     shippingMethodId: fulfillment.shippingMethodId,
     status: fulfillment.status,
     trackingCode: fulfillment.trackingCode,
+    trackedAt: fulfillment.trackedAt
+      ? fulfillment.trackedAt.toISOString()
+      : null,
+    deliveredAt: fulfillment.deliveredAt
+      ? fulfillment.deliveredAt.toISOString()
+      : null,
     createdAt: fulfillment.createdAt.toISOString(),
     updatedAt: fulfillment.updatedAt.toISOString(),
   };

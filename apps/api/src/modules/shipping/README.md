@@ -20,15 +20,22 @@ rates dynamically.
 - `is_active`, `deleted_at` — soft-retire (sets `deleted_at` and
   `is_active = false`).
 
-`fulfillments` (placeholder per the v0.1 checklist):
+`fulfillments`:
 
-- `order_intent_id` (FK, cascade) — pointer to the placeholder consumed
-  by the future Order module. Will swap to `order_id` once orders land.
+- `order_id` (FK, cascade) — pointer to the canonical order. Cascades
+  on hard delete (defense-in-depth; orders are not hard-deleted in
+  v0.1). The previous `order_intent_id` placeholder was swapped in
+  migration `0014_fulfillments_order_id`.
 - `shipping_method_id` (FK, restrict) — soft-retire methods rather than
   hard-delete to keep the audit trail intact.
-- `status` (text) — `pending | fulfilled | cancelled` v0.1 lifecycle.
+- `status` (text) — `pending | shipped | delivered | cancelled` v0.1
+  lifecycle. Plain text so future states (`returned`, ...) do not require
+  a schema migration.
 - `tracking_code` — free-text courier reference, populated by the
   operator (manual) or the plugin (future).
+- `tracked_at` / `delivered_at` — denormalised lifecycle timestamps so
+  admin filters ("orders shipped this week") do not need to scan the
+  audit log.
 
 ## Service surface
 
@@ -43,7 +50,12 @@ rates dynamically.
 | `createMethod(input)` | admin create (validates manual ↔ flatRate cross-field rule) |
 | `updateMethod(id, patch)` | admin update |
 | `deleteMethod(id)` | admin soft-delete |
-| `createFulfillment(orderIntentId, methodCode)` | minimal placeholder until the Order module materializes orders |
+| `createFulfillmentForOrder(orderId, { methodCode }, repo?)` | create `pending` fulfillment for an order; called by the orders service inside the `→ paid` transition (passing its tx-scoped repo) |
+| `getFulfillmentById(id)` / `listFulfillmentsByOrderId(orderId)` / `listFulfillmentsForOrders(orderIds)` | reads; the orders module batches across a list response |
+| `setTracking(id, { actor, trackingCode })` | set/clear the tracking code without a status change |
+| `markShipped(id, { actor, trackingCode? })` | `pending → shipped`; stamps `tracked_at`, optionally captures tracking in the same op |
+| `markDelivered(id, { actor })` | `shipped → delivered`; stamps `delivered_at`. The route layer best-effort transitions the parent order `paid → fulfilled` |
+| `cancel(id, { actor, reason? })` | `pending|shipped → cancelled`; does NOT cancel the parent order |
 
 ## Providers
 
@@ -56,6 +68,8 @@ parity check lives at the service boundary; a manual method whose
 
 ## Routes
 
+Shipping methods:
+
 - `GET /admin/v1/shipping/methods?activeOnly=`
 - `POST /admin/v1/shipping/methods`
 - `GET /admin/v1/shipping/methods/:id`
@@ -65,8 +79,46 @@ parity check lives at the service boundary; a manual method whose
 - `POST /storefront/v1/shipping/quote` — body `{ methodCode, currency }`,
   returns `{ amount: Money }`
 
+Fulfillments (admin):
+
+- `GET /admin/v1/fulfillments?orderId=`
+- `GET /admin/v1/fulfillments/:id`
+- `PATCH /admin/v1/fulfillments/:id/tracking` — body `{ trackingCode }`
+  (pass `null` to clear)
+- `POST /admin/v1/fulfillments/:id/mark-shipped` — body `{ trackingCode? }`
+- `POST /admin/v1/fulfillments/:id/mark-delivered` — also nudges the
+  parent order `paid → fulfilled` best-effort
+- `POST /admin/v1/fulfillments/:id/cancel` — body `{ reason? }`
+
+Each mutation writes an audit row (`entityKind: "fulfillment"`).
+
 Admin routes are gated by `requireAuth` + `requireRole("owner",
 "admin", "staff")`.
+
+## Order ↔ fulfillment lifecycle
+
+```
+order.pending_payment ──► order.paid ──► (fulfillment.created, status=pending)
+                                          │
+                                          ▼
+                                      fulfillment.shipped (operator)
+                                          │
+                                          ▼
+                                      fulfillment.delivered (operator)
+                                          │
+                                          ▼
+                            order.fulfilled (best-effort, route-layer composition)
+```
+
+The orders service injects a `ShippingService` and the orders repository
+exposes a tx-scoped shipping repo so the create-on-paid insert lands in
+the same transaction as the order update — partial failure cannot leave
+a `paid` order without a fulfillment row. The `delivered → order.fulfilled`
+edge happens at the routes layer (rather than from inside the shipping
+service) so each module's service stays focused on its own bounded
+context per ADR-0005; the route swallows a `ConflictError` on the
+order-side transition so a "mark delivered" never fails because the
+order was already in a terminal state.
 
 ## Checkout integration
 
