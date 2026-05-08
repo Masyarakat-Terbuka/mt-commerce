@@ -62,6 +62,16 @@ export default defineConfig({
       prefixDefaultLocale: false,
     },
   },
+  // Pre-fetch internal links on hover so the next click feels instant.
+  // Astro injects a tiny script that warms the cache for any `<a>` the
+  // pointer hovers — by the time the user clicks, the HTML and CSS are
+  // already there and the ClientRouter can swap immediately. The cost
+  // is a handful of HEAD-of-page requests for whichever links the user
+  // actually considers; the storefront has no per-route bundles to bloat.
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: "hover",
+  },
   // Astro 5.18 introduced a stricter config refinement that crashes when
   // `image.remotePatterns` is undefined; supplying an empty array keeps the
   // refiner happy. We don't use Astro's `<Image />` for remote URLs anyway —
