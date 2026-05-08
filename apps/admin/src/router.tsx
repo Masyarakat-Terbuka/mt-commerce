@@ -39,7 +39,7 @@ import {
   type OrdersSearchKind,
 } from "@/pages/OrdersPage";
 import { OrderDetailPage } from "@/pages/OrderDetailPage";
-import { ComingSoonPage } from "@/pages/ComingSoonPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { SignOutPage } from "@/pages/SignOutPage";
 
 interface RouterContext {
@@ -254,7 +254,7 @@ const customerDetailRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => gatedRoute,
   path: "/pengaturan",
-  component: ComingSoonPage,
+  component: SettingsPage,
 });
 
 const routeTree = rootRoute.addChildren([

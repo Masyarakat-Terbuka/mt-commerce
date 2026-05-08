@@ -40,6 +40,7 @@ import {
   storefrontRoutes as paymentsStorefrontRoutes,
   webhookRoutes as paymentsWebhookRoutes,
 } from "../modules/payments/index.js";
+import { adminRoutes as settingsAdminRoutes } from "../modules/settings/index.js";
 import type { AppBindings } from "../lib/types.js";
 
 // OpenAPIHono so nested OpenAPIHono routers — health, /v1, and every
@@ -83,6 +84,7 @@ export function buildRoutes(): OpenAPIHono<AppBindings> {
   router.route("/storefront/v1", ordersStorefrontRoutes);
   router.route("/admin/v1", paymentsAdminRoutes);
   router.route("/storefront/v1", paymentsStorefrontRoutes);
+  router.route("/admin/v1", settingsAdminRoutes);
   // Webhook routes mount at the top level (not under /admin or
   // /storefront) — providers need a stable, unversioned path.
   router.route("/", paymentsWebhookRoutes);

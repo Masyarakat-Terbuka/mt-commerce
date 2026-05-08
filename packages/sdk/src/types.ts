@@ -1497,6 +1497,132 @@ export interface RefundPaymentInput {
 }
 
 // ----------------------------------------------------------------------------
+// Settings (admin)
+//
+// Mirror `apps/api/src/modules/settings/types.ts`. The wire shape carries
+// resolved region NAMES alongside the BPS ids so the admin UI can render
+// `name ?? id` without a second round-trip.
+// ----------------------------------------------------------------------------
+
+export type StoreLocale = "id" | "en";
+
+export interface WireStoreSettings {
+  storeName: string;
+  defaultCurrency: string;
+  defaultLocale: StoreLocale;
+
+  defaultTaxRateId: string | null;
+
+  shippingOriginProvinsiId: string | null;
+  shippingOriginKotaKabupatenId: string | null;
+  shippingOriginKecamatanId: string | null;
+  shippingOriginKelurahanId: string | null;
+  shippingOriginPostalCode: string | null;
+  shippingOriginAddressLine1: string | null;
+  shippingOriginPhone: string | null;
+
+  shippingOriginProvinsiName?: string;
+  shippingOriginKotaKabupatenName?: string;
+  shippingOriginKecamatanName?: string;
+  shippingOriginKelurahanName?: string;
+
+  notificationEmailEnabled: boolean;
+  notificationWhatsappEnabled: boolean;
+
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoreSettings {
+  storeName: string;
+  defaultCurrency: string;
+  defaultLocale: StoreLocale;
+
+  defaultTaxRateId: string | null;
+
+  shippingOriginProvinsiId: string | null;
+  shippingOriginKotaKabupatenId: string | null;
+  shippingOriginKecamatanId: string | null;
+  shippingOriginKelurahanId: string | null;
+  shippingOriginPostalCode: string | null;
+  shippingOriginAddressLine1: string | null;
+  shippingOriginPhone: string | null;
+
+  shippingOriginProvinsiName?: string;
+  shippingOriginKotaKabupatenName?: string;
+  shippingOriginKecamatanName?: string;
+  shippingOriginKelurahanName?: string;
+
+  notificationEmailEnabled: boolean;
+  notificationWhatsappEnabled: boolean;
+
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Partial-update body for `client.admin.settings.update`. Every key is
+ * optional; pass `null` to clear a nullable field. The API rejects an
+ * empty body with `validation_error`.
+ */
+export interface UpdateStoreSettingsInput {
+  storeName?: string;
+  defaultCurrency?: string;
+  defaultLocale?: StoreLocale;
+
+  defaultTaxRateId?: string | null;
+
+  shippingOriginProvinsiId?: string | null;
+  shippingOriginKotaKabupatenId?: string | null;
+  shippingOriginKecamatanId?: string | null;
+  shippingOriginKelurahanId?: string | null;
+  shippingOriginPostalCode?: string | null;
+  shippingOriginAddressLine1?: string | null;
+  shippingOriginPhone?: string | null;
+
+  notificationEmailEnabled?: boolean;
+  notificationWhatsappEnabled?: boolean;
+}
+
+// ----------------------------------------------------------------------------
+// Tax (admin)
+//
+// Minimal surface — only `list` is exposed at v0.1, used by the admin
+// settings page to populate the "default tax rate" Select. Mirrors
+// `apps/api/src/modules/tax/routes/wire.ts`.
+// ----------------------------------------------------------------------------
+
+export interface WireTaxRate {
+  id: string;
+  code: string;
+  name: string;
+  rateBasisPoints: number;
+  currency: string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface TaxRate {
+  id: string;
+  code: string;
+  name: string;
+  /** 1100 = 11.00%. Convert to a fraction with `basisPoints / 10000`. */
+  rateBasisPoints: number;
+  currency: string;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  archivedAt: Date | null;
+}
+
+export interface AdminListTaxRatesQuery {
+  /** When true, archived rates are excluded. Default true. */
+  activeOnly?: boolean;
+}
+
+// ----------------------------------------------------------------------------
 // Per-call options
 // ----------------------------------------------------------------------------
 

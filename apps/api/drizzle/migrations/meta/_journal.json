@@ -113,6 +113,13 @@
       "when": 1747872000000,
       "tag": "0015_notifications_event_id",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1747958400000,
+      "tag": "0016_settings",
+      "breakpoints": true
     }
   ]
 }

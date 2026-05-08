@@ -33,3 +33,4 @@ export * from "./order_items.js";
 export * from "./order_status_history.js";
 export * from "./audit_log.js";
 export * from "./payments.js";
+export * from "./store_settings.js";
