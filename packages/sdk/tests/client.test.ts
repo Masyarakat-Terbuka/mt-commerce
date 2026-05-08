@@ -1099,3 +1099,83 @@ describe("createClient — admin.orders", () => {
     expect(body.reason).toBe("duplicate");
   });
 });
+
+// ----------------------------------------------------------------------------
+// Admin inventory — only the signed `adjust` mutation is wired at v0.1.
+// The headline assertions:
+//   - The request lands on the variant-scoped path with cookies.
+//   - The body is `{ delta }` verbatim (the SDK does not coerce or rename).
+//   - The response is decoded into a domain `InventoryLevel` with a `Date`
+//     `updatedAt` rather than a raw ISO string.
+//   - 409 conflict ("would drive available below zero") surfaces as ApiError
+//     with the server code intact, so callers can branch on it.
+// ----------------------------------------------------------------------------
+
+describe("createClient — admin.inventory", () => {
+  const sampleInventoryWirePayload = {
+    id: "inv_01J",
+    variantId: "var_abc",
+    locationId: null,
+    available: 105,
+    reserved: 0,
+    updatedAt: "2026-05-07T08:00:00.000Z",
+  };
+
+  it("posts a signed delta to the variant inventory endpoint", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: sampleInventoryWirePayload,
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const level = await client.admin.inventory.adjust("var_abc", { delta: 5 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(
+      "http://localhost:8000/admin/v1/variants/var_abc/inventory/adjust",
+    );
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    const sentBody = JSON.parse(String(calls[0]!.init?.body));
+    expect(sentBody).toEqual({ delta: 5 });
+
+    expect(level.variantId).toBe("var_abc");
+    expect(level.available).toBe(105);
+    expect(level.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("forwards a negative delta verbatim — sign is the caller's contract", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: { ...sampleInventoryWirePayload, available: 95 },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.admin.inventory.adjust("var_abc", { delta: -10 });
+
+    const sentBody = JSON.parse(String(calls[0]!.init?.body));
+    expect(sentBody).toEqual({ delta: -10 });
+  });
+
+  it("surfaces 409 (would-go-negative) as ApiError with the server code", async () => {
+    const { fetch } = mockFetch({
+      status: 409,
+      body: {
+        error: {
+          code: "conflict",
+          message: "Inventory adjustment would drive `available` below zero.",
+          details: { variantId: "var_abc", delta: -1000, available: 5 },
+        },
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(
+      client.admin.inventory.adjust("var_abc", { delta: -1000 }),
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      code: "conflict",
+      status: 409,
+    });
+  });
+});

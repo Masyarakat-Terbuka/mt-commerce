@@ -34,6 +34,7 @@ import { fromJSON as moneyFromJSON } from "@mt-commerce/core/money";
 import { ApiError, isApiErrorEnvelope } from "./errors.js";
 import type {
   AddCartItemInput,
+  AdjustInventoryInput,
   AdminListOrdersQuery,
   AdminListProductsQuery,
   AuthMe,
@@ -56,6 +57,7 @@ import type {
   CreateVariantInput,
   CustomerAddress,
   District,
+  InventoryLevel,
   ListKecamatanQuery,
   ListKelurahanQuery,
   ListKotaKabupatenQuery,
@@ -103,6 +105,7 @@ import type {
   WireCustomer,
   WireCustomerAddress,
   WireDistrict,
+  WireInventoryLevel,
   WireListEnvelope,
   WireOrder,
   WireOrderItem,
@@ -403,6 +406,17 @@ function toOrderStatusEvent(w: WireOrderStatusEvent): OrderStatusEvent {
     actorId: w.actorId,
     details: w.details,
     createdAt: new Date(w.createdAt),
+  };
+}
+
+function toInventoryLevel(w: WireInventoryLevel): InventoryLevel {
+  return {
+    id: w.id,
+    variantId: w.variantId,
+    locationId: w.locationId,
+    available: w.available,
+    reserved: w.reserved,
+    updatedAt: new Date(w.updatedAt),
   };
 }
 
@@ -1032,11 +1046,30 @@ export interface AdminOrdersApi {
   ): Promise<Order>;
 }
 
+export interface AdminInventoryApi {
+  /**
+   * Apply a signed delta to a variant's available stock.
+   *
+   * Server validation: integer, non-zero, |delta| ≤ 1,000,000. The API also
+   * refuses an adjustment that would drive `available` below zero (returns
+   * `409 conflict`). The returned `InventoryLevel` is the post-adjustment
+   * state — the SDK does not currently expose a separate read endpoint
+   * (the API has not added one yet), so callers should hold on to this
+   * value as the source of truth for the row they just touched.
+   */
+  adjust(
+    variantId: string,
+    input: AdjustInventoryInput,
+    options?: RequestOptions,
+  ): Promise<InventoryLevel>;
+}
+
 export interface AdminApi {
   auth: AdminAuthApi;
   products: AdminProductsApi;
   categories: AdminCategoriesApi;
   orders: AdminOrdersApi;
+  inventory: AdminInventoryApi;
 }
 
 export interface MtCommerceClient {
@@ -1914,6 +1947,25 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           },
         );
         return toOrder(wire);
+      },
+    },
+    inventory: {
+      // The API exposes only the signed `adjust` mutation at v0.1 — there is
+      // no `GET /admin/v1/variants/{id}/inventory` endpoint yet. Callers that
+      // need the current `available` either keep the value returned here or
+      // re-derive it from a follow-up adjust. Once a read endpoint lands the
+      // SDK will gain a `byVariantId(...)` method without breaking this one.
+      async adjust(variantId, input, requestOptions) {
+        const wire = await request<WireInventoryLevel>(
+          adminCtx,
+          `/admin/v1/variants/${encodeURIComponent(variantId)}/inventory/adjust`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: { delta: input.delta },
+          },
+        );
+        return toInventoryLevel(wire);
       },
     },
   };
