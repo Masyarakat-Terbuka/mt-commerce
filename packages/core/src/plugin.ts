@@ -289,6 +289,42 @@ export interface DomainEventMap {
     orderId: string;
     orderNumber: string;
   };
+
+  // ---- payments ---------------------------------------------------------
+  /**
+   * A captured payment. Emitted by the payments module after the provider
+   * confirms the funds movement and the `payments` row transitions to
+   * `captured`. The notification module renders `payment_received` against
+   * this event; future plugins (analytics, accounting export) attach the
+   * same way.
+   *
+   * `provider` carries the provider code (`midtrans`, `xendit`, ...) the
+   * payment was settled through — not the operator-facing payment method
+   * label on the order. Plugin listeners that branch on which provider
+   * captured (e.g. provider-specific reconciliation) read this directly;
+   * notifications consult the order's `paymentMethod` instead.
+   */
+  "payment.captured": {
+    paymentId: string;
+    orderId: string;
+    provider: string;
+  };
+
+  // ---- shipping ---------------------------------------------------------
+  /**
+   * A fulfillment that has been handed to the courier. Emitted by the
+   * shipping module on the `pending → shipped` transition (admin
+   * `mark-shipped`, or a future plugin webhook). `trackingCode` is null
+   * when the operator marked shipped without a code — the platform does
+   * not block the transition on a missing code (couriers issue codes
+   * asynchronously in some flows). The notification module's
+   * `shipping_update` template omits the tracking line when it is null.
+   */
+  "fulfillment.shipped": {
+    fulfillmentId: string;
+    orderId: string;
+    trackingCode: string | null;
+  };
 }
 
 export type DomainEventName = keyof DomainEventMap;

@@ -53,6 +53,7 @@ function createFakeRepo(store: FakeStore): NotificationRepository {
         payload: (row.payload ?? {}) as Record<string, unknown>,
         status: row.status ?? "pending",
         errorMessage: row.errorMessage ?? null,
+        eventId: row.eventId ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -61,6 +62,18 @@ function createFakeRepo(store: FakeStore): NotificationRepository {
     },
     async getById(id: string): Promise<NotificationRow | null> {
       return store.rows.get(id) ?? null;
+    },
+    async getByEventTriple(eventId, kind, channel) {
+      for (const row of store.rows.values()) {
+        if (
+          row.eventId === eventId &&
+          row.kind === kind &&
+          row.channel === channel
+        ) {
+          return row;
+        }
+      }
+      return null;
     },
     async list(
       filters: NotificationListFilters,

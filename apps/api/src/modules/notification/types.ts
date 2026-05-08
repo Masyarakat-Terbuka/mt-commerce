@@ -146,6 +146,16 @@ export interface Notification {
   payload: Record<string, unknown>;
   status: NotificationStatus;
   errorMessage: string | null;
+  /**
+   * Deterministic idempotency key set when the row is produced by an
+   * event-bus listener (`order.placed`, `payment.captured`,
+   * `fulfillment.shipped`). Null for non-event sends. The DB-side partial
+   * unique index `notifications_event_kind_channel_uniq` uses this to
+   * reject a duplicate `(event_id, kind, channel)` insert so a re-delivered
+   * event cannot trigger a second send. See `notifications.ts` schema for
+   * the full rationale.
+   */
+  eventId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -171,6 +181,15 @@ export interface SendInput {
   recipient: string;
   message: NotificationPayload;
   locale?: NotificationLocale;
+  /**
+   * Optional deterministic idempotency key. When set, the service uses the
+   * DB-side partial unique index on `(event_id, kind, channel)` to refuse a
+   * duplicate insert and return the existing row instead of dispatching to
+   * the channel a second time. The event-listener path always passes one;
+   * direct callers (auth's verification email) leave it unset so the row
+   * stays NULL-keyed and a re-send is permitted.
+   */
+  eventId?: string;
 }
 
 // ---------------------------------------------------------------------------

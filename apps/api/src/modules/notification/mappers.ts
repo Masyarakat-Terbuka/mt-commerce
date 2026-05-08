@@ -23,6 +23,7 @@ export function toNotification(row: NotificationRow): Notification {
     payload: (row.payload ?? {}) as Record<string, unknown>,
     status: row.status as NotificationStatus,
     errorMessage: row.errorMessage ?? null,
+    eventId: row.eventId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

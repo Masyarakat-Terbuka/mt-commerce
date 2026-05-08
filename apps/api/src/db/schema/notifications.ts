@@ -22,13 +22,33 @@
  *     the template + payload.
  *   - `status` is `pending` while the row is in flight, `sent` after success,
  *     `failed` with `error_message` set after a thrown adapter call.
+ *   - `event_id` is set when the row was produced by an event-bus listener
+ *     (order.placed, payment.captured, fulfillment.shipped). The id is a
+ *     deterministic string the listener derives from the event payload — see
+ *     `apps/api/src/modules/notification/service.ts` for the format. Null
+ *     for non-event sends (`email_verification`, `password_reset`). The
+ *     partial unique index below uses this column to reject a duplicate
+ *     `(event_id, kind, channel)` insert so a re-delivered event cannot
+ *     spawn a second send. The partial-on-not-null shape leaves the
+ *     existing non-event sends untouched (they can still write multiple
+ *     rows for the same recipient — verification mail can be re-sent).
  *
  * Indexes:
  *   - `created_at` — admin "recent notifications" query and TTL sweeps.
  *   - `(channel, status)` — operator dashboards filter by these two together
  *     ("how many emails are stuck pending right now").
+ *   - `(event_id, kind, channel)` UNIQUE WHERE event_id IS NOT NULL — DB-
+ *     enforced idempotency for event-driven sends. The application catches
+ *     the 23505 raised on duplicate insert and returns the existing row.
  */
-import { index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 export const notifications = pgTable(
   "notifications",
@@ -41,6 +61,14 @@ export const notifications = pgTable(
     payload: jsonb("payload").notNull().default({}),
     status: text("status").notNull().default("pending"),
     errorMessage: text("error_message"),
+    /**
+     * Optional deterministic key for event-driven sends. Null for non-event
+     * sends. The partial unique index `notifications_event_kind_channel_uniq`
+     * enforces "at most one row per (event_id, kind, channel)" so a duplicate
+     * event delivery cannot produce a second send. See the column comment
+     * above.
+     */
+    eventId: text("event_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -54,6 +82,18 @@ export const notifications = pgTable(
       table.channel,
       table.status,
     ),
+    /**
+     * Idempotency guard. Drizzle's `uniqueIndex` does not surface a partial
+     * `WHERE` clause in the generated DDL on every dialect, so the actual
+     * partial predicate lives in the hand-written migration
+     * (`drizzle/migrations/0015_notifications_event_id.sql`). The schema-side
+     * index here is plain unique — it is harmless even if Drizzle ever
+     * regenerates it because the migration is the source of truth for the
+     * `WHERE event_id IS NOT NULL` clause.
+     */
+    eventKindChannelUniq: uniqueIndex(
+      "notifications_event_kind_channel_uniq",
+    ).on(table.eventId, table.kind, table.channel),
   }),
 );
 
