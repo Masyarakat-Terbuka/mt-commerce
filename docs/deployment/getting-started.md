@@ -1,0 +1,194 @@
+# Deploying mt-commerce
+
+A merchant or developer can put mt-commerce on a VPS in one sitting. This
+guide walks through that path on Hetzner Cloud; the same steps work on any
+Ubuntu 22.04 LTS VPS, including Indonesian providers — see
+[`biznet-gio.md`](./biznet-gio.md) and [`idcloudhost.md`](./idcloudhost.md).
+
+The stack runs as five containers behind Caddy: Postgres, Redis, the API
+(Hono on Bun), the admin SPA (Vite + React), and the storefront (Astro).
+Caddy terminates TLS and obtains Let's Encrypt certificates automatically.
+
+## Prerequisites
+
+- A registered domain you control DNS for.
+- A VPS with at least 2 vCPU and 4 GB RAM. Hetzner CX22 is a reasonable
+  starting size; the API and Postgres are the only services that benefit
+  meaningfully from more memory.
+- An SSH key pair on your laptop.
+
+## 1. Provision the server
+
+Hetzner Cloud:
+
+1. Create a new project, then a new server.
+2. Image: Ubuntu 22.04 LTS.
+3. Type: CX22 (or larger).
+4. Region: pick the one closest to your customers. Falkenstein and Helsinki
+   are reasonable for European traffic; Singapore for Southeast Asia.
+5. Add your SSH key under "SSH keys".
+6. Optional: enable IPv6, backups, the Hetzner firewall.
+
+Note the server's public IPv4 address.
+
+## 2. Point DNS at the server
+
+In your DNS provider, create three A records:
+
+```
+mystore.example.com           A   <server-ip>
+admin.mystore.example.com     A   <server-ip>
+api.mystore.example.com       A   <server-ip>
+```
+
+If you use IPv6, add matching AAAA records. DNS must propagate before
+Caddy can complete the ACME challenge in step 6.
+
+## 3. Initial hardening
+
+SSH in as `root`, then:
+
+```bash
+# Create a non-root user with sudo.
+adduser deploy
+usermod -aG sudo deploy
+
+# Move your SSH key over.
+mkdir -p /home/deploy/.ssh
+cp ~/.ssh/authorized_keys /home/deploy/.ssh/
+chown -R deploy:deploy /home/deploy/.ssh
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/authorized_keys
+
+# Disable root SSH and password auth.
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+systemctl reload ssh
+
+# Firewall: SSH + HTTP + HTTPS only.
+apt update && apt install -y ufw fail2ban
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 443/udp   # HTTP/3 (Caddy uses QUIC for HTTP/3)
+ufw --force enable
+
+systemctl enable --now fail2ban
+```
+
+Disconnect, then SSH back in as `deploy`. From here on, run commands as
+`deploy` and prefix with `sudo` when needed.
+
+## 4. Install Docker
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+
+sudo usermod -aG docker $USER
+newgrp docker
+docker run --rm hello-world
+```
+
+## 5. Clone the repo and configure
+
+```bash
+cd ~
+git clone https://github.com/masyarakat-terbuka/mt-commerce.git
+cd mt-commerce
+cp .env.production.example .env.production
+```
+
+Open `.env.production` in a text editor and fill in:
+
+- `DOMAIN` — your apex domain (e.g. `mystore.example.com`).
+- `ACME_EMAIL` — a monitored inbox for Let's Encrypt expiry warnings.
+- `POSTGRES_PASSWORD` — generate with `openssl rand -base64 24`.
+- `DATABASE_URL` — must match the Postgres credentials above.
+- `BETTER_AUTH_SECRET` — generate with `openssl rand -base64 32`.
+- `SMTP_*` — credentials for a transactional email provider.
+
+Leave the optional plugin variables (`MIDTRANS_*`, `BITESHIP_*`,
+`WHATSAPP_*`) blank unless those plugins are wired into
+`apps/api/mt-commerce.config.ts`.
+
+## 6. Build and start
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+The first build takes 2–4 minutes depending on the server. Caddy obtains
+TLS certificates the first time it sees a request to each subdomain. Watch
+the logs:
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f caddy
+```
+
+Look for `certificate obtained successfully` lines for each subdomain.
+
+## 7. First-time setup
+
+Migrations run automatically on every API container start, so the schema
+is already in place. Two manual steps remain.
+
+Seed Indonesian regions (provinces, regencies, districts, villages):
+
+```bash
+docker compose -f docker-compose.prod.yml exec api bun run db:seed:regions
+```
+
+Provision the first owner. The user must already exist — sign up via the
+storefront or `POST /api/auth/sign-up/email` first, then:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api \
+  bun run provision-owner you@example.com
+```
+
+## 8. Verify
+
+```
+https://api.mystore.example.com/health    → {"status":"ok"}
+https://admin.mystore.example.com/login   → admin login page
+https://mystore.example.com/              → storefront home
+```
+
+Check the running containers:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+
+All services should report `healthy` after about a minute.
+
+## What's next
+
+- [Backup and restore](./backup-restore.md) — set up nightly Postgres dumps.
+- [Firewall and SSL](./firewall-ssl.md) — verify hardening, rotate secrets.
+
+## Updating
+
+```bash
+cd ~/mt-commerce
+git pull
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+Migrations run automatically on the new API container's first boot.

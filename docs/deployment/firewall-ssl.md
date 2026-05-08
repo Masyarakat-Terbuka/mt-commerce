@@ -1,0 +1,118 @@
+# Firewall and SSL
+
+This page covers the network-edge configuration the
+[getting-started guide](./getting-started.md) sets up, plus a few operations
+tasks that come up later.
+
+## Firewall
+
+The host runs `ufw` with a default-deny inbound policy and three open ports:
+
+| Port    | Protocol | Purpose                              |
+|---------|----------|--------------------------------------|
+| 22      | tcp      | SSH                                  |
+| 80      | tcp      | HTTP — Caddy redirects to 443        |
+| 443     | tcp      | HTTPS                                |
+| 443     | udp      | HTTP/3 (QUIC) via Caddy              |
+
+Verify with:
+
+```bash
+sudo ufw status verbose
+```
+
+If you provision the VM through a provider that already enforces a network
+firewall (Hetzner Cloud Firewall, Biznet Gio panel firewall, IDCloudHost
+panel firewall), keeping `ufw` on the host is still worthwhile — it
+protects against rules accidentally relaxed in the panel.
+
+The Postgres and Redis containers do **not** publish host ports. They are
+only reachable inside the `mt-commerce` docker bridge network.
+
+## Why not expose the API directly?
+
+Caddy in front of the API gives you:
+
+- Automatic Let's Encrypt certificates with renewal.
+- Centralized HSTS and other security headers.
+- HTTP/2 + HTTP/3 termination.
+- A single place to add rate-limit or basic-auth rules later.
+
+The API listens only on the internal docker network. If you need to expose
+metrics or admin endpoints in the future, do it through Caddy with a
+locked-down route, not by opening a host port.
+
+## SSL certificates
+
+Caddy issues certificates the first time it sees a request to a hostname
+in the Caddyfile. If DNS is correct and ports 80/443 are reachable from
+the public internet, this is automatic.
+
+Verify a certificate from the host:
+
+```bash
+echo | openssl s_client -connect api.${DOMAIN}:443 -servername api.${DOMAIN} 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+```
+
+You should see an issuer of `Let's Encrypt` and a `notAfter` ~90 days out.
+Caddy renews automatically at the 60-day mark.
+
+If certificate issuance fails, check Caddy's log:
+
+```bash
+docker compose -f docker-compose.prod.yml logs caddy
+```
+
+The most common causes are DNS not pointing at the host yet, or a firewall
+in front of the VM blocking inbound traffic on 80/443.
+
+## Rotating the Better Auth secret
+
+`BETTER_AUTH_SECRET` is used to sign session cookies. Rotating it
+invalidates all existing sessions, so users get logged out and need to
+sign in again. Better Auth does not currently support a "previous secret"
+window for graceful rotation; the trade-off below is what you have today.
+
+Plan the rotation for a low-traffic window, then:
+
+```bash
+cd ~/mt-commerce
+# 1. Generate the new secret.
+NEW_SECRET=$(openssl rand -base64 32)
+echo "$NEW_SECRET"
+
+# 2. Edit .env.production and replace the BETTER_AUTH_SECRET value.
+$EDITOR .env.production
+
+# 3. Restart only the API. Postgres, Redis, admin, storefront, and Caddy
+#    keep running.
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d api
+```
+
+Existing customers and staff will be prompted to sign in again on their
+next request. New sessions are signed with the new secret.
+
+After rotation, monitor `auth_users` sign-ins for a day to confirm
+everything is healthy:
+
+```bash
+docker compose -f docker-compose.prod.yml logs api | grep -i auth
+```
+
+## Hardening checklist
+
+A short list to walk through after the first deploy:
+
+- [ ] `ufw status` shows default-deny inbound.
+- [ ] SSH password authentication is disabled (`PasswordAuthentication no`).
+- [ ] Root SSH login is disabled (`PermitRootLogin no`).
+- [ ] `fail2ban` is running.
+- [ ] All three subdomains have valid Let's Encrypt certificates.
+- [ ] Postgres and Redis ports (5432, 6379) are **not** reachable from
+      outside the host. Confirm with `ss -tlnp | grep -E '5432|6379'` —
+      should match nothing.
+- [ ] `BETTER_AUTH_SECRET` is unique to this deploy and has at least
+      32 characters of entropy.
+- [ ] `.env.production` has mode `0600` and is owned by the deploy user.
+- [ ] Backups are running and have been test-restored at least once.

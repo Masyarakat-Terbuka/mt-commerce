@@ -1,0 +1,62 @@
+# Caddyfile for mt-commerce production.
+#
+# Caddy auto-issues and renews Let's Encrypt certificates on first contact.
+# DNS for ${DOMAIN}, admin.${DOMAIN}, and api.${DOMAIN} must point to this
+# host, and ports 80 + 443 must be reachable from the public internet for
+# the HTTP-01 / TLS-ALPN-01 challenge to complete.
+#
+# Variables:
+#   {$DOMAIN}     — apex domain (e.g. mystore.example.com)
+#   {$ACME_EMAIL} — contact for Let's Encrypt expiry notices
+
+{
+    email {$ACME_EMAIL}
+    # Disable the admin endpoint that Caddy exposes by default; we don't
+    # need it inside the container and it'd be one more port to lock down.
+    admin off
+}
+
+# Storefront — apex.
+{$DOMAIN} {
+    encode zstd gzip
+
+    header {
+        # Conservative security headers. Tighten these per deploy as needed.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Remove the upstream "Server: nginx" leak.
+        -Server
+    }
+
+    reverse_proxy storefront:8080
+}
+
+# Admin SPA.
+admin.{$DOMAIN} {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    reverse_proxy admin:8080
+}
+
+# API.
+api.{$DOMAIN} {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    reverse_proxy api:8000
+}

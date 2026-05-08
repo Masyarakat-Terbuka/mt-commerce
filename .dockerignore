@@ -1,0 +1,67 @@
+# Repo-root .dockerignore. The api/admin/storefront images are built from
+# the repo root so this file applies to all three.
+
+# Dependency / build outputs
+**/node_modules
+**/dist
+**/build
+**/out
+**/.output
+**/.astro
+**/.next
+**/.vite
+**/.turbo
+
+# Test artifacts
+**/coverage
+**/*.lcov
+
+# Env files (never bake secrets into the image)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Operator-specific plugin config
+mt-commerce.config.ts
+mt-commerce.config.js
+apps/api/mt-commerce.config.ts
+apps/api/mt-commerce.config.js
+
+# VCS
+.git
+.gitignore
+.github
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+*.swp
+*.swo
+
+# Logs
+*.log
+bun-debug.log*
+
+# TypeScript caches
+**/*.tsbuildinfo
+**/.eslintcache
+
+# Local Docker volumes
+.docker
+postgres-data
+redis-data
+
+# Claude worktrees
+.claude
+
+# Repo-level docs and meta
+docs
+*.md
+!apps/*/README.md
+
+# Docker-related (don't COPY itself or compose files into images)
+docker-compose*.yml
+**/Dockerfile
+**/.dockerignore
