@@ -1,0 +1,50 @@
+---
+title: Pesanan
+description: Bagaimana checkout berubah menjadi pesanan, dan bagaimana status pesanan berkembang dari ditempatkan sampai selesai.
+---
+
+Sebuah **pesanan** lahir saat sebuah checkout yang terisi penuh
+(alamat, metode pengiriman, niat pembayaran) bertransisi menjadi
+`completed`. Sebelum titik itu, hanya ada baris `carts` dan
+`checkouts`. Setelah titik itu, baris `orders` dan `order_items`
+dibekukan — harga, jumlah pengiriman, dan pajak tidak dihitung ulang
+ketika daftar harga atau ongkir berubah di kemudian hari.
+
+## State machine
+
+Pesanan bergerak melalui status berikut:
+
+| Status       | Arti                                                               |
+| ------------ | ------------------------------------------------------------------ |
+| `placed`     | Dibuat dari checkout. Menunggu pembayaran.                         |
+| `paid`       | Pembayaran sudah ditangkap.                                        |
+| `fulfilled`  | Semua barang dikirim atau diserahkan.                              |
+| `cancelled`  | Dibatalkan sebelum dikirim.                                        |
+| `refunded`   | Dana dikembalikan, baik sebagian maupun seluruhnya.                |
+
+Setiap transisi mencatat baris baru di `order_status_history` dengan
+aktor (sistem, staf, atau pelanggan), waktu, dan alasan opsional.
+`audit_log` menyimpan diff field bila ada.
+
+## Event
+
+Setiap transisi memancarkan event domain pada bus event:
+`order.placed`, `order.paid`, `order.fulfilled`, `order.cancelled`,
+`order.refunded`. Pendengar plugin dapat berlangganan event ini untuk
+mengirim notifikasi, mensinkronkan ke marketplace, atau memicu
+otomatisasi lain. Bus event memberikan jaminan **at-least-once** —
+pendengar harus idempoten.
+
+## Penomoran
+
+Pesanan punya dua identifier:
+
+- `id` ULID (`ord_01HZ...`) — primary key, dipakai API dan plugin.
+- `number` yang ramah pelanggan (`MT-2025-000123`) — dipakai email,
+  WhatsApp, dan invoice. Dialokasikan dengan sequence Postgres
+  sehingga selalu monoton dan unik per toko.
+
+## Daftar bacaan
+
+- [`apps/api/src/modules/order`](https://github.com/masyarakat-terbuka/mt-commerce/tree/main/apps/api/src/modules/order)
+- [ADR-0011 (audit log)](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0011-audit-log.md)

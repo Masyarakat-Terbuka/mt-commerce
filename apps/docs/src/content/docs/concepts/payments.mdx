@@ -1,0 +1,59 @@
+---
+title: Pembayaran
+description: Bagaimana mt-commerce menangani inisiasi, capture, refund, dan webhook secara idempoten.
+---
+
+Pembayaran adalah area di mana kesalahan menjadi uang yang hilang.
+mt-commerce memperlakukannya secara konservatif: setiap transisi
+direkam, setiap pemanggilan provider memakai kunci idempotensi, dan
+setiap webhook diverifikasi sebelum byte-nya dipercaya.
+
+## Antarmuka provider
+
+Inti tidak tahu Midtrans, Xendit, atau Stripe. Ia tahu antarmuka
+`PaymentProvider`:
+
+- `initiate(intent)` — mulai pembayaran; kembalikan `redirectUrl` atau
+  petunjuk yang dipakai storefront.
+- `capture(intent)` — untuk provider yang tidak otomatis menangkap;
+  tidak wajib.
+- `refund(intent, amount?)` — kembalikan dana, sebagian atau penuh.
+- `verifyWebhookSignature({ rawBody, headers })` — dipanggil **sebelum**
+  body webhook diparsing.
+
+Plugin mendaftarkan implementasi melalui
+`ctx.registerPaymentProvider({ code, ... })`. Lihat
+[ADR-0012](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0012-payment-provider-interface.md)
+untuk argumen lengkap di balik bentuk antarmuka ini.
+
+## Status pembayaran
+
+| Status        | Arti                                                            |
+| ------------- | --------------------------------------------------------------- |
+| `initiated`   | Niat pembayaran dibuat, menunggu pembeli.                       |
+| `pending`     | Pembeli memulai, provider belum mengkonfirmasi.                 |
+| `captured`    | Dana diterima dan dapat dipakai.                                |
+| `failed`      | Provider menolak; pembeli boleh mencoba ulang.                  |
+| `refunded`    | Dikembalikan, sebagian atau penuh.                              |
+
+Tabel `payment_attempts` mencatat setiap percakapan dengan provider
+(payload yang dikirim, respons, kode status). Berguna untuk audit dan
+dukungan pelanggan.
+
+## Idempotensi
+
+Endpoint pembayaran menerima header `Idempotency-Key`. Permintaan
+ulang dengan kunci yang sama mengembalikan jawaban yang sama tanpa
+memanggil provider dua kali. Webhook juga idempoten: pengiriman ulang
+event `settlement` yang sama untuk pembayaran yang sudah `captured`
+menulis baris percobaan baru tetapi **tidak** mengubah status
+pembayaran atau pesanan.
+
+## Plugin pembayaran v0.1
+
+- [Midtrans](/plugins/payment-midtrans/) — QRIS, GoPay, ShopeePay, VA
+  bank-bank besar, kartu kredit, gerai Indomaret/Alfamart, dan saluran
+  bill payment.
+
+Provider tambahan dapat didaftarkan dari paket plugin pihak ketiga
+tanpa mengubah inti.

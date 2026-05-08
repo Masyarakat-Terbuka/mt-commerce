@@ -1,0 +1,21 @@
+{
+  "name": "@mt-commerce/docs",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "typecheck": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@astrojs/starlight": "^0.37.0",
+    "astro": "~5.13.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

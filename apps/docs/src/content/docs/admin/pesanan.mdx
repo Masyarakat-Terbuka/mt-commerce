@@ -1,0 +1,49 @@
+---
+title: Mengelola pesanan
+description: Membaca daftar pesanan, memproses pembayaran, dan menandai pengiriman.
+---
+
+Halaman **Pesanan** adalah pusat kerja harian. Setiap baris adalah
+satu pesanan dari pelanggan — pelanggan terdaftar maupun pembelian
+tamu — dengan status yang menunjukkan tahap pesanannya saat ini.
+
+## Memahami status
+
+| Status        | Yang harus Anda lakukan                                          |
+| ------------- | ---------------------------------------------------------------- |
+| Ditempatkan   | Menunggu pembayaran. Tidak ada tindakan; sistem akan otomatis    |
+|               | bergerak ke Dibayar saat pembayaran masuk.                       |
+| Dibayar       | Siap dikirim. Buat label/atur kurir, lalu tandai dikirim.        |
+| Dikirim       | Sudah diserahkan ke kurir. Pelacakan akan otomatis update bila   |
+|               | Anda memakai plugin pengiriman terhubung.                        |
+| Selesai       | Sampai ke pelanggan. Tidak perlu tindakan.                       |
+| Dibatalkan    | Tidak diproses; stok dikembalikan otomatis.                      |
+| Dikembalikan  | Dana sudah dikembalikan, sebagian atau penuh.                    |
+
+## Membuka satu pesanan
+
+Klik nomor pesanan (misalnya `MT-2025-000123`) untuk melihat detail:
+barang yang dipesan, alamat pengiriman, riwayat status, dan riwayat
+pembayaran. Bagian **Catatan internal** dapat Anda pakai untuk pesan
+antar tim — pelanggan tidak melihat ini.
+
+## Menandai pengiriman
+
+Setelah pembayaran tertangkap dan barang dikemas:
+
+1. Buka pesanan.
+2. Klik **Buat pengiriman**.
+3. Pilih kurir (bila Anda memakai plugin Biteship, daftar tarif live
+   muncul; bila tarif manual, pilih metode yang sudah Anda atur).
+4. Masukkan nomor resi atau biarkan kosong bila plugin akan
+   mengisinya saat order dibuat di sisi kurir.
+5. Klik **Tandai dikirim**. Sistem mengirim notifikasi WhatsApp dan
+   email ke pelanggan secara otomatis.
+
+## Pengembalian dana
+
+Klik **Refund** pada pesanan yang sudah dibayar. Anda dapat
+mengembalikan sebagian atau penuh. Provider pembayaran (misalnya
+Midtrans) yang mengeksekusi pengembaliannya — sistem mencatat
+percobaan tersebut di histori dan akan mengubah status pesanan
+menjadi Dikembalikan saat provider mengkonfirmasi.

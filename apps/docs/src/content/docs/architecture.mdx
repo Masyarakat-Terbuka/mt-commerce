@@ -1,0 +1,75 @@
+---
+title: Arsitektur
+description: Bentuk sistem mt-commerce — monolit modular, API headless, admin dan storefront sebagai klien referensi.
+---
+
+mt-commerce dibangun sebagai **monolit modular yang headless**. Satu API
+HTTP menjalankan seluruh logika commerce; admin dan storefront adalah
+klien referensi yang berbicara dengan API itu seperti aplikasi pihak
+ketiga lain. Anda boleh memakai keduanya, mengganti salah satu, atau
+membangun klien baru.
+
+Untuk argumen lengkap di balik pilihan ini, lihat
+[ADR-0001 (headless)](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0001-headless-architecture.md)
+dan
+[ADR-0005 (modular monolith)](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0005-modular-monolith.md).
+
+## Diagram
+
+```
+   ┌───────────────┐   ┌──────────────────┐   ┌──────────────┐
+   │  Admin app    │   │  Storefront      │   │  Klien Anda  │
+   │  (React)      │   │  (Astro)         │   │  (apa pun)   │
+   └───────┬───────┘   └────────┬─────────┘   └──────┬───────┘
+           │                    │                    │
+           └────────────────────┼────────────────────┘
+                                ▼
+                        ┌───────────────┐
+                        │   API (Hono)  │
+                        └───────┬───────┘
+                                │
+                ┌───────────────┼───────────────┐
+                ▼               ▼               ▼
+          PostgreSQL          Redis          Plugin
+```
+
+## Bagian-bagiannya
+
+- **API** — aplikasi [Hono](https://hono.dev/) di atas Bun. Satu proses,
+  banyak modul internal: catalog, customer, cart, checkout, order,
+  payment, shipping, tax, notification, auth, dan webhook. Setiap modul
+  memiliki tabelnya sendiri dan mengekspos antarmuka layanan; modul
+  lain memakai antarmuka itu, tidak mengakses tabel orang lain
+  langsung.
+- **Storefront** — aplikasi [Astro 5](https://astro.build/) dengan
+  pulau React untuk bagian interaktif (varian, keranjang, checkout).
+  Di-render statis sebanyak mungkin agar cepat di koneksi lambat.
+- **Admin** — SPA Vite + React + shadcn/ui. Dibuat untuk pemilik toko,
+  bukan insinyur.
+- **PostgreSQL** — satu-satunya tempat data bisnis tinggal.
+- **Redis** — cache dan antrian pekerjaan. Bukan sumber kebenaran.
+- **Plugin** — paket npm yang mendaftarkan provider pembayaran,
+  pengiriman, kanal notifikasi, atau pendengar event. Lihat
+  [Konsep: Plugin](/concepts/plugins/).
+
+## Mengapa monolit modular
+
+Tim kecil bisa membangun, mengoperasikan, dan men-deploy satu
+aplikasi. Refactor lintas-modul aman karena pemeriksaan tipe
+mencakup seluruh sistem. Pemanggilan antar-modul adalah panggilan
+fungsi dalam-proses, bukan loncatan jaringan.
+
+Disiplin batas modul ditegakkan melalui review dan aturan ESLint.
+Bila suatu hari satu modul perlu dipisah menjadi layanan tersendiri
+karena beban atau kebutuhan operasional, antarmuka layanan dan
+kepemilikan data yang sudah jelas membuat ekstraksi itu mungkin —
+tanpa harus membayar pajak operasional microservice sejak awal.
+
+## Untuk pengembang plugin
+
+Plugin tidak mengimpor modul API langsung. Permukaan publik untuk
+penulis plugin ada di
+[`@mt-commerce/core/plugin`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/core/src/plugin.ts):
+`definePlugin`, `PluginContext`, dan tipe `PaymentProvider`,
+`ShippingProvider`, `NotificationChannel`, beserta peta event domain.
+Lihat [panduan penulis plugin](/plugins/author-guide/).

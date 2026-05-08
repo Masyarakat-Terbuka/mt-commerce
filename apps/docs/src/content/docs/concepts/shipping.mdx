@@ -1,0 +1,60 @@
+---
+title: Pengiriman
+description: Bagaimana mt-commerce menghitung tarif, membuat pengiriman, dan melacak status sampai diserahkan.
+---
+
+mt-commerce memodelkan pengiriman dengan dua hal: **metode pengiriman**
+yang dapat dipilih pembeli pada checkout, dan **fulfillment** yang
+mewakili paket fisik setelah pesanan dibayar.
+
+## Metode pengiriman
+
+Tabel `shipping_methods` menampung baris seperti:
+
+| Field           | Contoh                |
+| --------------- | --------------------- |
+| `code`          | `BITESHIP_JNE_REG`    |
+| `name`          | "JNE Reguler"         |
+| `provider_kind` | `manual` atau `plugin`|
+
+Metode `manual` punya tarif datar yang ditetapkan operator
+(misalnya "Pengiriman dalam kota Rp 15.000"). Metode `plugin` mengutus
+perhitungan tarif ke `ShippingProvider` yang terdaftar dengan
+`code` yang sama.
+
+## Antarmuka provider
+
+```ts
+ctx.registerShippingProvider({
+  code: "biteship-jne-reg",
+  displayName: "Biteship — JNE REG",
+  async quote(method, { currency }) {
+    return { amount: 18000n, currency };
+  },
+});
+```
+
+`quote` wajib mengembalikan `Money` dalam mata uang yang diminta.
+Plugin pengiriman v0.1 — [Biteship](/plugins/shipping-biteship/) —
+mengembalikan tarif live dari JNE, J&T, SiCepat, AnterAja, Gojek, dan
+Grab dalam satu API.
+
+## State machine fulfillment
+
+| Status        | Arti                                                       |
+| ------------- | ---------------------------------------------------------- |
+| `pending`     | Dibuat dari pesanan yang sudah dibayar.                    |
+| `shipped`     | Kurir sudah mengambil; nomor resi tersedia.                |
+| `delivered`   | Konfirmasi diserahkan ke penerima.                         |
+| `cancelled`   | Dibatalkan sebelum dikirim.                                |
+
+Webhook tracking dari provider memetakan ke event domain
+`fulfillment.shipped` dan `fulfillment.delivered`. Lihat
+[ADR-0013 (siklus shipping/fulfillment)](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0013-shipping-fulfillment-lifecycle.md).
+
+## Bayar di tempat (COD)
+
+Plugin Biteship mendukung COD: lewatkan `cod: true` saat quote untuk
+menyaring kurir yang mendukung COD, dan lewatkan `cod: true` plus
+`codAmount` saat pembuatan order. Kurir akan menagih tunai pada
+pengantaran.

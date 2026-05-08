@@ -1,0 +1,83 @@
+---
+title: Mulai cepat
+description: Dari git clone sampai toko jalan di laptop, dalam lima menit.
+---
+
+Panduan ini membawa Anda dari `git clone` sampai API, admin, dan
+storefront berjalan di mesin lokal. Target waktu: lima menit pada
+koneksi yang wajar.
+
+## Prasyarat
+
+- [Bun](https://bun.sh/) 1.3 ke atas.
+- [Docker](https://www.docker.com/) dan plugin Compose.
+- Git.
+
+## 1. Clone dan pasang dependensi
+
+```bash
+git clone https://github.com/masyarakat-terbuka/mt-commerce.git
+cd mt-commerce
+bun install
+```
+
+## 2. Hidupkan Postgres dan Redis
+
+`docker-compose.yml` di akar repositori menyediakan dua layanan
+stateful yang dibutuhkan API:
+
+```bash
+docker compose up -d postgres redis
+```
+
+Tunggu sampai keduanya `healthy` (sekitar sepuluh detik):
+
+```bash
+docker compose ps
+```
+
+## 3. Salin file lingkungan
+
+```bash
+cp apps/api/.env.example apps/api/.env
+cp apps/admin/.env.example apps/admin/.env
+cp apps/storefront/.env.example apps/storefront/.env
+```
+
+Nilai default sudah cocok untuk pengembangan lokal. Tidak perlu
+mengubah apa pun untuk percobaan pertama.
+
+## 4. Jalankan migrasi dan seed
+
+```bash
+bun --filter '@mt-commerce/api' db:migrate
+bun --filter '@mt-commerce/api' db:seed:regions
+```
+
+Migrasi membangun skema. Seed mengisi data wilayah administratif
+Indonesia (provinsi, kabupaten/kota, kecamatan, kelurahan) yang
+diperlukan checkout.
+
+## 5. Jalankan semuanya
+
+```bash
+bun dev
+```
+
+Skrip ini menjalankan API, admin, dan storefront secara paralel.
+
+| Aplikasi    | URL                       |
+| ----------- | ------------------------- |
+| API         | http://localhost:8000     |
+| Storefront  | http://localhost:4321     |
+| Admin       | http://localhost:5173     |
+
+Buka storefront, lalu admin. Untuk login admin pertama kali, lihat
+bagian "Memprovisikan pemilik pertama" di
+[autentikasi](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/api/authentication.md).
+
+## Bila ada yang salah
+
+Jalankan `bun run reset` untuk menghapus volume Docker dan menjalankan
+ulang seluruh proses setup. Aman dijalankan kapan pun selama belum ada
+data produksi yang dipakai bersama.

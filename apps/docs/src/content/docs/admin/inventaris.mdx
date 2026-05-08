@@ -1,0 +1,55 @@
+---
+title: Mengelola inventaris
+description: Mencatat stok per varian, melakukan penyesuaian, dan membaca riwayat perubahan.
+---
+
+Halaman **Inventaris** memperlihatkan stok per varian — bukan per
+produk. Sebuah produk dengan tiga ukuran punya tiga baris di sini,
+masing-masing dengan jumlahnya sendiri.
+
+## Menyesuaikan stok
+
+Untuk mengubah jumlah stok:
+
+1. Cari varian yang ingin Anda sesuaikan.
+2. Klik **Sesuaikan**.
+3. Pilih jenis penyesuaian:
+   - **Tambah** atau **kurang** sejumlah unit (untuk barang masuk dari
+     supplier atau koreksi kecil).
+   - **Setel ke** angka tertentu (untuk hasil stok opname).
+4. Tulis alasan singkat: "Barang masuk PO-2026-001", "Stok opname
+   bulanan", dan seterusnya.
+5. Simpan.
+
+Setiap penyesuaian dicatat di histori dengan nama Anda, waktu, jenis,
+dan alasan. Tidak ada yang menghilang diam-diam.
+
+## Stok turun otomatis
+
+Anda **tidak** perlu mengurangi stok saat pesanan masuk — sistem
+melakukannya secara otomatis pada saat checkout selesai, di dalam
+transaksi yang sama dengan pembuatan pesanan. Bila stok kurang, sistem
+mencegah checkout sehingga oversell tidak terjadi.
+
+Pesanan yang dibatalkan otomatis mengembalikan stok ke kondisi
+semula.
+
+## Stok rendah
+
+Atur ambang **stok rendah** per varian (default: 5 unit). Saat stok
+turun di bawah ambang, varian muncul dengan tanda peringatan di
+daftar. Email atau WhatsApp peringatan stok rendah ke staf adalah
+fitur yang masih direncanakan.
+
+## Beberapa lokasi gudang
+
+v0.1 mendukung lokasi gudang tunggal per toko. Multi-warehouse ada di
+peta jalan tahap **Maturity**; sampai itu tiba, pakai satu lokasi
+default.
+
+## Bila ada selisih
+
+Selisih antara jumlah fisik dan sistem biasanya berasal dari satu
+dari tiga sumber: penyesuaian yang lupa dicatat, pesanan dibatalkan
+manual tanpa di sistem, atau retur yang belum diproses. Histori
+penyesuaian di setiap varian membantu menelusuri.
