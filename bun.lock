@@ -55,6 +55,7 @@
         "@hono/swagger-ui": "^0.5.0",
         "@hono/zod-openapi": "^0.18.0",
         "@mt-commerce/core": "workspace:*",
+        "@mt-commerce/plugin-example": "workspace:*",
         "@node-rs/argon2": "^2.0.2",
         "better-auth": "^1.2.0",
         "dotenv": "^16.4.5",
@@ -123,6 +124,22 @@
         "typescript": "~5.9.3",
         "typescript-eslint": "^8.57.1",
         "vitest": "^2.1.0",
+      },
+    },
+    "packages/plugins/example": {
+      "name": "@mt-commerce/plugin-example",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@eslint/js": "^9.39.4",
+        "@mt-commerce/core": "workspace:*",
+        "@types/bun": "^1.2.0",
+        "eslint": "^9.39.4",
+        "typescript": "~5.9.3",
+        "typescript-eslint": "^8.57.1",
+        "vitest": "^2.1.0",
+      },
+      "peerDependencies": {
+        "@mt-commerce/core": "workspace:*",
       },
     },
     "packages/sdk": {
@@ -459,6 +476,8 @@
     "@mt-commerce/api": ["@mt-commerce/api@workspace:apps/api"],
 
     "@mt-commerce/core": ["@mt-commerce/core@workspace:packages/core"],
+
+    "@mt-commerce/plugin-example": ["@mt-commerce/plugin-example@workspace:packages/plugins/example"],
 
     "@mt-commerce/sdk": ["@mt-commerce/sdk@workspace:packages/sdk"],
 

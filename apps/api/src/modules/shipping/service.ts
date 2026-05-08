@@ -17,6 +17,7 @@
  */
 import type { Money } from "@mt-commerce/core/money";
 import { id } from "@mt-commerce/core/ulid";
+import type { ShippingProvider as PluginShippingProvider } from "@mt-commerce/core/plugin";
 import {
   ConflictError,
   NotFoundError,
@@ -175,6 +176,26 @@ export interface ShippingService {
     fulfillmentId: string,
     opts: CancelFulfillmentOptions,
   ): Promise<Fulfillment>;
+
+  // -------------------------------------------------------------------
+  // Plugin extension point
+  // -------------------------------------------------------------------
+  /**
+   * Register a plugin-supplied shipping provider keyed by `provider.code`.
+   * The shipping service routes a `provider_kind = 'plugin'` method to the
+   * registered provider whose `code` equals the method's `code`.
+   *
+   * Throws `ConflictError` when a provider with the same code is already
+   * registered. The plugin loader catches and surfaces this as a clean
+   * "duplicate provider" boot diagnostic.
+   *
+   * Why a separate sub-registry rather than reusing the existing
+   * `Map<ShippingProviderKind, ShippingProvider>`: the kind-keyed map can
+   * hold one entry per kind, but plugins ship multiple providers (Biteship
+   * REG, JNE, SiCepat, …) all under the `plugin` kind. The sub-registry
+   * lets each method row pick its provider by `code`.
+   */
+  registerPluginProvider(provider: PluginShippingProvider): void;
 }
 
 /**
@@ -187,6 +208,13 @@ type PendingEvent = {
 }[EventName];
 
 export class ShippingServiceImpl implements ShippingService {
+  /**
+   * Plugin-supplied providers keyed by `provider.code`. Looked up only
+   * when `method.providerKind === 'plugin'`; manual methods continue to
+   * resolve through `providers.get('manual')`.
+   */
+  private readonly pluginProviders = new Map<string, PluginShippingProvider>();
+
   constructor(
     private readonly repo: ShippingRepository,
     private readonly providers: Map<ShippingProviderKind, ShippingProvider>,
@@ -233,15 +261,35 @@ export class ShippingServiceImpl implements ShippingService {
       });
     }
 
-    const provider = this.providers.get(method.providerKind);
-    if (!provider) {
-      throw new ConflictError("No provider registered for this method.", {
-        providerKind: method.providerKind,
-        methodCode: input.methodCode,
+    // Plugin methods route through the `code`-keyed sub-registry; manual
+    // methods route through the `kind`-keyed registry. Branching here (and
+    // not inside the provider) keeps the manual provider free of plugin
+    // concerns and keeps plugin providers free of any default rate logic.
+    let amount: Money;
+    if (method.providerKind === "plugin") {
+      const pluginProvider = this.pluginProviders.get(method.code);
+      if (!pluginProvider) {
+        throw new ConflictError(
+          "No plugin provider registered for this shipping method.",
+          {
+            providerKind: method.providerKind,
+            methodCode: input.methodCode,
+          },
+        );
+      }
+      amount = await pluginProvider.quote(method, {
+        currency: input.currency,
       });
+    } else {
+      const provider = this.providers.get(method.providerKind);
+      if (!provider) {
+        throw new ConflictError("No provider registered for this method.", {
+          providerKind: method.providerKind,
+          methodCode: input.methodCode,
+        });
+      }
+      amount = await provider.quote(method, { currency: input.currency });
     }
-
-    const amount = await provider.quote(method, { currency: input.currency });
     if (amount.currency !== input.currency) {
       throw new ValidationError(
         "Shipping method currency does not match the requested currency.",
@@ -356,6 +404,20 @@ export class ShippingServiceImpl implements ShippingService {
   // -------------------------------------------------------------------
   // Fulfillment reads
   // -------------------------------------------------------------------
+
+  // -------------------------------------------------------------------
+  // Plugin extension point
+  // -------------------------------------------------------------------
+
+  registerPluginProvider(provider: PluginShippingProvider): void {
+    if (this.pluginProviders.has(provider.code)) {
+      throw new ConflictError(
+        "Plugin shipping provider with this code is already registered.",
+        { code: provider.code },
+      );
+    }
+    this.pluginProviders.set(provider.code, provider);
+  }
 
   async getFulfillmentById(
     fulfillmentId: string,

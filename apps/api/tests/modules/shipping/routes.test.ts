@@ -192,6 +192,9 @@ function createFakeService(opts: { initial?: ShippingMethod[] } = {}): ShippingS
     async cancel() {
       throw new Error("not implemented in this routes test");
     },
+    registerPluginProvider() {
+      // Plugin extension point — not exercised by the routes fake.
+    },
   };
 }
 

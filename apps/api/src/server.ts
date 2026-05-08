@@ -14,6 +14,15 @@
 import { createApp } from "./app.js";
 import { env } from "./lib/env.js";
 import { logger } from "./lib/logger.js";
+import { loadPlugins } from "./lib/plugins.js";
+
+// Plugins load BEFORE the app starts serving so a payment provider, shipping
+// provider, or notification channel registered by a plugin is available to
+// the very first request. The loader is lenient by default — a misbehaving
+// plugin logs and is skipped — and refuses to crash boot unless the
+// operator explicitly opts in via MT_COMMERCE_STRICT_PLUGINS=true. See
+// `lib/plugins.ts` for the full failure-handling contract.
+await loadPlugins();
 
 const app = createApp();
 

@@ -98,6 +98,9 @@ function makeShippingService(
     markShipped: async () => fail(),
     markDelivered: async () => fail(),
     cancel: async () => fail(),
+    registerPluginProvider: () => {
+      // Plugin extension point — not exercised by this test.
+    },
     ...overrides,
   };
 }

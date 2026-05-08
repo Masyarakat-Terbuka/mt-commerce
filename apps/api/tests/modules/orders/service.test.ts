@@ -423,6 +423,9 @@ function createFakeShippingService(
     cancel: async () => {
       throw new Error("not implemented in test fake");
     },
+    registerPluginProvider: () => {
+      // Plugin extension point — not exercised by this test.
+    },
   };
 }
 
