@@ -16,6 +16,13 @@
  * `imageUrl`, we render a calm cream tile with just the title centered —
  * no caption, no "photo coming soon" line. The cream tile + title speaks
  * for itself, and the missing photo reads as intentional rather than broken.
+ *
+ * View-transition pairing: each card's `<img>` carries
+ * `view-transition-name: pdp-image-<slug>`. The matching name lives on
+ * the PDP hero (`ProductDetail.tsx`), so the browser morphs the clicked
+ * card image into the hero across the Astro `ClientRouter` swap —
+ * rather than cross-fading two unrelated rectangles. Browsers without
+ * View Transitions support fall through to a normal page swap.
  */
 import Price from "./Price.astro";
 import { resolveLocale, localePath, type Locale } from "@/lib/i18n";
@@ -52,7 +59,11 @@ const compareAt = firstVariant?.compareAt;
  * along; non-Unsplash hosts simply get the original `src` (the srcset
  * still works because the browser falls back when widths don't apply).
  */
-function unsplashSrcset(url: string): { src: string; srcset: string; sizes: string } {
+function unsplashSrcset(url: string): {
+  src: string;
+  srcset: string;
+  sizes: string;
+} {
   const base = url.split("?")[0]!;
   if (!base.includes("images.unsplash.com")) {
     return { src: url, srcset: url, sizes: "(min-width: 768px) 33vw, 50vw" };
@@ -61,7 +72,11 @@ function unsplashSrcset(url: string): { src: string; srcset: string; sizes: stri
     `${base}?w=${w}&q=${q}&auto=format&fit=crop`;
   return {
     src: at(600, 75),
-    srcset: [`${at(300, 70)} 300w`, `${at(600, 75)} 600w`, `${at(900, 78)} 900w`].join(", "),
+    srcset: [
+      `${at(300, 70)} 300w`,
+      `${at(600, 75)} 600w`,
+      `${at(900, 78)} 900w`,
+    ].join(", "),
     sizes: "(min-width: 768px) 33vw, 50vw",
   };
 }
@@ -69,11 +84,8 @@ function unsplashSrcset(url: string): { src: string; srcset: string; sizes: stri
 const cardImg = product.hasImage ? unsplashSrcset(product.imageUrl) : null;
 ---
 
-<a
-  href={localePath(locale, `/products/${product.slug}`)}
-  class="group block"
->
-  <div class="aspect-square w-full overflow-hidden bg-cream">
+<a href={localePath(locale, `/products/${product.slug}`)} class="group block">
+  <div class="bg-cream aspect-square w-full overflow-hidden">
     {
       cardImg ? (
         <img
@@ -83,25 +95,30 @@ const cardImg = product.hasImage ? unsplashSrcset(product.imageUrl) : null;
           alt={alt}
           loading={loading}
           decoding="async"
+          style={`view-transition-name: pdp-image-${product.slug};`}
           class="h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
         />
       ) : (
         <div class="flex h-full w-full items-center justify-center px-6 text-center">
-          <span class="t-body line-clamp-2 text-fg">{title}</span>
+          <span class="t-body text-fg line-clamp-2">{title}</span>
         </div>
       )
     }
   </div>
   <div class="mt-4 space-y-1">
-    {/*
+    {
+      /*
       Card title is `h3` so it sits one level below the section's `h2`
       (e.g. "Pilihan terbaru" / "Hasil pencarian"). Pages that use
       `ProductCard` must render that `h2` to keep heading order valid.
-    */}
-    <h3 class="t-body line-clamp-1 text-fg transition-colors duration-200 group-hover:text-accent">
+    */
+    }
+    <h3
+      class="t-body text-fg group-hover:text-accent line-clamp-1 transition-colors duration-200"
+    >
       {title}
     </h3>
-    <div class="flex items-baseline gap-2 t-body">
+    <div class="t-body flex items-baseline gap-2">
       <Price money={product.basePrice} muted />
       {compareAt && <Price money={compareAt} strike />}
     </div>

@@ -393,6 +393,11 @@ export default function ProductDetail(props: ProductDetailProps) {
               fetchPriority="high"
               width={1600}
               height={900}
+              // Pairs with the matching name on `ProductCard.astro` —
+              // the browser morphs a clicked card image into this hero
+              // across the Astro view-transition swap. Unsupporting
+              // browsers fall through to a normal swap.
+              style={{ viewTransitionName: `pdp-image-${product.slug}` }}
               className="h-full w-full object-cover"
             />
           ) : (
