@@ -88,14 +88,21 @@ export const ORDER_LIST_STATUS_OPTIONS = [
 export type OrdersListStatus = (typeof ORDER_LIST_STATUS_OPTIONS)[number];
 
 export interface OrdersListSearch {
-  status: OrdersListStatus;
-  page: number;
+  /** Status filter; absent = no filter (the UI maps absent → "all"). */
+  status?: OrdersListStatus;
+  /** Page number; absent = page 1. */
+  page?: number;
   /** Customer email substring (exact match server-side). */
   email?: string;
   /** ISO-8601 date string (YYYY-MM-DD) for the lower bound. */
   from?: string;
   /** ISO-8601 date string (YYYY-MM-DD) for the upper bound. */
   to?: string;
+  /**
+   * Filter to a specific customer's orders. Used by the customer detail page's
+   * "View all orders" link. Empty / missing = no filter.
+   */
+  customerId?: string;
 }
 
 const STATUS_LABEL_KEYS: Record<OrdersListStatus, string> = {
@@ -159,7 +166,9 @@ export function OrdersPage() {
   const t = useTranslator();
   const { locale } = useLocale();
 
-  const search = useSearch({ from: "/pesanan" }) as OrdersListSearch;
+  // `from` is a route-id, not a URL — TanStack Router prefixes nested routes
+  // with their parent's id, and `/pesanan` lives under the `gated` layout.
+  const search = useSearch({ from: "/gated/pesanan" }) as OrdersListSearch;
   const navigate = useNavigate();
 
   // Local input mirrors the URL `email` so the field is responsive while
@@ -243,15 +252,19 @@ export function OrdersPage() {
     [navigate],
   );
 
+  const currentPage = search.page ?? 1;
+  const currentStatus = search.status ?? "all";
+
   const queryKey = [
     "admin",
     "orders",
     {
-      page: search.page,
-      status: search.status,
+      page: currentPage,
+      status: currentStatus,
       email: search.email ?? "",
       from: search.from ?? "",
       to: search.to ?? "",
+      customerId: search.customerId ?? "",
     },
   ] as const;
 
@@ -259,10 +272,11 @@ export function OrdersPage() {
     queryKey,
     queryFn: () =>
       api.admin.orders.list({
-        page: search.page,
+        page: currentPage,
         pageSize: PAGE_SIZE,
-        ...(search.status !== "all" ? { status: search.status } : {}),
+        ...(currentStatus !== "all" ? { status: currentStatus } : {}),
         ...(search.email ? { email: search.email } : {}),
+        ...(search.customerId ? { customerId: search.customerId } : {}),
         // The API parses `createdFrom` / `createdTo` as RFC 3339; passing
         // a date-only string is accepted because Zod's `coerce.date()`
         // takes anything `new Date(...)` can read. We emit ISO date-only
@@ -301,7 +315,7 @@ export function OrdersPage() {
           className="h-7 w-full max-w-xs"
         />
         <Select
-          value={search.status}
+          value={search.status ?? "all"}
           onValueChange={(value) => setStatus(value as OrdersListStatus)}
         >
           <SelectTrigger className="h-7 w-[180px]">
@@ -447,10 +461,10 @@ export function OrdersPage() {
             <PaginationItem>
               <PaginationPrevious
                 href="#"
-                aria-disabled={search.page <= 1}
+                aria-disabled={currentPage <= 1}
                 onClick={(e) => {
                   e.preventDefault();
-                  if (search.page > 1) setPage(search.page - 1);
+                  if (currentPage > 1) setPage(currentPage - 1);
                 }}
               />
             </PaginationItem>
@@ -460,7 +474,7 @@ export function OrdersPage() {
                 <PaginationItem key={pageNumber}>
                   <PaginationLink
                     href="#"
-                    isActive={pageNumber === search.page}
+                    isActive={pageNumber === currentPage}
                     onClick={(e) => {
                       e.preventDefault();
                       setPage(pageNumber);
@@ -474,10 +488,10 @@ export function OrdersPage() {
             <PaginationItem>
               <PaginationNext
                 href="#"
-                aria-disabled={search.page >= totalPages}
+                aria-disabled={currentPage >= totalPages}
                 onClick={(e) => {
                   e.preventDefault();
-                  if (search.page < totalPages) setPage(search.page + 1);
+                  if (currentPage < totalPages) setPage(currentPage + 1);
                 }}
               />
             </PaginationItem>
