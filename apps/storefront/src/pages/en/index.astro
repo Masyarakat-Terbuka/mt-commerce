@@ -1,7 +1,12 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProductGrid from "@/islands/ProductGrid.tsx";
-import { listCategories, resolveApiUrl } from "@/lib/api";
+import {
+  listCategories,
+  listProducts,
+  resolveApiUrl,
+  toProductCardListing,
+} from "@/lib/api";
 import { createTranslator, localePath } from "@/lib/i18n";
 
 const locale = "en" as const;
@@ -16,7 +21,10 @@ const detailHrefBase = localePath("en", "/products");
 // Mirrors `pages/index.astro` — see comments there for rationale.
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
 const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
-const searchUrl = new URL(localePath(locale, "/search?q={search_term_string}"), siteUrl).toString();
+const searchUrl = new URL(
+  localePath(locale, "/search?q={search_term_string}"),
+  siteUrl,
+).toString();
 const jsonLd = [
   {
     "@context": "https://schema.org",
@@ -45,7 +53,6 @@ const jsonLd = [
 // Three Unsplash widths so a 360 px mobile doesn't pay for a 2400 px image.
 // See `src/pages/index.astro` for the rationale.
 const heroBase = "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9";
-const heroImage = `${heroBase}?w=2400&q=80&auto=format&fit=crop`;
 const heroSrcset = [
   `${heroBase}?w=800&q=70&auto=format&fit=crop 800w`,
   `${heroBase}?w=1200&q=72&auto=format&fit=crop 1200w`,
@@ -53,15 +60,27 @@ const heroSrcset = [
   `${heroBase}?w=2400&q=80&auto=format&fit=crop 2400w`,
 ].join(", ");
 const heroSrc1200 = `${heroBase}?w=1200&q=72&auto=format&fit=crop`;
-const heroImageAlt = "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
+const heroImageAlt =
+  "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
 
-const categories = await listCategories(locale);
+// Mirrors `pages/index.astro` — fetch categories and the featured grid in
+// parallel and seed the island so the home doesn't show the
+// "Loading products…" skeleton on first paint.
+const [categories, featured] = await Promise.all([
+  listCategories(locale),
+  listProducts(locale, { pageSize: 3, sort: "newest" }),
+]);
+const featuredCards = toProductCardListing(featured, locale);
+const featuredInitialData =
+  featuredCards.items.length > 0 ? featuredCards : undefined;
 ---
 
 <BaseLayout title={title} description={description} jsonLd={jsonLd}>
   {/* Mirrors id/index.astro — see comments there. */}
   <section class="relative" aria-labelledby="home-hero">
-    <div class="relative h-[50vh] min-h-[420px] w-full overflow-hidden md:h-[70vh] md:min-h-[560px]">
+    <div
+      class="relative h-[50vh] min-h-[420px] w-full overflow-hidden md:h-[70vh] md:min-h-[560px]"
+    >
       <img
         src={heroSrc1200}
         srcset={heroSrcset}
@@ -72,19 +91,19 @@ const categories = await listCategories(locale);
         fetchpriority="high"
         class="absolute inset-0 h-full w-full object-cover"
       />
-      <div class="absolute inset-0 bg-cream/35" aria-hidden="true"></div>
+      <div class="bg-cream/35 absolute inset-0" aria-hidden="true"></div>
 
       <div class="absolute inset-0 flex items-end">
         <div class="mx-auto w-full max-w-[1280px] px-5 pb-12 md:px-8 md:pb-20">
-          <h1 id="home-hero" class="t-display max-w-[20ch] text-fg">
+          <h1 id="home-hero" class="t-display text-fg max-w-[20ch]">
             {t("home.hero.headline")}
           </h1>
-          <p class="mt-4 max-w-[44ch] t-body text-fg/85">
+          <p class="t-body text-fg/85 mt-4 max-w-[44ch]">
             {t("home.hero.subhead")}
           </p>
           <a
             href={localePath(locale, "/products")}
-            class="mt-8 inline-flex items-center gap-2 t-body text-fg underline-offset-[6px] transition-colors duration-200 hover:text-accent hover:underline"
+            class="t-body text-fg hover:text-accent mt-8 inline-flex items-center gap-2 underline-offset-[6px] transition-colors duration-200 hover:underline"
           >
             {t("home.hero.cta")}
             <span aria-hidden="true">&rarr;</span>
@@ -94,12 +113,14 @@ const categories = await listCategories(locale);
     </div>
   </section>
 
-  <section class="mx-auto max-w-[1280px] px-5 pb-24 pt-24 md:px-8 md:pb-32 md:pt-32">
+  <section
+    class="mx-auto max-w-[1280px] px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32"
+  >
     <div class="flex items-baseline justify-between">
       <h2 class="t-overline text-muted">{t("home.featured.title")}</h2>
       <a
         href={localePath(locale, "/products")}
-        class="t-body text-muted transition-colors duration-150 hover:text-accent"
+        class="t-body text-muted hover:text-accent transition-colors duration-150"
       >
         {t("products.list.title")} &rarr;
       </a>
@@ -118,33 +139,32 @@ const categories = await listCategories(locale);
         query={{ pageSize: 3, sort: "newest" }}
         limit={3}
         skeletonCount={3}
+        initialData={featuredInitialData}
       />
     </div>
   </section>
 
   {
     categories.length > 0 && (
-      <section class="border-t border-line">
+      <section class="border-line border-t">
         <div class="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16">
           <p class="t-overline text-muted">{t("home.categories.title")}</p>
-          <ul class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 t-body">
-            {
-              categories.map((c, idx) => (
-                <li class="flex items-center gap-x-3">
-                  <a
-                    href={`${localePath(locale, "/products")}?category=${c.slug}`}
-                    class="text-fg transition-colors duration-150 hover:text-accent"
-                  >
-                    {c.name[locale]}
-                  </a>
-                  {idx < categories.length - 1 && (
-                    <span class="text-faint" aria-hidden="true">
-                      ·
-                    </span>
-                  )}
-                </li>
-              ))
-            }
+          <ul class="t-body mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
+            {categories.map((c, idx) => (
+              <li class="flex items-center gap-x-3">
+                <a
+                  href={`${localePath(locale, "/products")}?category=${c.slug}`}
+                  class="text-fg hover:text-accent transition-colors duration-150"
+                >
+                  {c.name[locale]}
+                </a>
+                {idx < categories.length - 1 && (
+                  <span class="text-faint" aria-hidden="true">
+                    ·
+                  </span>
+                )}
+              </li>
+            ))}
           </ul>
         </div>
       </section>

@@ -35,9 +35,12 @@
     "commit-msg": "./scripts/check-commit-msg.sh $1"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx,astro}": [
+    "*.{ts,tsx,js,jsx}": [
       "bunx prettier --write",
       "bunx eslint --fix --max-warnings=0"
+    ],
+    "*.astro": [
+      "bunx prettier --write"
     ],
     "*.{json,md,css,yml,yaml}": [
       "bunx prettier --write"

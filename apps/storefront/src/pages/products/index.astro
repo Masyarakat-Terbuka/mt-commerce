@@ -2,8 +2,13 @@
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import Filters from "@/components/Filters.astro";
 import ProductGrid from "@/islands/ProductGrid.tsx";
-import { listProducts, resolveApiUrl } from "@/lib/api";
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import { listProducts, resolveApiUrl, toProductCardListing } from "@/lib/api";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -38,24 +43,30 @@ const activeFilters = {
   sort: sortRaw ?? undefined,
 };
 
-// Build-time fetch to populate the ItemList JSON-LD. The grid itself
-// still hydrates client-side (so visitors see fresh availability and
-// can paginate without a page reload), but search engines benefit from
-// seeing a real list of products in the page source.
+// Single request-time fetch — drives both the SEO `ItemList` JSON-LD and
+// the island's `initialData`. Using the same query args the island would
+// have requested means visitors hit zero "Memuat produk…" flash on first
+// paint while search engines still see a real product list in the source.
 //
-// `listProducts` is resilient — on API failure it returns an empty
-// list, in which case we omit the `ItemList` payload entirely rather
-// than emitting an empty one.
+// Resilience: on API failure `listProducts` returns an empty result; we
+// omit the `ItemList` payload AND pass nothing as `initialData` so the
+// island falls back to a client-side fetch (offline-build behaviour).
 const seoListing = await listProducts(locale, {
   ...(category ? { category } : {}),
   ...(search ? { search } : {}),
+  ...(minPrice ? { minPrice: BigInt(minPrice) } : {}),
+  ...(maxPrice ? { maxPrice: BigInt(maxPrice) } : {}),
   page,
   sort,
-  pageSize: 24,
 });
+const seoCards = toProductCardListing(seoListing, locale);
+const initialGridData = seoCards.items.length > 0 ? seoCards : undefined;
 
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
-const productsUrl = new URL(localePath(locale, "/products"), siteUrl).toString();
+const productsUrl = new URL(
+  localePath(locale, "/products"),
+  siteUrl,
+).toString();
 const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
 
 // `BreadcrumbList` covers the navigation trail; `ItemList` enumerates
@@ -96,8 +107,14 @@ if (seoListing.items.length > 0) {
 }
 ---
 
-<BaseLayout title={title} description={t("products.list.title")} jsonLd={jsonLd}>
-  <div class="mx-auto max-w-[1280px] px-5 pb-24 pt-16 md:px-8 md:pb-32 md:pt-20">
+<BaseLayout
+  title={title}
+  description={t("products.list.title")}
+  jsonLd={jsonLd}
+>
+  <div
+    class="mx-auto max-w-[1280px] px-5 pt-16 pb-24 md:px-8 md:pt-20 md:pb-32"
+  >
     {/* Page title — display weight 400, generous bottom margin. */}
     <header class="mb-12 md:mb-16">
       <h1 class="t-display text-fg">{t("products.list.title")}</h1>
@@ -108,11 +125,13 @@ if (seoListing.items.length > 0) {
       <Filters active={activeFilters} />
     </div>
 
-    {/*
+    {
+      /*
       Visually-hidden section heading. Cards inside the grid use `h3`; this
       `h2` keeps the heading order valid (h1 → h2 → h3) without adding
       another visible label above the grid.
-    */}
+    */
+    }
     <h2 class="sr-only">{t("products.list.title")}</h2>
     {/* Grid — 3 columns desktop, 2 columns mobile, massive gap. */}
     <ProductGrid
@@ -136,6 +155,7 @@ if (seoListing.items.length > 0) {
       skeletonCount={9}
       showCount
       showingCountTemplate={t("products.list.showing_count")}
+      initialData={initialGridData}
     />
   </div>
 </BaseLayout>

@@ -21,7 +21,11 @@
  * code, which is what the React product islands need to call the API on the
  * visitor's machine.
  */
-import { createClient, type Product as SdkProduct, type MtCommerceClient } from "@mt-commerce/sdk";
+import {
+  createClient,
+  type Product as SdkProduct,
+  type MtCommerceClient,
+} from "@mt-commerce/sdk";
 import type { Money } from "@mt-commerce/core/money";
 import type { Locale } from "./i18n.js";
 
@@ -267,7 +271,10 @@ export async function listFeaturedProducts(
   locale: Locale,
   limit = 4,
 ): Promise<StoreProduct[]> {
-  const result = await listProducts(locale, { pageSize: limit, sort: "newest" });
+  const result = await listProducts(locale, {
+    pageSize: limit,
+    sort: "newest",
+  });
   return result.items.slice(0, limit);
 }
 
@@ -276,10 +283,133 @@ export async function getProductBySlug(
   slug: string,
 ): Promise<StoreProduct | null> {
   try {
-    const product = await createStoreClient(locale).storefront.products.bySlug(slug);
+    const product =
+      await createStoreClient(locale).storefront.products.bySlug(slug);
     return adaptProduct(product);
   } catch (err) {
     console.error(`[storefront] getProductBySlug(${slug}) failed:`, err);
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shape adapters for islands that render request-time data.
+// ---------------------------------------------------------------------------
+
+/**
+ * Slim, locale-resolved shape the `ProductGrid` and `ProductDetail` islands
+ * need to render a card without further translation. The bilingual
+ * `StoreProduct.title` becomes a single string here so the island stays
+ * locale-agnostic.
+ */
+export type StoreProductCard = {
+  id: string;
+  slug: string;
+  title: string;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  variants: Array<{
+    price: Money;
+    compareAtPrice?: Money | null;
+  }>;
+};
+
+export type StoreProductCardListing = {
+  items: StoreProductCard[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+/**
+ * Resolve a `StoreProduct` for a given locale into the slim shape the
+ * islands consume. Centralised here so every page that seeds an island
+ * does the same `title[locale]` / variant-shape projection.
+ *
+ * Note: the storefront's `StoreProduct` carries both `id` and `en` titles,
+ * but the API has already resolved the locale in `listProducts` — both
+ * keys hold the same already-translated string today. Picking `[locale]`
+ * stays correct when the API grows real per-locale title fields.
+ */
+export function toProductCard(
+  product: StoreProduct,
+  locale: Locale,
+): StoreProductCard {
+  return {
+    id: product.id,
+    slug: product.slug,
+    title: product.title[locale],
+    imageUrl: product.hasImage ? product.imageUrl : null,
+    imageAlt: product.imageAlt[locale],
+    variants: product.variants.map((v) => ({
+      price: v.price,
+      compareAtPrice: v.compareAt ?? null,
+    })),
+  };
+}
+
+export function toProductCardListing(
+  result: ListProductsResult,
+  locale: Locale,
+): StoreProductCardListing {
+  return {
+    items: result.items.map((p) => toProductCard(p, locale)),
+    total: result.total,
+    page: result.page,
+    pageSize: result.pageSize,
+    totalPages: result.totalPages,
+  };
+}
+
+/**
+ * Slim PDP shape consumed by `ProductDetail` when the page seeds the island
+ * from request-time data. Mirrors the public `StoreProduct` for the fields
+ * the island reads, with locale already resolved to a single string.
+ */
+export type StoreProductInitial = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  categoryIds: string[];
+  variants: Array<{
+    id: string;
+    title: string;
+    sku: string;
+    price: Money;
+    compareAtPrice: Money | null;
+  }>;
+};
+
+/**
+ * Project a `StoreProduct` into the slim shape the PDP island expects.
+ * The `sku` field isn't carried on `StoreProduct` (we don't surface it on
+ * the storefront), so it falls back to the variant id — matches the
+ * island's existing fallback (`variant.title ?? variant.sku`).
+ */
+export function toInitialProduct(
+  product: StoreProduct,
+  locale: Locale,
+): StoreProductInitial {
+  return {
+    id: product.id,
+    slug: product.slug,
+    title: product.title[locale],
+    description: product.description[locale],
+    imageUrl: product.hasImage ? product.imageUrl : null,
+    imageAlt: product.imageAlt[locale],
+    categoryIds: product.categorySlug ? [product.categorySlug] : [],
+    variants: product.variants.map((v) => ({
+      id: v.id,
+      title: v.name[locale],
+      // The storefront's adapted shape doesn't carry SKU; fall back to id
+      // so the island's `title ?? sku` chain renders something stable.
+      sku: v.id,
+      price: v.price,
+      compareAtPrice: v.compareAt ?? null,
+    })),
+  };
 }
