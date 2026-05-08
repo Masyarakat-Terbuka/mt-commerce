@@ -2091,34 +2091,41 @@ export function createClient(options: ClientOptions): MtCommerceClient {
       },
       async byNumber(orderNumber, opts) {
         // The admin API does not yet expose a `/orders/by-number/...`
-        // shortcut — the number is unique, so we look it up via the list
-        // filter and surface a 404 ApiError if the page is empty. A
-        // dedicated endpoint can be added when admin tooling needs it.
+        // shortcut — the number is unique, so we walk the list (newest
+        // first) and surface a 404 ApiError when no page contains the
+        // requested order. A dedicated endpoint can be added later
+        // without changing this signature.
+        //
+        // Page size is 100 (the API's `MAX_PAGE_SIZE`) so the typical
+        // recent-order lookup costs exactly one round trip; older orders
+        // walk forward in 100-row chunks. We cap the walk at a generous
+        // upper bound so a typo cannot turn into an unbounded scan.
         const { locale, ...requestOptions } = opts ?? {};
-        const qs = buildQuery({
-          locale: resolveLocale(adminCtx, locale),
-          pageSize: 1,
-          // The list endpoint does not currently filter by orderNumber,
-          // so we emulate it by fetching the full set and matching the
-          // string client-side. Acceptable at v0.1 because order_number
-          // is rare on the admin landing page (most lookups are by id);
-          // the filter parameter can be added to the API later without
-          // breaking this signature.
-        });
-        const wire = await request<WirePaginated<WireOrder>>(
-          adminCtx,
-          `/admin/v1/orders${qs}`,
-          requestOptions,
-        );
-        const match = wire.data.find((o) => o.orderNumber === orderNumber);
-        if (!match) {
-          throw new ApiError({
-            code: "not_found",
-            message: `Order ${orderNumber} was not found.`,
-            status: 404,
+        const PAGE_SIZE = 100;
+        const MAX_PAGES = 50;
+        const localeValue = resolveLocale(adminCtx, locale);
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const qs = buildQuery({
+            locale: localeValue,
+            page,
+            pageSize: PAGE_SIZE,
           });
+          const wire = await request<WirePaginated<WireOrder>>(
+            adminCtx,
+            `/admin/v1/orders${qs}`,
+            requestOptions,
+          );
+          const match = wire.data.find((o) => o.orderNumber === orderNumber);
+          if (match) return toOrder(match);
+          // Stop when we've consumed the full result set.
+          if (wire.data.length < PAGE_SIZE) break;
+          if (page * PAGE_SIZE >= wire.total) break;
         }
-        return toOrder(match);
+        throw new ApiError({
+          code: "not_found",
+          message: `Order ${orderNumber} was not found.`,
+          status: 404,
+        });
       },
       async events(id, requestOptions) {
         const wire = await request<WireListEnvelope<WireOrderStatusEvent>>(
