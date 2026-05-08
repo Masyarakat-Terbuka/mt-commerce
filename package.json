@@ -18,7 +18,7 @@
     "lint:staged": "lint-staged",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "commitlint": "commitlint",
+    "commitlint": "bunx commitlint",
     "prepare": "simple-git-hooks"
   },
   "devDependencies": {
@@ -34,7 +34,7 @@
   },
   "simple-git-hooks": {
     "pre-commit": "bun run lint:staged",
-    "commit-msg": "bun commitlint --edit $1"
+    "commit-msg": "bunx commitlint --edit $1"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,astro}": [
