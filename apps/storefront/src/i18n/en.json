@@ -6,6 +6,7 @@
   "nav.search": "Search",
   "nav.account": "Account",
   "nav.menu": "Menu",
+  "nav.skip_to_content": "Skip to main content",
   "nav.help": "Help",
   "nav.privacy": "Privacy policy",
   "nav.terms": "Terms of service",
@@ -50,7 +51,6 @@
   "search.loading": "Loading results…",
   "search.count": "{count} results",
   "search.browse_all": "Browse all products",
-
 
   "products.list.title": "All products",
   "products.list.empty": "No products match your search.",
@@ -104,6 +104,7 @@
   "cart.quantity": "Quantity",
   "cart.close": "Close",
   "cart.error_generic": "Couldn't add to cart. Try again in a moment.",
+  "cart.count_announce": "Cart: {count}",
 
   "checkout.title": "Checkout",
   "checkout.steps.address": "Address",

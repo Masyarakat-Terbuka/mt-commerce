@@ -3,7 +3,13 @@ import "@/styles/global.css";
 import { ClientRouter } from "astro:transitions";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
-import { resolveLocale, type Locale } from "@/lib/i18n";
+import CartDrawer from "@/islands/CartDrawer.tsx";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 import { buildHreflangPair, jsonLdString, ogLocale } from "@/lib/seo";
 
 export interface Props {
@@ -39,11 +45,22 @@ export interface Props {
   jsonLd?: object | object[];
 }
 
-const { title, description, ogImage, canonical, noindex, ogType = "website", jsonLd } = Astro.props;
+const {
+  title,
+  description,
+  ogImage,
+  canonical,
+  noindex,
+  ogType = "website",
+  jsonLd,
+} = Astro.props;
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
-const canonicalUrl = canonical ?? new URL(Astro.url.pathname, siteUrl).toString();
+const canonicalUrl =
+  canonical ?? new URL(Astro.url.pathname, siteUrl).toString();
 // Brand mark — same asset used in the header. Falls back as the social
 // preview image when callers don't pass one explicitly.
 const resolvedOgImage = ogImage ?? "/logo.png";
@@ -65,7 +82,11 @@ const alternateOgLocale = locale === "id" ? "en_US" : "id_ID";
 // Normalise JSON-LD into an array of payloads. A single object is the
 // common case; arrays are used on pages that emit more than one shape
 // (for example PDP: Product + BreadcrumbList).
-const jsonLdPayloads = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [];
+const jsonLdPayloads = jsonLd
+  ? Array.isArray(jsonLd)
+    ? jsonLd
+    : [jsonLd]
+  : [];
 ---
 
 <!doctype html>
@@ -79,14 +100,16 @@ const jsonLdPayloads = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []
     <link rel="canonical" href={canonicalUrl} />
     <link rel="icon" type="image/png" href="/logo.png" />
 
-    {/*
+    {
+      /*
       hreflang advertises the id/en pair to search engines. We always emit
       both locale URLs and an `x-default` pointing at the default locale,
       per Google's guidance for sites that don't auto-detect language.
       `@astrojs/sitemap` produces the same alternates inside the sitemap;
       duplicating here makes the relationship visible to crawlers that
       don't fetch the sitemap on every page.
-    */}
+    */
+    }
     <link rel="alternate" hreflang="id" href={hreflang.id} />
     <link rel="alternate" hreflang="en" href={hreflang.en} />
     <link rel="alternate" hreflang="x-default" href={hreflang.xDefault} />
@@ -101,25 +124,29 @@ const jsonLdPayloads = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []
     <meta property="og:locale" content={ogLocale(locale)} />
     <meta property="og:locale:alternate" content={alternateOgLocale} />
 
-    {/*
+    {
+      /*
       Twitter card. `summary_large_image` is the right card for both
       content and product pages — Twitter falls back gracefully on the
       OG fields, but emitting `twitter:title` / `twitter:description` /
       `twitter:image` explicitly avoids the ambiguity some scrapers
       have when only OG is present.
-    */}
+    */
+    }
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     {description && <meta name="twitter:description" content={description} />}
     <meta name="twitter:image" content={absoluteOgImage} />
 
-    {/*
+    {
+      /*
       Geist Variable served from Google Fonts. Hosted, not bundled — keeps
       the storefront free of a new top-level dep while still delivering a
       distinctive type face. `display=swap` avoids flashing invisible text
       on slow connections, which matches the platform's "fast on modest
       hardware" principle.
-    */}
+    */
+    }
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -127,20 +154,27 @@ const jsonLdPayloads = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []
       href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap"
     />
 
-    {/*
+    {
+      /*
       JSON-LD structured data. Each payload is serialised through
       `jsonLdString`, which escapes `</` so a stray `</script>` substring
       inside any product copy or URL cannot break out of the script
       element. `is:inline` skips Astro's bundler — JSON-LD is data, not
       a JS module, and must land in the HTML head as-is.
-    */}
+    */
+    }
     {
       jsonLdPayloads.map((payload) => (
-        <script type="application/ld+json" is:inline set:html={jsonLdString(payload)} />
+        <script
+          type="application/ld+json"
+          is:inline
+          set:html={jsonLdString(payload)}
+        />
       ))
     }
 
-    {/*
+    {
+      /*
       Astro's built-in client-side router. Intercepts internal `<a>` clicks
       and swaps content without a full page reload — no white flash, no
       re-download of CSS or fonts, scroll position preserved on back/forward.
@@ -151,19 +185,63 @@ const jsonLdPayloads = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : []
       internal link), the typical second-page navigation feels instant.
       Islands re-mount on swap; cart state survives because it lives in
       a module-level store + localStorage, not React component state.
-    */}
+    */
+    }
     <ClientRouter />
   </head>
-  <body class="min-h-screen bg-cream text-fg">
+  <body class="bg-cream text-fg min-h-screen">
+    {
+      /*
+      Skip link — lets keyboard users bypass the header on every page.
+      The link is visually hidden until focused, at which point it sits
+      flush in the top-left corner. Per WIG: "include skip link for main
+      content". `scroll-margin-top` on `<main>` keeps focus from landing
+      under the sticky header when the link is activated.
+    */
+    }
+    <a
+      href="#main"
+      class="focus-visible:bg-paper focus-visible:t-body focus-visible:text-fg sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:top-4 focus-visible:left-4 focus-visible:z-50 focus-visible:px-4 focus-visible:py-2"
+    >
+      {t("nav.skip_to_content")}
+    </a>
     <Header />
-    {/*
+    {
+      /*
       No inner wrapper here — pages decide their own layout (full-bleed
       hero on home, sidebar layout on listing, centered column on detail).
       A blanket `mx-auto max-w-6xl` would force every page to fight it.
-    */}
-    <main>
+    */
+    }
+    <main id="main" style="scroll-margin-top: 4.5rem;">
       <slot />
     </main>
     <Footer />
+    {
+      /*
+      Global cart drawer — mounted once at the layout level so the
+      `mt:cart-open` event from any AddToCartButton on the page can
+      slide it in. Carries every i18n string the panel needs so the
+      island stays locale-agnostic.
+    */
+    }
+    <CartDrawer
+      client:load
+      locale={intlLocale}
+      cartHref={localePath(locale, "/cart")}
+      checkoutHref={localePath(locale, "/checkout")}
+      productsHref={localePath(locale, "/products")}
+      titleLabel={t("cart.title")}
+      closeLabel={t("cart.close")}
+      emptyLabel={t("cart.empty")}
+      emptyCtaLabel={t("cart.empty_cta")}
+      subtotalIncludingTaxLabel={t("cart.subtotal_including_tax")}
+      taxIncludedNote={t("cart.tax_included_note")}
+      shippingLabel={t("cart.shipping")}
+      totalLabel={t("cart.total")}
+      checkoutCtaLabel={t("cart.checkout_cta")}
+      removeLabel={t("cart.remove_item")}
+      quantityLabel={t("cart.quantity")}
+    />
   </body>
 </html>

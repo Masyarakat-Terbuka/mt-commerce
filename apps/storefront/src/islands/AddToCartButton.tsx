@@ -7,7 +7,11 @@
  *     the cart drawer (via the `mt:cart-open` window event).
  *   - During the in-flight call: the button is disabled, `aria-busy="true"`,
  *     and a small spinner replaces the label. On success the label flashes
- *     "Ditambahkan" / "Added" for ~900ms before reverting.
+ *     "Ditambahkan" / "Added" for ~900ms before reverting, paired with a
+ *     checkmark icon so the visual change is unmistakable. The cart-count
+ *     badge in the header bumps in sync (CSS, see `global.css`), and the
+ *     drawer slides in from the right (it auto-closes after ~3s unless the
+ *     user interacts).
  *   - Errors render as a calm inline message below the button, with `role="status"`
  *     and `aria-live="polite"` so screen readers hear it without interrupting.
  *
@@ -22,6 +26,8 @@
  *     `mt:cart-changed` window event the provider broadcasts.
  */
 import { useEffect, useState } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { CartProvider, useCart } from "./CartProvider.js";
 import { useSelectedVariant } from "./lib/variant-store.js";
 
@@ -84,6 +90,11 @@ function AddToCartButtonInner({
     }
   }
 
+  // Three visual states for the button content:
+  //   - sold out: static label, no icon.
+  //   - pending: lone ellipsis (matches WIG "loading states end with …").
+  //   - just added: label + checkmark, weight-400 success-coloured icon.
+  //   - default: plain label.
   const buttonLabel = isSoldOut
     ? soldOutLabel
     : pending
@@ -99,23 +110,35 @@ function AddToCartButtonInner({
         onClick={onAdd}
         disabled={isSoldOut || pending}
         aria-busy={pending}
+        // The status doubles via aria-label so a screen reader announces
+        // the post-click state ("Ditambahkan") on top of the polite live
+        // region below — covering both the visible flash and the click
+        // feedback.
+        aria-label={justAdded ? addedLabel : undefined}
         className="btn-primary w-full"
       >
+        {/* The icon is sized to match the label's leading height (~17px)
+            and sits to the LEFT of the text so the visual reads "checkmark,
+            then the success word". `aria-hidden` because the success word
+            already conveys the meaning. The icon is conditionally rendered
+            so the layout stays stable when no icon is needed. */}
+        {justAdded && (
+          <HugeiconsIcon
+            icon={CheckmarkCircle02Icon}
+            size={17}
+            strokeWidth={1.5}
+            aria-hidden
+            className="mr-2 inline-flex shrink-0"
+          />
+        )}
         {buttonLabel}
       </button>
       {/* Polite live region — read after the action, not during typing flow. */}
-      <p
-        role="status"
-        aria-live="polite"
-        className="sr-only"
-      >
+      <p role="status" aria-live="polite" className="sr-only">
         {justAdded ? addedLabel : ""}
       </p>
       {localError && (
-        <p
-          role="alert"
-          className="mt-3 t-caption text-danger"
-        >
+        <p role="alert" className="t-caption text-danger mt-3">
           {localError}
         </p>
       )}

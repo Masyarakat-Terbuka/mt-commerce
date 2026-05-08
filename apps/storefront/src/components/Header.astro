@@ -19,9 +19,13 @@
  * the dot structure is in place so the eventual store can hydrate it
  * without restyling the header.
  */
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 import CartCountBadge from "@/islands/CartCountBadge.tsx";
-import CartDrawer from "@/islands/CartDrawer.tsx";
 import HeaderAccountLink from "@/islands/HeaderAccountLink.tsx";
 import Icon from "@/components/Icon.astro";
 // Hugeicons mirror the admin's icon vocabulary so glyphs match across apps.
@@ -53,47 +57,67 @@ const checkoutHref = localePath(locale, "/checkout");
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
 ---
 
-<header class="sticky top-0 z-40 border-b border-line bg-cream">
-  <div class="mx-auto flex h-14 max-w-[1280px] items-center justify-between gap-4 px-5 md:h-16 md:px-8">
+<header class="border-line bg-cream sticky top-0 z-40 border-b">
+  <div
+    class="mx-auto flex h-14 max-w-[1280px] items-center justify-between gap-4 px-5 md:h-16 md:px-8"
+  >
     {/* Left cluster: mobile menu + lowercase wordmark */}
     <div class="flex items-center gap-3">
       <details class="relative md:hidden">
         <summary
-          class="flex h-9 w-9 cursor-pointer list-none items-center justify-center text-fg [&::-webkit-details-marker]:hidden"
+          class="text-fg flex h-9 w-9 cursor-pointer list-none items-center justify-center [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.menu")}
         >
           {/* Two thin lines — calmer than the usual three. */}
-          <span class="block h-px w-5 bg-fg before:mb-1.5 before:block before:h-px before:w-5 before:bg-fg before:content-['']"></span>
+          <span
+            class="bg-fg before:bg-fg block h-px w-5 before:mb-1.5 before:block before:h-px before:w-5 before:content-['']"
+          ></span>
         </summary>
         <nav
-          class="absolute left-0 top-full z-30 mt-px w-[calc(100vw-2.5rem)] border-b border-line bg-cream px-5 py-6"
+          class="border-line bg-cream absolute top-full left-0 z-30 mt-px w-[calc(100vw-2.5rem)] border-b px-5 py-6"
           aria-label="Mobile"
         >
-          <ul class="flex flex-col gap-4 t-body">
-            <li><a class="block hover:text-accent" href={homeHref}>{t("nav.home")}</a></li>
-            <li><a class="block hover:text-accent" href={productsHref}>{t("nav.products")}</a></li>
-            <li><a class="block hover:text-accent" href={aboutHref}>{t("nav.about")}</a></li>
-            <li><a class="block hover:text-accent" href={accountHref}>{t("nav.account")}</a></li>
+          <ul class="t-body flex flex-col gap-4">
+            <li>
+              <a class="hover:text-accent block" href={homeHref}
+                >{t("nav.home")}</a>
+            </li>
+            <li>
+              <a class="hover:text-accent block" href={productsHref}
+                >{t("nav.products")}</a>
+            </li>
+            <li>
+              <a class="hover:text-accent block" href={aboutHref}
+                >{t("nav.about")}</a>
+            </li>
+            <li>
+              <a class="hover:text-accent block" href={accountHref}
+                >{t("nav.account")}</a>
+            </li>
           </ul>
         </nav>
       </details>
 
-      {/*
+      {
+        /*
         Brand lockup: small logo tile + lowercase wordmark. The mark is a
         white door silhouette on a black tile (~28px square) — used as a
         modest accent rather than the wordmark itself, so the dark block
         doesn't dominate the cream header. `loading="eager"` because it's
         above the fold on every page.
-      */}
-      {/*
+      */
+      }
+      {
+        /*
         Brand link: the visible wordmark IS the accessible name, so no
         `aria-label` (Lighthouse fires `label-content-name-mismatch` when
         an aria-label diverges from a visible text label). The logo is
         decorative (`alt=""`) — the wordmark carries the name on its own.
-      */}
+      */
+      }
       <a
         href={homeHref}
-        class="flex items-center gap-2 text-fg transition-colors duration-150 hover:text-accent"
+        class="text-fg hover:text-accent flex items-center gap-2 transition-colors duration-150"
       >
         <img
           src="/logo.png"
@@ -104,18 +128,20 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
           decoding="async"
           class="size-7 rounded-sm"
         />
-        <span class="t-body font-normal lowercase tracking-tight">
+        <span class="t-body font-normal tracking-tight lowercase">
           mt-commerce
         </span>
       </a>
     </div>
 
-    {/* Center: desktop nav. Tracking is wider than body to feel architectural. */}
+    {
+      /* Center: desktop nav. Tracking is wider than body to feel architectural. */
+    }
     <nav class="hidden md:block" aria-label="Primary">
-      <ul class="flex items-center gap-10 t-body text-fg">
+      <ul class="t-body text-fg flex items-center gap-10">
         <li>
           <a
-            class="tracking-[0.01em] transition-colors duration-150 hover:text-accent"
+            class="hover:text-accent tracking-[0.01em] transition-colors duration-150"
             href={homeHref}
           >
             {t("nav.home")}
@@ -123,7 +149,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         </li>
         <li>
           <a
-            class="tracking-[0.01em] transition-colors duration-150 hover:text-accent"
+            class="hover:text-accent tracking-[0.01em] transition-colors duration-150"
             href={productsHref}
           >
             {t("nav.products")}
@@ -131,7 +157,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         </li>
         <li>
           <a
-            class="tracking-[0.01em] transition-colors duration-150 hover:text-accent"
+            class="hover:text-accent tracking-[0.01em] transition-colors duration-150"
             href={aboutHref}
           >
             {t("nav.about")}
@@ -144,16 +170,18 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
     <div class="flex items-center gap-1">
       <details class="group relative">
         <summary
-          class="flex h-9 w-9 cursor-pointer list-none items-center justify-center text-fg transition-colors duration-150 hover:text-accent [&::-webkit-details-marker]:hidden"
+          class="text-fg hover:text-accent flex h-9 w-9 cursor-pointer list-none items-center justify-center transition-colors duration-150 [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.search")}
         >
-          {/* Hugeicons Search01 — decorative; the <summary> carries aria-label. */}
+          {
+            /* Hugeicons Search01 — decorative; the <summary> carries aria-label. */
+          }
           <Icon icon={Search01Icon} />
         </summary>
         <form
           method="get"
           action={searchAction}
-          class="absolute right-0 top-full z-30 mt-px flex w-[min(380px,calc(100vw-2.5rem))] items-center gap-3 border-b border-line bg-cream px-5 py-4"
+          class="border-line bg-cream absolute top-full right-0 z-30 mt-px flex w-[min(380px,calc(100vw-2.5rem))] items-center gap-3 border-b px-5 py-4"
           role="search"
         >
           <label class="sr-only" for="header-search">{t("nav.search")}</label>
@@ -163,7 +191,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
             name="q"
             autocomplete="off"
             placeholder={t("nav.search").toLowerCase()}
-            class="flex-1 border-b border-line bg-transparent py-1 t-body text-fg placeholder:text-faint outline-none transition-colors duration-150 focus:border-fg"
+            class="border-line t-body text-fg placeholder:text-faint focus:border-fg flex-1 border-b bg-transparent py-1 transition-colors duration-150 outline-none"
           />
           <button type="submit" class="t-body text-fg hover:text-accent">
             &rarr;
@@ -173,49 +201,56 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
       <a
         href={cartHref}
-        class="relative flex h-9 w-9 items-center justify-center text-fg transition-colors duration-150 hover:text-accent"
+        class="text-fg hover:text-accent relative flex h-9 w-9 items-center justify-center transition-colors duration-150"
         aria-label={t("nav.cart")}
+        style="view-transition-name: header-cart;"
       >
-        {/* Hugeicons ShoppingBag01 — calmer than the cart-with-wheels variant
+        {
+          /* Hugeicons ShoppingBag01 — calmer than the cart-with-wheels variant
             and visually closer to the Saturdays NYC bag silhouette. The
-            anchor's aria-label describes the action; the icon stays decorative. */}
+            anchor's aria-label describes the action; the icon stays decorative. */
+        }
         <Icon icon={ShoppingBag01Icon} />
-        {/* Count dot — empty in markup until the cart store lands. The
-            element stays mounted so the layout stays stable when a count
-            arrives. */}
-        <span
-          data-cart-count
-          class="absolute -right-0.5 -top-0.5 hidden h-1.5 w-1.5 rounded-full bg-accent"
-          aria-hidden="true"
-        ></span>
+        {
+          /* Count badge — React island that mirrors useCart().itemCount and
+            plays a quiet scale bump on each successful add (data-cart-bump
+            in global.css). Pairs a polite aria-live region with the visible
+            number so screen readers also hear the update. */
+        }
+        <CartCountBadge
+          client:idle
+          announceTemplate={t("cart.count_announce")}
+        />
       </a>
 
-      {/*
+      {
+        /*
         The account label upgrades to the customer's display name on hydration.
         Server-renders as a static link so JavaScript-disabled visitors and the
         initial paint always see a usable element.
-      */}
+      */
+      }
       <HeaderAccountLink
         client:idle
         href={accountHref}
         fallbackLabel={t("nav.account")}
-        className="hidden h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
+        className="t-body text-fg hover:text-accent hidden h-9 items-center px-3 transition-colors duration-150 md:flex"
       />
       <noscript>
         <a
           href={accountHref}
-          class="hidden h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent md:flex"
+          class="t-body text-fg hover:text-accent hidden h-9 items-center px-3 transition-colors duration-150 md:flex"
         >
           {t("nav.account")}
         </a>
       </noscript>
 
-      <div class="hidden items-center gap-1 pl-2 t-caption md:flex">
+      <div class="t-caption hidden items-center gap-1 pl-2 md:flex">
         <a
           href={idHref}
           aria-current={locale === "id" ? "true" : undefined}
           class:list={[
-            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
+            "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
             locale === "id" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
@@ -226,7 +261,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
           href={enHref}
           aria-current={locale === "en" ? "true" : undefined}
           class:list={[
-            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
+            "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
             locale === "en" ? "text-fg" : "text-faint hover:text-fg",
           ]}
         >
