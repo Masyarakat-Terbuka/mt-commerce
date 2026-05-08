@@ -12,6 +12,10 @@
   "nav.privacy": "Privacy policy",
   "nav.terms": "Terms of service",
 
+  "mega_menu.featured": "Featured",
+  "mega_menu.see_all_link": "See all products →",
+  "mega_menu.aria_label": "Products menu",
+
   "promo_banner.text": "Free shipping on orders over Rp 250,000",
   "promo_banner.dismiss": "Dismiss banner",
   "promo_banner.region_label": "Promotion",

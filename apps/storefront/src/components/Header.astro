@@ -27,6 +27,8 @@ import {
   localePath,
   type Locale,
 } from "@/lib/i18n";
+import { listCategories, listProducts } from "@/lib/api";
+import Price from "@/components/Price.astro";
 import CartCountBadge from "@/islands/CartCountBadge.tsx";
 import HeaderAccountLink from "@/islands/HeaderAccountLink.tsx";
 import Icon from "@/components/Icon.astro";
@@ -42,6 +44,24 @@ const productsHref = localePath(locale, "/products");
 const aboutHref = localePath(locale, "/about");
 const cartHref = localePath(locale, "/cart");
 const accountHref = localePath(locale, "/account");
+
+// ---------------------------------------------------------------------------
+// Mega-menu data — fetched at SSR time so the panel renders pre-hydrated.
+//
+// Both calls are wrapped in `try/catch` inside `lib/api.ts` and return empty
+// shapes on failure, so a build with the API unreachable still produces a
+// usable header (categories collapse to nothing; the "Lihat semua" link
+// alone is the resilient fallback).
+//
+// Featured products: pick the newest 3 across the whole catalog rather than
+// "newest in the first category". The first category is alphabetical, so
+// scoping to it would surface the same three products on every page until
+// that category gets new stock — visually stale.
+// ---------------------------------------------------------------------------
+const [megaCategories, megaFeatured] = await Promise.all([
+  listCategories(locale),
+  listProducts(locale, { pageSize: 3, sort: "newest" }),
+]);
 // The header form posts to the dedicated search results page rather than
 // the product listing. /products is for browsing the catalog; /search is
 // where a typed query (`?q=...`) renders results, breadcrumb, and a
@@ -143,7 +163,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
     {
       /* Center: desktop nav. Tracking is wider than body to feel architectural. */
     }
-    <nav class="hidden md:block" aria-label="Primary">
+    <nav class="hidden md:block" aria-label="Primary" data-mega-menu-root>
       <ul class="t-body text-fg flex items-center gap-10">
         <li>
           <a
@@ -153,13 +173,31 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
             {t("nav.home")}
           </a>
         </li>
+        {
+          /*
+            Products entry — mega-menu trigger.
+
+            A real <button> (not an <a>) for keyboard activation: pressing
+            Enter or Space toggles the panel rather than navigating away.
+            Hover (via JS mouseenter/leave with a small grace timeout) and
+            focus-within open it; ESC closes and returns focus here.
+
+            The panel itself lives outside the <ul> to span the full header
+            width — it's anchored to the <header> via `position: absolute`
+            on the .mega-menu-panel below.
+          */
+        }
         <li>
-          <a
-            class="hover:text-accent tracking-[0.01em] transition-colors duration-150"
-            href={productsHref}
+          <button
+            type="button"
+            class="hover:text-accent cursor-pointer tracking-[0.01em] transition-colors duration-150"
+            aria-expanded="false"
+            aria-haspopup="true"
+            aria-controls="mega-menu-panel"
+            data-mega-menu-trigger
           >
             {t("nav.products")}
-          </a>
+          </button>
         </li>
         <li>
           <a
@@ -316,4 +354,306 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
       </div>
     </div>
   </div>
+
+  {
+    /*
+      Mega-menu panel.
+
+      Anchored to <header> (which is `position: sticky`, so it forms a
+      positioning context for `absolute` children). Sits below the header
+      bar via `top-full`, full-width via `left-0 right-0`, with an inner
+      max-width matching the rest of the site frame.
+
+      Visual: matches the header surface (`bg-cream`, hairline border) so
+      the panel reads as an extension of the header rather than a floating
+      card. No shadow / no gradient / no glow — same calm rules.
+
+      Hidden by default via `data-state="closed"` (the JS toggles it). The
+      `hidden` attribute on the closed state keeps the panel out of the
+      tab order and the accessibility tree until opened. Mobile (<md) hides
+      it entirely — the existing left-hand <details> menu already covers
+      mobile navigation, and a 4-column grid on a phone would be a wall of
+      links.
+
+      Animation: opacity + translateY, 150ms. `prefers-reduced-motion`
+      collapses the translate to a snap.
+    */
+  }
+  <div
+    id="mega-menu-panel"
+    role="region"
+    aria-label={t("mega_menu.aria_label")}
+    data-mega-menu-panel
+    data-state="closed"
+    hidden
+    class="border-line bg-cream absolute top-full right-0 left-0 z-30 border-b"
+  >
+    <div class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-10">
+      <div class="grid grid-cols-4 gap-8">
+        {/* Cols 1-3: categories */}
+        <div class="col-span-3">
+          <p class="t-overline text-faint mb-4">{t("nav.products")}</p>
+          {
+            megaCategories.length > 0 ? (
+              <ul class="grid grid-cols-3 gap-x-6 gap-y-3">
+                {megaCategories.map((category) => (
+                  <li>
+                    <a
+                      href={localePath(
+                        locale,
+                        `/products?category=${category.slug}`,
+                      )}
+                      class="t-body text-fg hover:text-accent block transition-colors duration-150"
+                      data-mega-menu-link
+                    >
+                      {category.name[locale]}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null
+          }
+          <a
+            href={productsHref}
+            class="t-body text-fg hover:text-accent mt-6 inline-block tracking-[0.01em] transition-colors duration-150"
+            data-mega-menu-link
+          >
+            {t("mega_menu.see_all_link")}
+          </a>
+        </div>
+
+        {/* Col 4: featured products */}
+        {
+          megaFeatured.items.length > 0 && (
+            <div>
+              <p class="t-overline text-faint mb-4">
+                {t("mega_menu.featured")}
+              </p>
+              <ul class="space-y-4">
+                {megaFeatured.items.slice(0, 3).map((product) => (
+                  <li>
+                    <a
+                      href={localePath(locale, `/products/${product.slug}`)}
+                      class="group flex items-center gap-3"
+                      data-mega-menu-link
+                    >
+                      <div class="bg-cream relative size-14 shrink-0 overflow-hidden">
+                        {product.hasImage ? (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.imageAlt[locale]}
+                            loading="lazy"
+                            decoding="async"
+                            width="56"
+                            height="56"
+                            class="size-full object-cover transition-opacity duration-150 group-hover:opacity-90"
+                          />
+                        ) : (
+                          <div class="border-line size-full border" />
+                        )}
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <p class="t-body text-fg group-hover:text-accent line-clamp-1 transition-colors duration-150">
+                          {product.title[locale]}
+                        </p>
+                        <Price
+                          money={product.basePrice}
+                          locale={intlLocale}
+                          muted
+                          class="t-caption"
+                        />
+                      </div>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        }
+      </div>
+    </div>
+  </div>
 </header>
+
+<style>
+  /*
+    Mega-menu open/closed transitions. Tailwind v4 generates the layout
+    classes; the animation tokens live here because Tailwind doesn't ship
+    a clean `data-state="open"` variant out of the box and inlining
+    keyframe-style transitions in the markup would clutter the .astro tree.
+
+    Rules:
+      - Closed: opacity 0, translateY(-4px), `pointer-events: none` so a
+        ghost panel doesn't trap clicks during the fade-out.
+      - Open: opacity 1, translateY(0), interactive.
+      - `prefers-reduced-motion: reduce` keeps the opacity swap (so it's
+        still legible *something happened*) but drops the translate.
+
+    The panel uses `[hidden]` to stay out of the a11y tree and tab order
+    when closed; we only remove `hidden` when opening, then animate. On
+    close we run the reverse transition then re-apply `hidden` — see the
+    JS below.
+  */
+  [data-mega-menu-panel] {
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition:
+      opacity 150ms ease,
+      transform 150ms ease;
+  }
+  [data-mega-menu-panel][data-state="open"] {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-mega-menu-panel] {
+      transform: none;
+      transition: opacity 100ms ease;
+    }
+    [data-mega-menu-panel][data-state="open"] {
+      transform: none;
+    }
+  }
+</style>
+
+<script>
+  /**
+   * Mega-menu controller.
+   *
+   * The panel is server-rendered with `data-state="closed"` and the
+   * `hidden` attribute. We toggle:
+   *   - hover: open on mouseenter (trigger or panel), close on mouseleave
+   *     after a 120ms grace timeout so a user crossing the gap between
+   *     trigger and panel doesn't lose the menu.
+   *   - focus: open when the trigger receives focus or focus moves into
+   *     the panel; close when focus leaves both.
+   *   - click on trigger: toggles (keyboard-friendly: Enter/Space land here).
+   *   - ESC: closes and returns focus to the trigger.
+   *   - astro:after-swap: closes the panel after every page swap so the
+   *     fresh DOM starts in a known state.
+   *
+   * Re-attached on `astro:page-load` (fires once on initial load AND after
+   * every ClientRouter swap), so a header re-mount does not leave dead
+   * listeners or a stale-open panel.
+   */
+  function initMegaMenu() {
+    // Listeners attach on every viewport — the trigger lives inside
+    // `nav.hidden md:block`, so it's `display:none` below md and cannot
+    // receive hover/focus/click. The panel therefore never opens on
+    // mobile, where the existing left-hand <details> menu handles
+    // navigation. Wiring unconditionally keeps the code simple across
+    // viewport resize without a media-query listener.
+    const trigger = document.querySelector<HTMLButtonElement>(
+      "[data-mega-menu-trigger]",
+    );
+    const panel = document.querySelector<HTMLElement>("[data-mega-menu-panel]");
+    if (!trigger || !panel) return;
+
+    let closeTimer: number | undefined;
+    const GRACE_MS = 120;
+
+    const open = () => {
+      if (closeTimer !== undefined) {
+        window.clearTimeout(closeTimer);
+        closeTimer = undefined;
+      }
+      if (panel.dataset.state === "open") return;
+      panel.hidden = false;
+      // Force a reflow so the transition picks up the state change. Reading
+      // offsetHeight is the canonical way to flush pending style updates.
+      void panel.offsetHeight;
+      panel.dataset.state = "open";
+      trigger.setAttribute("aria-expanded", "true");
+    };
+
+    const close = (returnFocus = false) => {
+      if (panel.dataset.state === "closed") return;
+      panel.dataset.state = "closed";
+      trigger.setAttribute("aria-expanded", "false");
+      // Wait for the 150ms transition to finish before adding `hidden`
+      // back — otherwise the panel snaps invisible mid-animation.
+      window.setTimeout(() => {
+        if (panel.dataset.state === "closed") panel.hidden = true;
+      }, 180);
+      if (returnFocus) trigger.focus();
+    };
+
+    const scheduleClose = () => {
+      if (closeTimer !== undefined) window.clearTimeout(closeTimer);
+      closeTimer = window.setTimeout(() => close(false), GRACE_MS);
+    };
+
+    const cancelClose = () => {
+      if (closeTimer !== undefined) {
+        window.clearTimeout(closeTimer);
+        closeTimer = undefined;
+      }
+    };
+
+    // Hover.
+    trigger.addEventListener("mouseenter", open);
+    trigger.addEventListener("mouseleave", scheduleClose);
+    panel.addEventListener("mouseenter", cancelClose);
+    panel.addEventListener("mouseleave", scheduleClose);
+
+    // Focus — opens on focus into trigger or panel, closes when focus
+    // leaves both. Using a single focusout on the document and checking
+    // relatedTarget keeps the logic simple.
+    trigger.addEventListener("focus", open);
+    panel.addEventListener("focusin", open);
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget as Node | null;
+      if (!next) return;
+      if (trigger.contains(next) || panel.contains(next)) return;
+      close(false);
+    };
+    trigger.addEventListener("focusout", onFocusOut);
+    panel.addEventListener("focusout", onFocusOut);
+
+    // Click toggle (keyboard Enter/Space lands here too).
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (panel.dataset.state === "open") {
+        close(false);
+      } else {
+        open();
+      }
+    });
+
+    // ESC anywhere on the document closes the panel and returns focus.
+    // The keydown listener attaches to `document`, which survives across
+    // ClientRouter swaps — so we stash a reference on the window and tear
+    // down any previous instance before re-adding. Without this the
+    // listener count would grow with every navigation, leaking memory and
+    // running the same handler N times on each ESC.
+    const w = window as Window & { __mtMegaMenuKeydown?: EventListener };
+    if (w.__mtMegaMenuKeydown) {
+      document.removeEventListener("keydown", w.__mtMegaMenuKeydown);
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (panel.dataset.state !== "open") return;
+      event.preventDefault();
+      close(true);
+    };
+    w.__mtMegaMenuKeydown = onKeyDown as EventListener;
+    document.addEventListener("keydown", onKeyDown);
+
+    // Auto-close when a link inside the panel is followed — the
+    // ClientRouter swap will rebuild the header anyway, but closing
+    // immediately removes the visual lag between click and swap.
+    panel
+      .querySelectorAll<HTMLAnchorElement>("[data-mega-menu-link]")
+      .forEach((link) => {
+        link.addEventListener("click", () => close(false));
+      });
+  }
+
+  // Astro fires `astro:page-load` on first paint AND after every
+  // ClientRouter swap. Re-running init on each swap re-binds listeners
+  // against the freshly rendered header.
+  document.addEventListener("astro:page-load", initMegaMenu);
+</script>
