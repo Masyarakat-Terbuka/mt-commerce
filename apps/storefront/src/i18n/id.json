@@ -273,7 +273,8 @@
   "account.profile.submitting": "Menyimpan…",
   "account.profile.saved": "Perubahan disimpan.",
 
-  "footer.copyright": "mt-commerce. Sumber terbuka.",
+  "footer.copyright": "© {year} mt-commerce. Lisensi MIT.",
+  "footer.region": "Dibuat di Indonesia",
   "footer.about": "Tentang",
   "footer.contact": "Kontak",
   "footer.col.about.title": "Tentang",
@@ -291,5 +292,26 @@
   "footer.col.legal.title": "Hukum",
   "footer.col.legal.terms": "Syarat layanan",
   "footer.col.legal.privacy": "Kebijakan privasi",
-  "footer.col.legal.license": "Lisensi"
+  "footer.col.legal.license": "Lisensi",
+
+  "footer.shop.heading": "Belanja",
+  "footer.shop.all_products": "Semua produk",
+  "footer.help.heading": "Bantuan",
+  "footer.help.shipping": "Pengiriman",
+  "footer.help.returns": "Pengembalian",
+  "footer.help.payment": "Pembayaran",
+  "footer.help.faq": "Pertanyaan umum",
+  "footer.about.heading": "Tentang",
+  "footer.about.about": "Tentang kami",
+  "footer.about.contact": "Hubungi kami",
+  "footer.legal.heading": "Hukum",
+  "footer.legal.privacy": "Kebijakan privasi",
+  "footer.legal.terms": "Syarat layanan",
+  "footer.newsletter.heading": "Kabar berkala",
+  "footer.newsletter.description": "Kabar singkat tentang produk baru dan cerita di balik pengrajin. Tanpa spam, berhenti kapan saja.",
+  "footer.newsletter.email_label": "Alamat email",
+  "footer.newsletter.email_placeholder": "kamu@email.com",
+  "footer.newsletter.submit": "Berlangganan",
+  "footer.newsletter.success": "Terima kasih, kamu sudah terdaftar.",
+  "footer.newsletter.error_invalid": "Format email tidak valid."
 }
