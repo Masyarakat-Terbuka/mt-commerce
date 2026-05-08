@@ -12,6 +12,7 @@
  *     OpenAPI later will see the same model these helpers produce.
  */
 import { toJSON as moneyToJSON, type MoneyJSON } from "@mt-commerce/core/money";
+import type { AuditActorKind, AuditEvent } from "../../audit/index.js";
 import type {
   Category,
   InventoryLevel,
@@ -121,5 +122,67 @@ export function toWireInventoryLevel(level: InventoryLevel): WireInventoryLevel 
     available: level.available,
     reserved: level.reserved,
     updatedAt: level.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Wire shape for one row in the variant's inventory audit history. Mirrors
+ * the persisted `audit_log` row but converts `createdAt` to ISO and
+ * normalizes the `details` blob to the inventory-specific shape callers
+ * actually consume. The full `details` map is also forwarded under
+ * `details` so future audit consumers can read whatever extra fields a new
+ * action attaches.
+ */
+export interface WireInventoryAuditEntry {
+  id: string;
+  variantId: string;
+  action: string;
+  actorKind: AuditActorKind;
+  actorId: string | null;
+  /**
+   * Inventory-specific details. The audit row may carry extra keys for
+   * future actions — those are still available under `details`. The three
+   * fields surfaced here are the ones the inventory UI cares about.
+   */
+  deltaApplied: number | null;
+  before: number | null;
+  after: number | null;
+  details: Record<string, unknown>;
+  reason: string | null;
+  createdAt: string;
+}
+
+export function toWireInventoryAuditEntry(
+  event: AuditEvent,
+): WireInventoryAuditEntry {
+  // Defensive coercion: the column is plain JSONB and a future caller
+  // could write a row with a different shape. We pull what we recognise
+  // and pass the full `details` map through unchanged for completeness.
+  const details = event.details ?? {};
+  const deltaApplied =
+    typeof (details as Record<string, unknown>).deltaApplied === "number"
+      ? ((details as Record<string, unknown>).deltaApplied as number)
+      : null;
+  const before =
+    typeof (details as Record<string, unknown>).before === "number"
+      ? ((details as Record<string, unknown>).before as number)
+      : null;
+  const after =
+    typeof (details as Record<string, unknown>).after === "number"
+      ? ((details as Record<string, unknown>).after as number)
+      : null;
+  return {
+    id: event.id,
+    // The audit row's entityId is the variantId for this entityKind.
+    variantId: event.entityId,
+    action: event.action,
+    actorKind: event.actorKind,
+    actorId: event.actorId,
+    deltaApplied,
+    before,
+    after,
+    details,
+    reason: event.reason,
+    createdAt: event.createdAt.toISOString(),
   };
 }

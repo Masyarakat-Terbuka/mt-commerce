@@ -50,6 +50,13 @@ import {
   type Variant,
   type VariantTranslations,
 } from "./types.js";
+import {
+  auditService as defaultAuditService,
+  type AuditActor,
+  type AuditService,
+  type InventoryAdjustDetails,
+  type PaginatedAudit,
+} from "../audit/index.js";
 
 export interface CatalogService {
   // Products
@@ -102,11 +109,52 @@ export interface CatalogService {
 
   // Inventory
   getInventory(variantId: string): Promise<InventoryLevel | null>;
-  adjustInventory(variantId: string, delta: number): Promise<InventoryLevel>;
+  /**
+   * Page through inventory rows. `productId` narrows to one product's
+   * variants; without it, every variant in the system is paginated. Soft-
+   * deleted variants are excluded.
+   */
+  listInventoryLevels(
+    query: { productId?: string; page?: number; pageSize?: number },
+  ): Promise<Paginated<InventoryLevel>>;
+  /**
+   * Apply a signed delta to a variant's available stock and append an
+   * `audit_log` row in the same transaction. The actor (resolved from
+   * request context) and the optional `reason` are persisted alongside
+   * `{ deltaApplied, before, after }` so the audit trail is self-contained.
+   */
+  adjustInventory(
+    variantId: string,
+    input: { delta: number; reason?: string },
+    ctx: AdjustInventoryContext,
+  ): Promise<InventoryLevel>;
+  /**
+   * List the audit history for a variant's inventory, newest first.
+   * Returns rows with `entityKind = "inventory"` and `entityId = variantId`.
+   */
+  listInventoryAudit(
+    variantId: string,
+    query: { page?: number; pageSize?: number },
+  ): Promise<PaginatedAudit>;
+}
+
+/**
+ * Per-call context for `adjustInventory`. The route layer reads the actor
+ * from the auth middleware (`getAuthedUser` for staff, otherwise system).
+ */
+export interface AdjustInventoryContext {
+  actor: AuditActor;
 }
 
 export class CatalogServiceImpl implements CatalogService {
-  constructor(private readonly repo: CatalogRepository) {}
+  /**
+   * `auditService` defaults to the runtime singleton; tests inject a fake
+   * to assert audit-row writes without standing up a database.
+   */
+  constructor(
+    private readonly repo: CatalogRepository,
+    private readonly auditService: AuditService = defaultAuditService,
+  ) {}
 
   // -------------------------------------------------------------------
   // Products
@@ -504,14 +552,39 @@ export class CatalogServiceImpl implements CatalogService {
     return row ? toInventoryLevel(row) : null;
   }
 
+  async listInventoryLevels(query: {
+    productId?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<Paginated<InventoryLevel>> {
+    const page = clampPage(query.page);
+    const pageSize = clampPageSize(query.pageSize);
+    const result = await this.repo.listInventoryLevels({
+      ...(query.productId !== undefined ? { productId: query.productId } : {}),
+      page,
+      pageSize,
+    });
+    return {
+      data: result.rows.map(toInventoryLevel),
+      total: result.total,
+      page,
+      pageSize,
+    };
+  }
+
   /**
-   * TODO: wire to audit_log when it lands. The audit row should capture the
-   * actor, the prior `available`, the delta, and the resulting `available`.
+   * Apply a signed delta to a variant's available stock and append an
+   * `audit_log` row in the same Postgres transaction. The audit row carries
+   * `{ deltaApplied, before, after }` plus the resolved actor and optional
+   * `reason`. Pre-checks (variant exists, delta is legal) run before opening
+   * the transaction so a doomed adjustment never spends a tx slot.
    */
   async adjustInventory(
     variantId: string,
-    delta: number,
+    input: { delta: number; reason?: string },
+    ctx: AdjustInventoryContext,
   ): Promise<InventoryLevel> {
+    const { delta, reason } = input;
     if (!Number.isInteger(delta) || delta === 0) {
       throw new ValidationError("delta must be a non-zero integer.", { delta });
     }
@@ -523,39 +596,74 @@ export class CatalogServiceImpl implements CatalogService {
       });
     }
 
-    let updated: Awaited<ReturnType<CatalogRepository["adjustInventoryAtomic"]>>;
-    try {
-      updated = await this.repo.adjustInventoryAtomic(variantId, delta);
-    } catch (err) {
-      // Postgres `22003` (numeric_value_out_of_range) — the resulting
-      // `available` would overflow `int4`. The Zod schema bounds `delta`
-      // at the boundary, but a colossal pre-existing `available` plus a
-      // legal-but-large delta could still overflow at the database. We
-      // convert this single, well-understood case into a 400 here rather
-      // than a generic 500 — and crucially do NOT add a wider catch.
-      if (isPostgresErrorWithCode(err, "22003")) {
-        throw new ValidationError(
-          "Inventory adjustment would overflow the supported range.",
-          {
-            code: "out_of_range",
-            variantId,
-            delta,
-            available: existing.available,
-          },
+    return this.repo.withTransaction(async ({ catalog, audit }) => {
+      let updated: Awaited<
+        ReturnType<CatalogRepository["adjustInventoryAtomic"]>
+      >;
+      try {
+        updated = await catalog.adjustInventoryAtomic(variantId, delta);
+      } catch (err) {
+        // Postgres `22003` (numeric_value_out_of_range) — the resulting
+        // `available` would overflow `int4`. The Zod schema bounds `delta`
+        // at the boundary, but a colossal pre-existing `available` plus a
+        // legal-but-large delta could still overflow at the database. We
+        // convert this single, well-understood case into a 400 here rather
+        // than a generic 500 — and crucially do NOT add a wider catch.
+        if (isPostgresErrorWithCode(err, "22003")) {
+          throw new ValidationError(
+            "Inventory adjustment would overflow the supported range.",
+            {
+              code: "out_of_range",
+              variantId,
+              delta,
+              available: existing.available,
+            },
+          );
+        }
+        throw err;
+      }
+      if (!updated) {
+        // The atomic update returned nothing, which means the WHERE guard
+        // (`available + delta >= 0`) failed. Surface a clear conflict so the
+        // caller can react (e.g. retry with a smaller delta).
+        throw new ConflictError(
+          "Inventory adjustment would drive `available` below zero.",
+          { variantId, delta, available: existing.available },
         );
       }
-      throw err;
-    }
-    if (!updated) {
-      // The atomic update returned nothing, which means the WHERE guard
-      // (`available + delta >= 0`) failed. Surface a clear conflict so the
-      // caller can react (e.g. retry with a smaller delta).
-      throw new ConflictError(
-        "Inventory adjustment would drive `available` below zero.",
-        { variantId, delta, available: existing.available },
-      );
-    }
-    return toInventoryLevel(updated);
+
+      // Audit row writes in the same transaction. A throw here rolls back
+      // the inventory write — auditing is a hard requirement, not a
+      // best-effort observation.
+      const details: InventoryAdjustDetails = {
+        deltaApplied: delta,
+        before: existing.available,
+        after: updated.available,
+      };
+      await this.auditService.recordEvent({
+        entityKind: "inventory",
+        entityId: variantId,
+        action: "inventory_adjust",
+        actor: ctx.actor,
+        details: details as unknown as Record<string, unknown>,
+        reason: reason ?? null,
+        repo: audit,
+      });
+
+      return toInventoryLevel(updated);
+    });
+  }
+
+  async listInventoryAudit(
+    variantId: string,
+    query: { page?: number; pageSize?: number },
+  ): Promise<PaginatedAudit> {
+    return this.auditService.listForEntity({
+      entityKind: "inventory",
+      entityId: variantId,
+      ...(query.page !== undefined ? { page: query.page } : {}),
+      ...(query.pageSize !== undefined ? { pageSize: query.pageSize } : {}),
+    });
   }
 
   // -------------------------------------------------------------------

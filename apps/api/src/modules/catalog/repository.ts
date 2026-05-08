@@ -31,6 +31,10 @@ import {
   type ProductRow,
   type ProductVariantRow,
 } from "../../db/schema/index.js";
+import {
+  createAuditRepository,
+  type AuditRepository,
+} from "../audit/repository.js";
 import type * as schema from "../../db/schema/index.js";
 import { DEFAULT_LOCALE, type KnownLocale } from "./i18n.js";
 import type { ProductSort, ProductStatus } from "./types.js";
@@ -96,12 +100,95 @@ export interface ProductListResult {
   total: number;
 }
 
+export interface InventoryListFilters {
+  /** When set, only inventory rows whose variant belongs to this product. */
+  productId?: string;
+  page: number;
+  pageSize: number;
+}
+
+export interface InventoryListResult {
+  rows: InventoryLevelRow[];
+  total: number;
+}
+
+/**
+ * Catalog repository surface. Declared explicitly (rather than inferred from
+ * `createCatalogRepository`) so `withTransaction` can name the recursive
+ * shape it hands back without TypeScript chasing its tail through the
+ * `ReturnType` of the factory.
+ */
+export interface CatalogRepository {
+  // Products
+  insertProduct(row: NewProductRow): Promise<ProductRow>;
+  getProductById(id: string): Promise<ProductRow | null>;
+  getProductBySlug(slug: string): Promise<ProductRow | null>;
+  listProducts(filters: ProductListFilters): Promise<ProductListResult>;
+  updateProduct(
+    id: string,
+    patch: Partial<NewProductRow>,
+  ): Promise<ProductRow | null>;
+  softDeleteProduct(id: string): Promise<void>;
+
+  // Variants
+  insertVariant(row: NewProductVariantRow): Promise<ProductVariantRow>;
+  getVariantById(id: string): Promise<ProductVariantRow | null>;
+  listVariantsForProducts(
+    productIds: string[],
+  ): Promise<ProductVariantRow[]>;
+  updateVariant(
+    id: string,
+    patch: Partial<NewProductVariantRow>,
+  ): Promise<ProductVariantRow | null>;
+  softDeleteVariant(id: string): Promise<void>;
+
+  // Categories
+  insertCategory(row: NewCategoryRow): Promise<CategoryRow>;
+  getCategoryById(id: string): Promise<CategoryRow | null>;
+  listCategories(): Promise<CategoryRow[]>;
+  updateCategory(
+    id: string,
+    patch: Partial<NewCategoryRow>,
+  ): Promise<CategoryRow | null>;
+  deleteCategory(id: string): Promise<void>;
+  setProductCategories(
+    productId: string,
+    categoryIds: string[],
+  ): Promise<void>;
+  listCategoryIdsForProducts(
+    productIds: string[],
+  ): Promise<Map<string, string[]>>;
+
+  // Inventory
+  insertInventoryLevel(
+    row: NewInventoryLevelRow,
+  ): Promise<InventoryLevelRow>;
+  getInventoryByVariant(
+    variantId: string,
+  ): Promise<InventoryLevelRow | null>;
+  adjustInventoryAtomic(
+    variantId: string,
+    delta: number,
+  ): Promise<InventoryLevelRow | null>;
+  listInventoryLevels(
+    filters: InventoryListFilters,
+  ): Promise<InventoryListResult>;
+
+  // Transactions
+  withTransaction<T>(
+    fn: (deps: {
+      catalog: CatalogRepository;
+      audit: AuditRepository;
+    }) => Promise<T>,
+  ): Promise<T>;
+}
+
 /**
  * Encapsulate the Drizzle calls so route/service code stays high-level. The
  * returned object is a singleton per `db`. Callers needing a transaction call
  * `db.transaction(async (tx) => createRepository(tx).createProduct(...))`.
  */
-export function createCatalogRepository(db: Db = defaultDb) {
+export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
   return {
     // -------------------------------------------------------------------
     // Products
@@ -471,7 +558,91 @@ export function createCatalogRepository(db: Db = defaultDb) {
         .returning();
       return updated ?? null;
     },
+
+    /**
+     * Page through inventory rows, optionally narrowed to one product. Used
+     * by the admin inventory listing. We compute a separate count aggregate
+     * to keep pagination cheap and predictable.
+     *
+     * Filters:
+     *   - `productId` joins `inventory_levels → product_variants` and
+     *     restricts to that product's variants.
+     * Soft-deleted variants are excluded — a deleted variant's stock row
+     * is dead weight to the operator. Multi-location is out of scope: rows
+     * with `location_id IS NOT NULL` are filtered out so the v0.1 listing
+     * matches the single-row-per-variant assumption the rest of the catalog
+     * already enforces.
+     */
+    async listInventoryLevels(
+      filters: InventoryListFilters,
+    ): Promise<InventoryListResult> {
+      const conditions: SQL[] = [isNull(inventoryLevels.locationId)];
+      if (filters.productId) {
+        const variantIds = db
+          .select({ vid: productVariants.id })
+          .from(productVariants)
+          .where(
+            and(
+              eq(productVariants.productId, filters.productId),
+              isNull(productVariants.deletedAt),
+            ),
+          );
+        conditions.push(inArray(inventoryLevels.variantId, variantIds));
+      } else {
+        // No product filter: still hide rows for soft-deleted variants. Done
+        // via a NOT IN against the soft-deleted variant ids — using a
+        // subquery keeps the index path on `inventory_levels` free instead
+        // of forcing an outer join.
+        const deletedVariantIds = db
+          .select({ vid: productVariants.id })
+          .from(productVariants)
+          .where(sql`${productVariants.deletedAt} IS NOT NULL`);
+        conditions.push(
+          sql`${inventoryLevels.variantId} NOT IN ${deletedVariantIds}`,
+        );
+      }
+      const where = and(...conditions);
+
+      const countRows = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(inventoryLevels)
+        .where(where ?? sql`true`);
+      const total = countRows[0]?.count ?? 0;
+
+      const offset = (filters.page - 1) * filters.pageSize;
+      const rows = await db
+        .select()
+        .from(inventoryLevels)
+        .where(where ?? sql`true`)
+        .orderBy(desc(inventoryLevels.updatedAt), asc(inventoryLevels.id))
+        .limit(filters.pageSize)
+        .offset(offset);
+      return { rows, total };
+    },
+
+    /**
+     * Run `fn` inside a Postgres transaction. The callback receives a
+     * repository bound to the transaction `tx` and an audit repository
+     * bound to the same `tx`, so the inventory adjustment and its audit
+     * row commit (or roll back) together.
+     *
+     * Two repos rather than a unified one because the audit module is its
+     * own bounded context per ADR-0005 — the catalog repo cannot reach into
+     * `audit_log` directly.
+     */
+    async withTransaction<T>(
+      fn: (deps: {
+        catalog: CatalogRepository;
+        audit: AuditRepository;
+      }) => Promise<T>,
+    ): Promise<T> {
+      return db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        return fn({
+          catalog: createCatalogRepository(txDb),
+          audit: createAuditRepository(txDb),
+        });
+      });
+    },
   };
 }
-
-export type CatalogRepository = ReturnType<typeof createCatalogRepository>;

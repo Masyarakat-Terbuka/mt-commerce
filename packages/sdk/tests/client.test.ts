@@ -1178,4 +1178,160 @@ describe("createClient — admin.inventory", () => {
       status: 409,
     });
   });
+
+  it("forwards an optional reason on adjust", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: sampleInventoryWirePayload,
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.admin.inventory.adjust("var_abc", {
+      delta: 5,
+      reason: "received from supplier",
+    });
+
+    const sentBody = JSON.parse(String(calls[0]!.init?.body));
+    expect(sentBody).toEqual({
+      delta: 5,
+      reason: "received from supplier",
+    });
+  });
+
+  it("omits a missing reason from the request body", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: sampleInventoryWirePayload,
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.admin.inventory.adjust("var_abc", { delta: 5 });
+
+    const sentBody = JSON.parse(String(calls[0]!.init?.body));
+    expect(sentBody).toEqual({ delta: 5 });
+    expect("reason" in sentBody).toBe(false);
+  });
+
+  it("byVariantId fetches the variant's inventory level", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: sampleInventoryWirePayload,
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const level = await client.admin.inventory.byVariantId("var_abc");
+    expect(calls[0]!.url).toBe(
+      "http://localhost:8000/admin/v1/variants/var_abc/inventory",
+    );
+    expect(calls[0]!.init?.method ?? "GET").toBe("GET");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    expect(level).not.toBeNull();
+    expect(level!.available).toBe(105);
+    expect(level!.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("byVariantId returns null on a 404", async () => {
+    const { fetch } = mockFetch({
+      status: 404,
+      body: {
+        error: {
+          code: "not_found",
+          message: "Inventory level not found for variant.",
+        },
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const level = await client.admin.inventory.byVariantId("var_missing");
+    expect(level).toBeNull();
+  });
+
+  it("byVariantId still throws non-404 errors", async () => {
+    const { fetch } = mockFetch({
+      status: 500,
+      body: { error: { code: "server_error", message: "boom" } },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(
+      client.admin.inventory.byVariantId("var_abc"),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("list paginates inventory levels and forwards productId", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [sampleInventoryWirePayload],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const result = await client.admin.inventory.list({
+      productId: "prod_abc",
+      page: 1,
+      pageSize: 20,
+    });
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/admin/v1/inventory/levels");
+    expect(url.searchParams.get("productId")).toBe("prod_abc");
+    expect(url.searchParams.get("page")).toBe("1");
+    expect(url.searchParams.get("pageSize")).toBe("20");
+    expect(result.total).toBe(1);
+    expect(result.data[0]!.variantId).toBe("var_abc");
+    expect(result.data[0]!.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("auditByVariantId fetches the audit history with pagination", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: "aud_01",
+            variantId: "var_abc",
+            action: "inventory_adjust",
+            actorKind: "staff",
+            actorId: "usr_staff",
+            deltaApplied: 5,
+            before: 100,
+            after: 105,
+            details: { deltaApplied: 5, before: 100, after: 105 },
+            reason: "received from supplier",
+            createdAt: "2026-05-07T08:00:00.000Z",
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const result = await client.admin.inventory.auditByVariantId("var_abc", {
+      page: 1,
+      pageSize: 20,
+    });
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe(
+      "/admin/v1/variants/var_abc/inventory/audit",
+    );
+    expect(url.searchParams.get("page")).toBe("1");
+    expect(url.searchParams.get("pageSize")).toBe("20");
+    expect(result.total).toBe(1);
+    const entry = result.data[0]!;
+    expect(entry.action).toBe("inventory_adjust");
+    expect(entry.actorKind).toBe("staff");
+    expect(entry.actorId).toBe("usr_staff");
+    expect(entry.deltaApplied).toBe(5);
+    expect(entry.before).toBe(100);
+    expect(entry.after).toBe(105);
+    expect(entry.reason).toBe("received from supplier");
+    expect(entry.createdAt).toBeInstanceOf(Date);
+  });
 });

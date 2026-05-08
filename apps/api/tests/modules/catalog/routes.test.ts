@@ -188,8 +188,14 @@ function createFakeService(state: FakeServiceState): CatalogService {
     async getInventory(): Promise<InventoryLevel | null> {
       return null;
     },
+    async listInventoryLevels() {
+      return { data: [], total: 0, page: 1, pageSize: 20 };
+    },
     async adjustInventory(): Promise<InventoryLevel> {
       return fail();
+    },
+    async listInventoryAudit() {
+      return { data: [], total: 0, page: 1, pageSize: 20 };
     },
   };
 }
@@ -433,5 +439,237 @@ describe("storefront routes /storefront/v1/products/:slug", () => {
     expect(body.slug).toBe("active-listing");
     expect(body.variants[0]?.price.currency).toBe("IDR");
     expect(body.variants[0]?.price.amount).toMatch(/^\d+$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inventory: GET endpoints + adjust forwards reason + audit history
+// ---------------------------------------------------------------------------
+
+describe("admin routes /admin/v1/variants/{id}/inventory", () => {
+  function makeLevel(
+    overrides: Partial<InventoryLevel> = {},
+  ): InventoryLevel {
+    return {
+      id: overrides.id ?? "inv_test",
+      variantId: overrides.variantId ?? "var_test",
+      locationId: overrides.locationId ?? null,
+      available: overrides.available ?? 12,
+      reserved: overrides.reserved ?? 0,
+      updatedAt: overrides.updatedAt ?? fixedDate,
+    };
+  }
+
+  it("GET /variants/{id}/inventory returns the level with ISO timestamps", async () => {
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const baseService = createFakeService(state);
+    const service: CatalogService = {
+      ...baseService,
+      async getInventory() {
+        return makeLevel();
+      },
+    };
+    const app = buildAdminApp(service);
+    const res = await app.request(
+      "/admin/v1/variants/var_test/inventory",
+      withAuth(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      available: number;
+      updatedAt: string;
+    };
+    expect(body.id).toBe("inv_test");
+    expect(body.available).toBe(12);
+    expect(body.updatedAt).toBe(fixedDate.toISOString());
+  });
+
+  it("GET /variants/{id}/inventory returns 404 when no level exists", async () => {
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request(
+      "/admin/v1/variants/var_missing/inventory",
+      withAuth(),
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("not_found");
+  });
+
+  it("GET /inventory/levels paginates and forwards productId", async () => {
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const baseService = createFakeService(state);
+    const observed: Array<{ productId?: string; page?: number }> = [];
+    const service: CatalogService = {
+      ...baseService,
+      async listInventoryLevels(query) {
+        observed.push({
+          productId: query.productId,
+          page: query.page,
+        });
+        return {
+          data: [makeLevel()],
+          total: 1,
+          page: query.page ?? 1,
+          pageSize: query.pageSize ?? 20,
+        };
+      },
+    };
+    const app = buildAdminApp(service);
+    const res = await app.request(
+      "/admin/v1/inventory/levels?productId=prod_abc&page=1&pageSize=10",
+      withAuth(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ id: string }>;
+      total: number;
+      page: number;
+      pageSize: number;
+    };
+    expect(body.total).toBe(1);
+    expect(body.page).toBe(1);
+    expect(body.pageSize).toBe(10);
+    expect(body.data).toHaveLength(1);
+    expect(observed[0]?.productId).toBe("prod_abc");
+    expect(observed[0]?.page).toBe(1);
+  });
+
+  it("POST .../inventory/adjust forwards delta and reason and resolves staff actor", async () => {
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const baseService = createFakeService(state);
+    const observed: Array<{
+      input: { delta: number; reason?: string };
+      ctx: { actor: { kind: string; userId?: string } };
+    }> = [];
+    const service: CatalogService = {
+      ...baseService,
+      async adjustInventory(_variantId, input, ctx) {
+        observed.push({
+          input,
+          ctx: {
+            actor: {
+              kind: ctx.actor.kind,
+              ...(ctx.actor.kind === "staff"
+                ? { userId: ctx.actor.userId }
+                : {}),
+            },
+          },
+        });
+        return makeLevel({ available: 17 });
+      },
+    };
+    const app = buildAdminApp(service);
+    const res = await app.request(
+      "/admin/v1/variants/var_test/inventory/adjust",
+      withAuth({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          delta: 5,
+          reason: "received from supplier",
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]?.input.delta).toBe(5);
+    expect(observed[0]?.input.reason).toBe("received from supplier");
+    expect(observed[0]?.ctx.actor.kind).toBe("staff");
+    expect(observed[0]?.ctx.actor.userId).toBe(STAFF_USER.id);
+  });
+
+  it("POST .../inventory/adjust rejects an empty reason at the boundary", async () => {
+    // The schema requires `reason.min(1)`; an empty string must be a 400,
+    // not a silent no-reason fallback. This pins the boundary contract so
+    // a future schema change cannot accidentally accept a blank reason.
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const app = buildAdminApp(createFakeService(state));
+    const res = await app.request(
+      "/admin/v1/variants/var_test/inventory/adjust",
+      withAuth({
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ delta: 5, reason: "" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("validation_error");
+  });
+
+  it("GET .../inventory/audit returns the paginated audit history", async () => {
+    const state: FakeServiceState = {
+      productsBySlug: new Map(),
+      productsById: new Map(),
+    };
+    const baseService = createFakeService(state);
+    const service: CatalogService = {
+      ...baseService,
+      async listInventoryAudit(variantId, query) {
+        return {
+          data: [
+            {
+              id: "aud_01",
+              entityKind: "inventory",
+              entityId: variantId,
+              action: "inventory_adjust",
+              actorKind: "staff",
+              actorId: "usr_test",
+              details: { deltaApplied: 5, before: 100, after: 105 },
+              reason: "received",
+              createdAt: fixedDate,
+            },
+          ],
+          total: 1,
+          page: query.page ?? 1,
+          pageSize: query.pageSize ?? 20,
+        };
+      },
+    };
+    const app = buildAdminApp(service);
+    const res = await app.request(
+      "/admin/v1/variants/var_test/inventory/audit?page=1&pageSize=20",
+      withAuth(),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{
+        id: string;
+        action: string;
+        actorKind: string;
+        deltaApplied: number | null;
+        before: number | null;
+        after: number | null;
+        reason: string | null;
+        createdAt: string;
+      }>;
+      total: number;
+    };
+    expect(body.total).toBe(1);
+    const entry = body.data[0]!;
+    expect(entry.action).toBe("inventory_adjust");
+    expect(entry.actorKind).toBe("staff");
+    expect(entry.deltaApplied).toBe(5);
+    expect(entry.before).toBe(100);
+    expect(entry.after).toBe(105);
+    expect(entry.reason).toBe("received");
+    expect(entry.createdAt).toBe(fixedDate.toISOString());
   });
 });

@@ -143,6 +143,64 @@ export interface AdjustInventoryInput {
    * the value verbatim; the API is the validation source of truth.
    */
   delta: number;
+  /**
+   * Optional free-form operator note (e.g. "received from supplier"). The
+   * server trims it, caps at 500 chars, and persists it to the audit_log
+   * row alongside the actor and the before/after counts. Omit (or pass an
+   * empty value) to record an adjustment without a reason.
+   */
+  reason?: string;
+}
+
+// ----------------------------------------------------------------------------
+// Inventory audit history — wire and domain shapes for one row of the
+// `audit_log` filtered to entity_kind=`inventory`.
+// ----------------------------------------------------------------------------
+
+export type InventoryActorKind = "system" | "staff" | "customer";
+
+export interface WireInventoryAuditEntry {
+  id: string;
+  variantId: string;
+  action: string;
+  actorKind: InventoryActorKind;
+  actorId: string | null;
+  /**
+   * Inventory-specific details extracted from `details`. Null when the
+   * persisted row is from an older or different action shape.
+   */
+  deltaApplied: number | null;
+  before: number | null;
+  after: number | null;
+  /** Full persisted details blob, including any forward-compatible fields. */
+  details: Record<string, unknown>;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface InventoryAuditEntry {
+  id: string;
+  variantId: string;
+  action: string;
+  actorKind: InventoryActorKind;
+  actorId: string | null;
+  deltaApplied: number | null;
+  before: number | null;
+  after: number | null;
+  details: Record<string, unknown>;
+  reason: string | null;
+  createdAt: Date;
+}
+
+export interface AdminListInventoryQuery {
+  productId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminListInventoryAuditQuery {
+  page?: number;
+  pageSize?: number;
 }
 
 // ----------------------------------------------------------------------------

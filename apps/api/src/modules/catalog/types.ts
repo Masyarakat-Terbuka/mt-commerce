@@ -507,6 +507,14 @@ export const adjustInventorySchema = z.object({
     .refine((n) => n !== 0, {
       message: "delta must be a non-zero integer",
     }),
+  /**
+   * Free-form operator note (e.g. "received 50 bags from supplier"). Trimmed
+   * and persisted to the audit_log row alongside the action; surfaced back
+   * through `GET /admin/v1/variants/{id}/inventory/audit`. A blank or
+   * whitespace-only string is folded to `null` by the audit service so the
+   * column distinguishes "no reason supplied" from "empty string."
+   */
+  reason: z.string().min(1).max(500).optional(),
 });
 export type AdjustInventoryInput = z.infer<typeof adjustInventorySchema>;
 
@@ -524,6 +532,43 @@ export type ProductSort = z.infer<typeof productSortSchema>;
 
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
+
+/**
+ * Admin inventory-level list query. `productId` narrows to one product's
+ * variants; without it, every variant in the system is paginated. Pagination
+ * mirrors the rest of the admin surface (1-indexed, `pageSize` capped).
+ */
+export const listInventoryLevelsQuerySchema = z.object({
+  productId: z.string().min(1).max(100).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_SIZE)
+    .default(DEFAULT_PAGE_SIZE),
+});
+export type ListInventoryLevelsQuery = z.infer<
+  typeof listInventoryLevelsQuerySchema
+>;
+
+/**
+ * Pagination query for the audit history endpoint. Same shape as the other
+ * admin list queries; kept distinct so future audit-only filters (date
+ * range, action) can land here without disturbing the inventory list.
+ */
+export const listInventoryAuditQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_SIZE)
+    .default(DEFAULT_PAGE_SIZE),
+});
+export type ListInventoryAuditQuery = z.infer<
+  typeof listInventoryAuditQuerySchema
+>;
 
 /**
  * Storefront and admin list-query schema. `coerce` flips the URL-string-only

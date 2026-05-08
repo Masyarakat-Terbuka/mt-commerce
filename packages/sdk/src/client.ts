@@ -37,6 +37,8 @@ import type {
   AdjustInventoryInput,
   AdminCreateCustomerInput,
   AdminListCustomersQuery,
+  AdminListInventoryAuditQuery,
+  AdminListInventoryQuery,
   AdminListOrdersQuery,
   AdminListProductsQuery,
   AdminUpdateCustomerInput,
@@ -61,6 +63,7 @@ import type {
   CustomerAddress,
   CustomerWithAddresses,
   District,
+  InventoryAuditEntry,
   InventoryLevel,
   ListKecamatanQuery,
   ListKelurahanQuery,
@@ -110,6 +113,7 @@ import type {
   WireCustomerAddress,
   WireCustomerWithAddresses,
   WireDistrict,
+  WireInventoryAuditEntry,
   WireInventoryLevel,
   WireListEnvelope,
   WireOrder,
@@ -431,6 +435,24 @@ function toInventoryLevel(w: WireInventoryLevel): InventoryLevel {
     available: w.available,
     reserved: w.reserved,
     updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toInventoryAuditEntry(
+  w: WireInventoryAuditEntry,
+): InventoryAuditEntry {
+  return {
+    id: w.id,
+    variantId: w.variantId,
+    action: w.action,
+    actorKind: w.actorKind,
+    actorId: w.actorId,
+    deltaApplied: w.deltaApplied,
+    before: w.before,
+    after: w.after,
+    details: w.details,
+    reason: w.reason,
+    createdAt: new Date(w.createdAt),
   };
 }
 
@@ -1118,15 +1140,43 @@ export interface AdminInventoryApi {
    * Server validation: integer, non-zero, |delta| ≤ 1,000,000. The API also
    * refuses an adjustment that would drive `available` below zero (returns
    * `409 conflict`). The returned `InventoryLevel` is the post-adjustment
-   * state — the SDK does not currently expose a separate read endpoint
-   * (the API has not added one yet), so callers should hold on to this
-   * value as the source of truth for the row they just touched.
+   * state.
+   *
+   * The optional `reason` lands in the audit log next to the actor and the
+   * before/after counts. A blank value is folded to "no reason supplied"
+   * server-side.
    */
   adjust(
     variantId: string,
     input: AdjustInventoryInput,
     options?: RequestOptions,
   ): Promise<InventoryLevel>;
+  /**
+   * GET the inventory level for a single variant. Returns `null` if the
+   * variant has no inventory row (the API replies 404; the SDK normalizes
+   * "missing" into a null result so callers do not have to branch on
+   * `ApiError.code === "not_found"` for the common case).
+   */
+  byVariantId(
+    variantId: string,
+    options?: RequestOptions,
+  ): Promise<InventoryLevel | null>;
+  /**
+   * Paginated list of inventory rows. `productId` narrows to one product's
+   * variants; without it, every variant's row is returned.
+   */
+  list(
+    query?: AdminListInventoryQuery,
+    options?: RequestOptions,
+  ): Promise<Paginated<InventoryLevel>>;
+  /**
+   * Paginated audit history for a variant's inventory, newest first.
+   */
+  auditByVariantId(
+    variantId: string,
+    query?: AdminListInventoryAuditQuery,
+    options?: RequestOptions,
+  ): Promise<Paginated<InventoryAuditEntry>>;
 }
 
 export interface AdminApi {
@@ -2168,11 +2218,6 @@ export function createClient(options: ClientOptions): MtCommerceClient {
       },
     },
     inventory: {
-      // The API exposes only the signed `adjust` mutation at v0.1 — there is
-      // no `GET /admin/v1/variants/{id}/inventory` endpoint yet. Callers that
-      // need the current `available` either keep the value returned here or
-      // re-derive it from a follow-up adjust. Once a read endpoint lands the
-      // SDK will gain a `byVariantId(...)` method without breaking this one.
       async adjust(variantId, input, requestOptions) {
         const wire = await request<WireInventoryLevel>(
           adminCtx,
@@ -2180,10 +2225,66 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           {
             ...(requestOptions ?? {}),
             method: "POST",
-            body: { delta: input.delta },
+            body: omitUndefined({
+              delta: input.delta,
+              reason: input.reason,
+            }),
           },
         );
         return toInventoryLevel(wire);
+      },
+      async byVariantId(variantId, requestOptions) {
+        try {
+          const wire = await request<WireInventoryLevel>(
+            adminCtx,
+            `/admin/v1/variants/${encodeURIComponent(variantId)}/inventory`,
+            requestOptions,
+          );
+          return toInventoryLevel(wire);
+        } catch (err) {
+          // 404 → null is the common case (no inventory row for this
+          // variant). Anything else (auth failure, server error, transport)
+          // bubbles up as ApiError so callers can react.
+          if (err instanceof ApiError && err.status === 404) {
+            return null;
+          }
+          throw err;
+        }
+      },
+      async list(query, requestOptions) {
+        const qs = buildQuery({
+          productId: query?.productId,
+          page: query?.page,
+          pageSize: query?.pageSize,
+        });
+        const wire = await request<WirePaginated<WireInventoryLevel>>(
+          adminCtx,
+          `/admin/v1/inventory/levels${qs}`,
+          requestOptions,
+        );
+        return {
+          data: wire.data.map(toInventoryLevel),
+          total: wire.total,
+          page: wire.page,
+          pageSize: wire.pageSize,
+        };
+      },
+      async auditByVariantId(variantId, query, requestOptions) {
+        const qs = buildQuery({
+          page: query?.page,
+          pageSize: query?.pageSize,
+        });
+        const wire = await request<WirePaginated<WireInventoryAuditEntry>>(
+          adminCtx,
+          `/admin/v1/variants/${encodeURIComponent(variantId)}/inventory/audit${qs}`,
+          requestOptions,
+        );
+        return {
+          data: wire.data.map(toInventoryAuditEntry),
+          total: wire.total,
+          page: wire.page,
+          pageSize: wire.pageSize,
+        };
       },
     },
   };
