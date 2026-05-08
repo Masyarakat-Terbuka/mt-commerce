@@ -33,7 +33,10 @@ export default defineConfig({
    */
   integrations: [
     react(),
-    mdx(),
+    // @astrojs/mdx 4.3 + astro 5.18 trips on `plugins is not iterable` when
+    // remark/rehype plugins aren't set explicitly. Empty arrays are the
+    // documented default; passing them silences the regression.
+    mdx({ remarkPlugins: [], rehypePlugins: [] }),
     sitemap({
       i18n: {
         defaultLocale: "id",
@@ -59,5 +62,16 @@ export default defineConfig({
       prefixDefaultLocale: false,
     },
   },
+  // Astro 5.18 introduced a stricter config refinement that crashes when
+  // `image.remotePatterns` is undefined; supplying an empty array keeps the
+  // refiner happy. We don't use Astro's `<Image />` for remote URLs anyway —
+  // product photography goes through the storefront's own CDN paths and
+  // hero photos are inline `<img>` with `srcset`.
+  image: { remotePatterns: [] },
+  // @astrojs/mdx 4.3 reads `config.markdown.{remarkPlugins,rehypePlugins}`
+  // unconditionally; Astro 5.18 stopped defaulting them to empty arrays
+  // when the operator omits the markdown block. Defaulting here keeps the
+  // mdx integration's `astro:config:done` hook from crashing.
+  markdown: { remarkPlugins: [], rehypePlugins: [] },
   output: "static",
 });
