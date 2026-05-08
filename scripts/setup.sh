@@ -91,26 +91,20 @@ step "Seeding regions and demo catalog"
 bun --filter '@mt-commerce/api' db:seed
 ok "seed loaded"
 
-# 7. Provision a demo staff owner so the admin is sign-in-able out of
-#    the box. Defaults are overridable via env vars; provision-owner
-#    errors with "already exists" on re-run, which we tolerate so this
-#    whole script stays idempotent.
+# 7. Seed a demo staff owner so the admin is sign-in-able out of the box.
+#    Defaults are overridable via env vars; the script signs the user up
+#    via Better Auth and promotes them to owner in one shot. Both steps
+#    are idempotent — re-running is a no-op for an existing demo owner.
 DEMO_EMAIL="${MT_COMMERCE_DEMO_EMAIL:-demo@mt-commerce.local}"
 DEMO_PASSWORD="${MT_COMMERCE_DEMO_PASSWORD:-DemoOwner1!}"
-step "Provisioning demo staff owner"
-if bun --filter '@mt-commerce/api' provision-owner \
-     "$DEMO_EMAIL" "$DEMO_PASSWORD" 2>&1 | tee /tmp/mt-provision.log; then
-  ok "owner created: $DEMO_EMAIL"
+step "Seeding demo staff owner"
+if bun --filter '@mt-commerce/api' seed:demo-owner \
+     "$DEMO_EMAIL" "$DEMO_PASSWORD"; then
+  ok "demo owner ready: $DEMO_EMAIL"
 else
-  if grep -q -i "already exists\|duplicate" /tmp/mt-provision.log; then
-    warn "owner already exists (re-run is a no-op): $DEMO_EMAIL"
-  else
-    err "provision-owner failed; see output above."
-    rm -f /tmp/mt-provision.log
-    exit 1
-  fi
+  err "seed:demo-owner failed; see output above."
+  exit 1
 fi
-rm -f /tmp/mt-provision.log
 
 printf "\n${G}${BOLD}Setup complete.${NC}\n\n"
 cat <<NEXT
