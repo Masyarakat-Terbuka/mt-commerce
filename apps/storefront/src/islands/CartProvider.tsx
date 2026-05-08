@@ -38,6 +38,7 @@ import {
 } from "react";
 import { ApiError, createClient, type Cart } from "@mt-commerce/sdk";
 import { resolveApiUrl } from "../lib/api.js";
+import { addLineItem } from "../lib/cart-actions.js";
 
 const STORAGE_KEY = "mt.cartId";
 const CART_CHANGED_EVENT = "mt:cart-changed";
@@ -219,19 +220,6 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     };
   }, [client, updateCart]);
 
-  // Ensure a cart exists; returns the id for use by the caller. Persistence
-  // is updated synchronously so a refresh mid-flight still finds the cart.
-  const ensureCart = useCallback(async (): Promise<string> => {
-    if (cartIdRef.current) return cartIdRef.current;
-    const created = await client.storefront.cart.create({
-      currency: DEFAULT_CURRENCY,
-    });
-    cartIdRef.current = created.id;
-    writePersistedCartId(created.id);
-    updateCart(created);
-    return created.id;
-  }, [client, updateCart]);
-
   // Total quantity helper. Used to compute deltas before/after a
   // mutation so the broadcast carries the change the badge needs to
   // decide whether to bump.
@@ -246,20 +234,23 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     async (variantId: string, quantity = 1) => {
       setError(null);
       setLoading(true);
-      const before = totalQuantity(cart);
       try {
-        const id = await ensureCart();
-        const next = await client.storefront.cart.addItem(id, {
+        // Delegate to the shared helper so the wire format and broadcast
+        // shape stay identical between PDP adds (this provider) and
+        // grid quick-adds (`QuickAddButton`, which uses `addLineItem`
+        // directly because it has no provider tree of its own). The
+        // helper also persists the cart id to localStorage and emits
+        // `mt:cart-changed`, so the rest of the provider just mirrors
+        // the returned cart into local state.
+        const result = await addLineItem({
+          apiUrl: apiUrl ?? resolveApiUrl(),
+          cartId: cartIdRef.current,
           variantId,
           quantity,
+          currency: DEFAULT_CURRENCY,
         });
-        updateCart(next);
-        const after = totalQuantity(next);
-        broadcastCartChange({
-          delta: after - before,
-          itemCount: after,
-          variantId,
-        });
+        cartIdRef.current = result.cartId;
+        updateCart(result.cart);
       } catch (err) {
         setError(err instanceof Error ? err.message : "cart_add_failed");
         throw err;
@@ -267,7 +258,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         setLoading(false);
       }
     },
-    [cart, client, ensureCart, totalQuantity, updateCart],
+    [apiUrl, updateCart],
   );
 
   const updateItem = useCallback(

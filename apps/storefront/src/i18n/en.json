@@ -50,6 +50,10 @@
 
   "products.card.photo_coming_soon": "Photo coming soon",
 
+  "quick_add.label": "Add to cart",
+  "quick_add.success": "Added",
+  "quick_add.error": "Failed to add. Try again.",
+
   "breadcrumb.home": "Home",
   "breadcrumb.search": "Search",
 

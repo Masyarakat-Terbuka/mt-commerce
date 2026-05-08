@@ -50,6 +50,10 @@
 
   "products.card.photo_coming_soon": "Foto segera hadir",
 
+  "quick_add.label": "Tambah ke keranjang",
+  "quick_add.success": "Ditambahkan",
+  "quick_add.error": "Gagal menambahkan. Coba lagi.",
+
   "breadcrumb.home": "Beranda",
   "breadcrumb.search": "Pencarian",
 
