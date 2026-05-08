@@ -29,6 +29,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
 import { ProductEditorPage } from "@/pages/ProductEditorPage";
 import { InventoryPage } from "@/pages/InventoryPage";
+import { CategoriesPage } from "@/pages/CategoriesPage";
 import { CustomersPage } from "@/pages/CustomersPage";
 import { CustomerDetailPage } from "@/pages/CustomerDetailPage";
 import {
@@ -149,6 +150,12 @@ const inventoryRoute = createRoute({
   component: InventoryPage,
 });
 
+const categoriesRoute = createRoute({
+  getParentRoute: () => gatedRoute,
+  path: "/kategori",
+  component: CategoriesPage,
+});
+
 /**
  * `/pesanan` keeps its filter state in the URL so that refreshing or
  * sharing the page preserves what the operator was looking at. The
@@ -266,6 +273,7 @@ const routeTree = rootRoute.addChildren([
     productNewRoute,
     productEditRoute,
     inventoryRoute,
+    categoriesRoute,
     ordersRoute,
     orderDetailRoute,
     customersRoute,
