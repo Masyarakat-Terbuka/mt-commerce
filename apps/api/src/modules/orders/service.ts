@@ -41,7 +41,6 @@ import { childLogger } from "../../lib/logger.js";
 import { DEFAULT_LOCALE } from "../catalog/i18n.js";
 import {
   shippingService as defaultShippingService,
-  type Fulfillment,
   type ShippingService,
 } from "../shipping/index.js";
 import { events, type EventName, type EventPayload } from "./events.js";

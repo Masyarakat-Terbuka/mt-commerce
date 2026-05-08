@@ -14,6 +14,7 @@
  * work in a single transaction. The default uses the module-level `db`.
  */
 import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as defaultDb } from "../../db/client.js";
 import {
@@ -88,7 +89,7 @@ export interface ProductListFilters {
  * a future caller passes user input.
  */
 function translatedField(
-  column: import("drizzle-orm/pg-core").AnyPgColumn,
+  column: AnyPgColumn,
   locale: KnownLocale,
   field: string,
 ): SQL<string | null> {

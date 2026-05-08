@@ -183,7 +183,10 @@ const imageAltSchema = z.string().min(1).max(500);
  * that targets an unknown locale would land translations the resolver can
  * never expose.
  */
-const localeSchema = z.enum(KNOWN_LOCALES);
+// Kept (with the underscore prefix) as a documentation reference for the
+// allowed locale set; the actual locale gating happens on the merged write
+// schemas below.
+const _localeSchema = z.enum(KNOWN_LOCALES);
 
 const KNOWN_LOCALES_LABEL = KNOWN_LOCALES.join(", ");
 

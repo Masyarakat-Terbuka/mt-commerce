@@ -24,16 +24,12 @@ import { and, asc, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-or
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as defaultDb } from "../../db/client.js";
 import {
-  kecamatan,
-  kelurahan,
-  kotaKabupaten,
   orderIntents,
   orderItems,
   orderStatusHistory,
   orders,
   productVariants,
   products,
-  provinsi,
   type NewOrderItemRow,
   type NewOrderRow,
   type NewOrderStatusHistoryRow,

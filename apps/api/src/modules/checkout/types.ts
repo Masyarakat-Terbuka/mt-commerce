@@ -136,7 +136,9 @@ const currencySchema = z
  * value through without translation. The string form preserves bigint
  * precision; the boundary parses to a `bigint`.
  */
-const moneyInputSchema = z.object({
+// Reserved for the upcoming partial-refund / capture flows. Prefixed to
+// silence the unused-vars rule until those endpoints land.
+const _moneyInputSchema = z.object({
   amount: z
     .string()
     .regex(/^-?\d+$/, { message: "amount must be an integer string" }),

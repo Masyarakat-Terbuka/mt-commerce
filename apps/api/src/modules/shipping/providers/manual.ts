@@ -30,7 +30,6 @@ export class ManualShippingProvider implements ShippingProvider {
    * weight; the caller forwards them anyway so the same call shape works
    * for plugin providers too.
    */
-  // eslint-disable-next-line @typescript-eslint/require-await
   async quote(
     method: ShippingMethod,
     _ctx: ShippingQuoteContext,

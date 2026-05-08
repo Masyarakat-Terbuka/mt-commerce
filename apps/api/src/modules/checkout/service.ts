@@ -34,7 +34,6 @@ import {
 import { childLogger } from "../../lib/logger.js";
 import {
   cartService as defaultCartService,
-  type Cart,
   type CartService,
   type CartTotals,
 } from "../cart/index.js";
