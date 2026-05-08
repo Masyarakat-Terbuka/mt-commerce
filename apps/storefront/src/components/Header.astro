@@ -7,8 +7,10 @@
  *   - Lowercase wordmark "mt-commerce" — `t-body` weight 400, no styling
  *   - Center nav: Beranda · Produk · Tentang (`t-body` weight 400, +0.02em
  *     tracking, generous gap)
- *   - Right cluster: small magnifier, cart icon with optional count dot,
- *     account link, locale toggle (`id · en` lowercase, tiny)
+ *   - Right cluster: search form (always visible from `md` up; magnifier
+ *     toggle on mobile to keep the bar uncluttered), cart icon with
+ *     optional count dot, account link, locale toggle (`id · en`
+ *     lowercase, tiny)
  *
  * Surface: `bg-cream` (matches body) with a 1px hairline bottom border.
  * No backdrop blur, no transparency tricks, no drop shadow — the header
@@ -80,19 +82,23 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
           <ul class="t-body flex flex-col gap-4">
             <li>
               <a class="hover:text-accent block" href={homeHref}
-                >{t("nav.home")}</a>
+                >{t("nav.home")}</a
+              >
             </li>
             <li>
               <a class="hover:text-accent block" href={productsHref}
-                >{t("nav.products")}</a>
+                >{t("nav.products")}</a
+              >
             </li>
             <li>
               <a class="hover:text-accent block" href={aboutHref}
-                >{t("nav.about")}</a>
+                >{t("nav.about")}</a
+              >
             </li>
             <li>
               <a class="hover:text-accent block" href={accountHref}
-                >{t("nav.account")}</a>
+                >{t("nav.account")}</a
+              >
             </li>
           </ul>
         </nav>
@@ -168,7 +174,45 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
     {/* Right cluster: search, cart, account, locale toggle */}
     <div class="flex items-center gap-1">
-      <details class="group relative">
+      {
+        /*
+        Search — two presentations from the same source-of-truth form:
+
+        Desktop (md+): always visible inline form. The magnifier icon sits
+        as a leading visual on the left of the input (decorative, the
+        `<label class="sr-only">` carries the accessible name). Single
+        text input — pressing Enter submits to /search (the default
+        behavior of a single-input GET form), so no visible button is
+        needed. Borderless input with a 1px hairline that becomes
+        `border-fg` on focus, matching the Filters search style.
+
+        Mobile (<md): falls back to the existing `<details>` toggle so
+        the brand + cart + account aren't pushed off the bar. The toggle
+        reveals the same form below the header on tap.
+      */
+      }
+      <form
+        method="get"
+        action={searchAction}
+        class="border-line text-faint focus-within:text-fg focus-within:border-fg hidden items-center gap-2 border-b py-1 transition-colors duration-150 md:flex md:w-[280px] lg:w-[360px]"
+        role="search"
+      >
+        <label class="sr-only" for="header-search-desktop">
+          {t("nav.search")}
+        </label>
+        {/* Decorative — the label above is the accessible name. */}
+        <Icon icon={Search01Icon} size={16} class="shrink-0" />
+        <input
+          id="header-search-desktop"
+          type="search"
+          name="q"
+          autocomplete="off"
+          placeholder={t("nav.search_placeholder")}
+          class="t-body text-fg placeholder:text-faint w-full bg-transparent outline-none"
+        />
+      </form>
+
+      <details class="group relative md:hidden">
         <summary
           class="text-fg hover:text-accent flex h-9 w-9 cursor-pointer list-none items-center justify-center transition-colors duration-150 [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.search")}
@@ -184,13 +228,15 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
           class="border-line bg-cream absolute top-full right-0 z-30 mt-px flex w-[min(380px,calc(100vw-2.5rem))] items-center gap-3 border-b px-5 py-4"
           role="search"
         >
-          <label class="sr-only" for="header-search">{t("nav.search")}</label>
+          <label class="sr-only" for="header-search-mobile">
+            {t("nav.search")}
+          </label>
           <input
-            id="header-search"
+            id="header-search-mobile"
             type="search"
             name="q"
             autocomplete="off"
-            placeholder={t("nav.search").toLowerCase()}
+            placeholder={t("nav.search_placeholder")}
             class="border-line t-body text-fg placeholder:text-faint focus:border-fg flex-1 border-b bg-transparent py-1 transition-colors duration-150 outline-none"
           />
           <button type="submit" class="t-body text-fg hover:text-accent">

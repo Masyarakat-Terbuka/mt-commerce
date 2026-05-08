@@ -4,12 +4,17 @@
   "nav.about": "About",
   "nav.cart": "Cart",
   "nav.search": "Search",
+  "nav.search_placeholder": "search products…",
   "nav.account": "Account",
   "nav.menu": "Menu",
   "nav.skip_to_content": "Skip to main content",
   "nav.help": "Help",
   "nav.privacy": "Privacy policy",
   "nav.terms": "Terms of service",
+
+  "promo_banner.text": "Free shipping on orders over Rp 250,000",
+  "promo_banner.dismiss": "Dismiss banner",
+  "promo_banner.region_label": "Promotion",
 
   "help.index.title": "Help",
   "help.index.subhead": "Short guides on shipping, payment, returns, and the mt-commerce platform.",
