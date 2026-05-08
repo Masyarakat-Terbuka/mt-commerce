@@ -47,8 +47,10 @@ if [[ -z "$first_line" ]]; then
 fi
 
 # Exempt merge / revert / fixup / squash commits — they have their own
-# conventions and rejecting them just creates friction.
-if [[ "$first_line" =~ ^Merge\ |^Revert\ |^fixup!\ |^squash!\  ]]; then
+# conventions and rejecting them just creates friction. The `Merge:` form
+# is what `git merge -m "Merge: ..."` produces in this repo's history;
+# `Merge branch` is git's default format.
+if [[ "$first_line" =~ ^Merge:\ |^Merge\ |^Revert\ |^fixup!\ |^squash!\  ]]; then
   exit 0
 fi
 
