@@ -91,26 +91,50 @@ step "Seeding regions and demo catalog"
 bun --filter '@mt-commerce/api' db:seed
 ok "seed loaded"
 
-printf "\n${G}${BOLD}Setup complete.${NC}\n\n"
-cat <<'NEXT'
-What's next:
+# 7. Provision a demo staff owner so the admin is sign-in-able out of
+#    the box. Defaults are overridable via env vars; provision-owner
+#    errors with "already exists" on re-run, which we tolerate so this
+#    whole script stays idempotent.
+DEMO_EMAIL="${MT_COMMERCE_DEMO_EMAIL:-demo@mt-commerce.local}"
+DEMO_PASSWORD="${MT_COMMERCE_DEMO_PASSWORD:-DemoOwner1!}"
+step "Provisioning demo staff owner"
+if bun --filter '@mt-commerce/api' provision-owner \
+     "$DEMO_EMAIL" "$DEMO_PASSWORD" 2>&1 | tee /tmp/mt-provision.log; then
+  ok "owner created: $DEMO_EMAIL"
+else
+  if grep -q -i "already exists\|duplicate" /tmp/mt-provision.log; then
+    warn "owner already exists (re-run is a no-op): $DEMO_EMAIL"
+  else
+    err "provision-owner failed; see output above."
+    rm -f /tmp/mt-provision.log
+    exit 1
+  fi
+fi
+rm -f /tmp/mt-provision.log
 
-  Run all three apps in parallel:
+printf "\n${G}${BOLD}Setup complete.${NC}\n\n"
+cat <<NEXT
+Sign in to the admin with:
+    email:    $DEMO_EMAIL
+    password: $DEMO_PASSWORD
+
+Run all three apps in parallel:
     bun dev
 
-  Or pick one:
+Or pick one:
     bun --filter '@mt-commerce/api' dev          # :8000
     bun --filter '@mt-commerce/storefront' dev   # :4321
     bun --filter '@mt-commerce/admin' dev        # :5173
 
-  Open in a browser:
+Open in a browser:
     http://localhost:4321         Storefront
-    http://localhost:5173         Admin
+    http://localhost:5173/login   Admin
+    http://localhost:4322         Docs
     http://localhost:8000/health  API health
     http://localhost:8000/docs    API Swagger UI (dev only)
 
-  Stop infrastructure:
-    docker compose down              # keep volumes (data preserved)
-    bun run reset                    # destructive: wipe volumes + re-setup
+Stop infrastructure:
+    docker compose down           # keep volumes (data preserved)
+    bun run reset                 # destructive: wipe volumes + re-setup
 
 NEXT
