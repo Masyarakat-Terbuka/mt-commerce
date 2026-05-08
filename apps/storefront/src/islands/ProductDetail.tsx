@@ -33,8 +33,9 @@
  *       6. Add-to-cart — full-width terracotta, 48px height.
  *       7. Specs/info — quiet two-column key/value list (reserved for future).
  *
- *   - Related products: small overline + a 3-column grid in the same
- *     minimal card style (no border, muted price).
+ *   - Related products: small overline + a 4-column grid at lg
+ *     (3-up tablet, 2-up mobile) in the same minimal card style
+ *     (no border, muted price). Mirrors `ProductGrid`'s breakpoints.
  *
  *   - Mobile sticky CTA: the add-to-cart wrapper sticks to the bottom of
  *     the viewport on small screens via Tailwind's `sticky` + breakpoint
@@ -243,7 +244,7 @@ export default function ProductDetail(props: ProductDetailProps) {
             },
             { signal: controller.signal },
           );
-          related = result.data.filter((p) => p.id !== product.id).slice(0, 3);
+          related = result.data.filter((p) => p.id !== product.id).slice(0, 4);
         } catch {
           // Swallow — a failed related-products call must not break the page.
         }
@@ -286,7 +287,7 @@ export default function ProductDetail(props: ProductDetailProps) {
         if (controller.signal.aborted) return;
         const filtered = result.data
           .filter((p) => p.id !== initialProduct.id)
-          .slice(0, 3);
+          .slice(0, 4);
         setState((prev) =>
           prev.status === "ready" ? { ...prev, related: filtered } : prev,
         );
@@ -474,7 +475,7 @@ export default function ProductDetail(props: ProductDetailProps) {
       {related.length > 0 && (
         <section className="mx-auto max-w-[1280px] px-5 pb-32 md:px-8 md:pb-40">
           <p className="t-overline text-muted">{relatedTitle}</p>
-          <div className="mt-10 grid grid-cols-2 gap-x-5 gap-y-12 md:mt-14 md:grid-cols-3 md:gap-x-10 md:gap-y-16 lg:gap-x-12">
+          <div className="mt-10 grid grid-cols-2 gap-x-5 gap-y-12 md:mt-14 md:grid-cols-3 md:gap-x-8 md:gap-y-16 lg:grid-cols-4 lg:gap-x-8 lg:gap-y-20">
             {related.map((p) => {
               const price =
                 p.variants.length > 0
