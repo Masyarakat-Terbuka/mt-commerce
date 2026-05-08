@@ -1,0 +1,297 @@
+# Plugin author guide
+
+mt-commerce is extended through plugins — npm packages that register
+payment providers, shipping providers, notification channels, and event
+listeners with the api at boot.
+
+This guide is for plugin authors. For the architectural decision behind
+this model, see [ADR-0008](../adr/0008-plugins-as-npm-packages.md).
+
+---
+
+## What a plugin is
+
+A plugin is an npm-format package whose default export is a factory that
+returns a `Plugin` manifest produced by `definePlugin`:
+
+```ts
+import { definePlugin, type Plugin } from "@mt-commerce/core/plugin";
+
+export interface MyPluginOptions {
+  apiKey: string;
+}
+
+export default function myPlugin(options: MyPluginOptions): Plugin {
+  return definePlugin({
+    name: "@my-org/payment-foo",
+    version: "1.0.0",
+    setup(ctx) {
+      ctx.registerPaymentProvider({
+        code: "foo",
+        displayName: "Foo Payments",
+        async initiate(intent) {
+          /* ... */
+        },
+        async refund(intent) {
+          /* ... */
+        },
+        verifyWebhookSignature({ rawBody, headers }) {
+          /* ... */
+          return true;
+        },
+      });
+    },
+  });
+}
+```
+
+The factory pattern keeps operator options outside the manifest's static
+shape. Operators wire plugins in `mt-commerce.config.ts`:
+
+```ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import myPlugin from "@my-org/payment-foo";
+
+export default defineConfig({
+  plugins: [
+    myPlugin({ apiKey: process.env.FOO_API_KEY ?? "" }),
+  ],
+});
+```
+
+---
+
+## Scaffolding a new plugin
+
+The bundled `@mt-commerce/plugin-example` is the template. Copy its
+shape:
+
+```
+packages/plugins/your-plugin/
+├── package.json          # name, version, peerDependencies on @mt-commerce/core
+├── tsconfig.json         # extends ../../../tsconfig.base.json
+├── tsconfig.build.json
+├── src/index.ts          # default-exported factory
+└── tests/index.test.ts   # vitest unit tests
+```
+
+Minimal `package.json`:
+
+```jsonc
+{
+  "name": "@your-org/plugin-foo",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "peerDependencies": {
+    "@mt-commerce/core": "workspace:*"
+  }
+}
+```
+
+The `peerDependencies` entry is the contract from
+[ADR-0008](../adr/0008-plugins-as-npm-packages.md): plugins declare the
+mt-commerce versions they support against `@mt-commerce/core`. Pin a
+range — e.g. `"^0.1.0"` — once the core package starts publishing.
+
+When publishing to npm:
+
+- ESM only (`"type": "module"`).
+- Ship types (`exports` should map both runtime and `types` paths).
+- Declare runtime deps (provider SDKs, signing libraries) under
+  `dependencies`, not `peerDependencies`. Operators do not want to learn
+  what your provider's SDK is called.
+
+---
+
+## The `Plugin` shape
+
+| Field      | Required | What it is                                                    |
+| ---------- | -------- | ------------------------------------------------------------- |
+| `name`     | yes      | Stable identifier for logs and the loader's manifest. Use the npm package name. |
+| `version`  | yes      | Semver. Logged on load.                                       |
+| `setup`    | yes      | Called once at api boot with a `PluginContext`. May be async; may return a teardown function (reserved for future shutdown wiring). |
+
+---
+
+## Extension points
+
+The api exposes four registries through `PluginContext`. Each
+`registerXxx` throws on duplicate identifiers; the loader catches and
+surfaces a per-plugin failure.
+
+### Payment providers
+
+```ts
+ctx.registerPaymentProvider({
+  code: "midtrans",
+  displayName: "Midtrans",
+  initiate(intent) { /* ... */ },
+  capture(intent) { /* optional — providers that auto-capture omit this */ },
+  refund(intent, amount?) { /* ... */ },
+  verifyWebhookSignature({ rawBody, headers }) { /* ... */ },
+});
+```
+
+`code` is the operator-facing identifier — stored on the `payments` row
+so refunds and webhooks route back to the right provider after restart.
+Lowercase, stable, unique across loaded plugins.
+
+`verifyWebhookSignature` is called BEFORE the api parses or trusts any
+field of `rawBody`. Returning `false` causes the webhook handler to
+respond 401 without dispatching.
+
+### Shipping providers
+
+```ts
+ctx.registerShippingProvider({
+  code: "biteship-jne-reg",
+  displayName: "Biteship — JNE REG",
+  async quote(method, { currency }) {
+    return { amount: 18000n, currency };
+  },
+});
+```
+
+The api's shipping module routes a method whose row has
+`provider_kind = 'plugin'` to the registered provider whose `code`
+matches the method's `code`. Operators create shipping methods through
+the admin pointing at your provider's code; the plugin author does not
+manage rows.
+
+`quote` MUST return a `Money` whose currency equals `opts.currency`. The
+service double-checks at the boundary; throwing a clean error is friendlier.
+
+### Notification channels
+
+```ts
+ctx.registerNotificationChannel({
+  id: "sms",
+  async send({ recipient, kind, body }) {
+    /* dispatch over the wire; throw on transport failure */
+  },
+});
+```
+
+Built-in ids (`email`, `whatsapp`) are reserved; the loader rejects
+collisions. Pick a fresh id (`sms`, `push`, `whatsapp-cloud`).
+
+The api persists an audit row before calling `send`. Throwing transitions
+the row to `failed`; returning normally transitions it to `sent`.
+
+### Event listeners
+
+```ts
+const unsubscribe = ctx.on("order.placed", async (payload) => {
+  /* react to the event; safe to hit the database */
+});
+```
+
+Listeners are invoked sequentially under the post-commit emit. The bus
+catches and logs per-listener throws so a buggy subscriber cannot poison
+the others, but a slow listener slows the emit. Keep work small or
+enqueue it onto a job queue.
+
+Listeners MUST be idempotent. The bus is at-least-once across restarts.
+
+The current event surface (see `DomainEventMap` in `@mt-commerce/core/plugin`):
+
+| Event                          | When                                         |
+| ------------------------------ | -------------------------------------------- |
+| `checkout.started`             | A checkout session opens.                    |
+| `checkout.shipping_set`        | Buyer picks a shipping method.               |
+| `checkout.payment_initiated`   | Payment is initiated for a checkout.         |
+| `checkout.completed`           | Checkout transitions to completed.           |
+| `checkout.failed`              | Checkout transitions to failed.              |
+| `order.placed`                 | An order is materialized from a checkout.    |
+| `order.paid`                   | An order's payment captures.                 |
+| `order.fulfilled`              | An order ships.                              |
+| `order.cancelled`              | An order is cancelled.                       |
+| `order.refunded`               | An order is refunded.                        |
+
+---
+
+## Logging and configuration
+
+`ctx.log` is a pino-shaped child logger scoped to your plugin
+(`{ plugin: "<name>" }`). Prefer the structured form so the log pipeline
+indexes on the fields:
+
+```ts
+ctx.log.info({ orderId }, "shipped");      // good
+ctx.log.info("shipped");                   // also fine
+```
+
+Operator config arrives through your factory's argument; `ctx.config` is
+also available for `definePlugin`-only plugins that do not use a factory
+wrapper.
+
+---
+
+## Testing your plugin
+
+Construct a fake `PluginContext` in tests — that is what
+`@mt-commerce/plugin-example`'s tests do (see
+[`packages/plugins/example/tests/index.test.ts`](../../packages/plugins/example/tests/index.test.ts)).
+The contract is small enough that a hand-rolled fake is shorter than
+anything you would import.
+
+A plugin author who wants a closer-to-real test can spin up the api in a
+sub-suite, place the plugin in `mt-commerce.config.ts`, and assert
+behavior through the http surface — but for most unit-test work the
+fake-context approach is faster and just as informative.
+
+---
+
+## How the loader picks up your plugin
+
+At api boot the loader looks for the operator's config in this order:
+
+1. The path in `MT_COMMERCE_CONFIG` (override; absolute or
+   workspace-relative)
+2. `apps/api/mt-commerce.config.ts` (canonical)
+3. `<workspace-root>/mt-commerce.config.ts` (fallback)
+
+Missing file → empty plugin list and an info-level log. Plugins are
+opt-in.
+
+When a config is found, the loader imports it via dynamic `import()` —
+Bun resolves the `.ts` file natively. For each `Plugin` in the
+`plugins` array, the loader builds a `PluginContext`, calls
+`setup(ctx)`, and on success records the plugin in the in-process
+manifest (`getLoadedPlugins()`).
+
+Failures:
+
+- Lenient mode (default) — a plugin's setup throwing is logged and
+  skipped; other plugins still load, the api still boots.
+- Strict mode (`MT_COMMERCE_STRICT_PLUGINS=true`) — the same throw
+  aborts boot. Operators who treat plugins as load-bearing turn this on.
+
+---
+
+## What plugins cannot do
+
+- **No sandboxing.** A plugin runs with the same privileges as the api
+  process. Operators trust the plugins they install.
+  ([ADR-0008](../adr/0008-plugins-as-npm-packages.md) discusses why.)
+- **No hot-reload.** Updating a plugin requires reinstalling and
+  restarting. Intentional — restart is a clean state transition.
+- **No reaching into api modules.** Import only from
+  `@mt-commerce/core/plugin` (and the rest of `@mt-commerce/core`).
+  Direct imports from `@mt-commerce/api` will not type-check (the
+  package is not a peer dep) and will not run (the loader does not
+  expose api internals through `PluginContext`).
+
+---
+
+## Reference
+
+- [ADR-0008](../adr/0008-plugins-as-npm-packages.md) — the architectural
+  decision behind this model.
+- [`@mt-commerce/core/plugin`](../../packages/core/src/plugin.ts) —
+  every type referenced in this guide.
+- [`@mt-commerce/plugin-example`](../../packages/plugins/example/src/index.ts) —
+  the template plugin.
+- [`apps/api/src/lib/plugins.ts`](../../apps/api/src/lib/plugins.ts) —
+  the loader implementation.

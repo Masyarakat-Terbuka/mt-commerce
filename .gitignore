@@ -22,6 +22,14 @@ coverage/
 .env.*.local
 !.env.example
 
+# Operator-supplied plugin config (canonical and root-fallback locations).
+# The `.example` template is checked in; the real file is per-deployment.
+mt-commerce.config.ts
+mt-commerce.config.js
+apps/api/mt-commerce.config.ts
+apps/api/mt-commerce.config.js
+!**/mt-commerce.config.example.ts
+
 # Logs
 *.log
 bun-debug.log*
