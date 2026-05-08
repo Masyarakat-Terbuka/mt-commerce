@@ -28,6 +28,12 @@ import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
 import { ProductEditorPage } from "@/pages/ProductEditorPage";
+import {
+  OrdersPage,
+  ORDER_LIST_STATUS_OPTIONS,
+  type OrdersListSearch,
+} from "@/pages/OrdersPage";
+import { OrderDetailPage } from "@/pages/OrderDetailPage";
 import { ComingSoonPage } from "@/pages/ComingSoonPage";
 import { SignOutPage } from "@/pages/SignOutPage";
 
@@ -132,10 +138,44 @@ const productEditRoute = createRoute({
   component: () => <ProductEditorPage mode="edit" />,
 });
 
+/**
+ * `/pesanan` keeps its filter state in the URL so that refreshing or
+ * sharing the page preserves what the operator was looking at. The
+ * `validateSearch` callback is the canonical place to coerce + clamp
+ * the query string into the typed shape that `useSearch` returns.
+ *
+ * Unknown statuses fall back to "all" so a stale link cannot break the
+ * page; page < 1 clamps to 1 for the same reason.
+ */
 const ordersRoute = createRoute({
   getParentRoute: () => gatedRoute,
   path: "/pesanan",
-  component: ComingSoonPage,
+  validateSearch: (raw: Record<string, unknown>): OrdersListSearch => {
+    const rawStatus = typeof raw.status === "string" ? raw.status : "all";
+    const status = (
+      ORDER_LIST_STATUS_OPTIONS as readonly string[]
+    ).includes(rawStatus)
+      ? (rawStatus as OrdersListSearch["status"])
+      : "all";
+    const rawPage = Number(raw.page);
+    const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+    const email =
+      typeof raw.email === "string" && raw.email.trim().length > 0
+        ? raw.email.trim()
+        : undefined;
+    const from =
+      typeof raw.from === "string" && raw.from.length > 0 ? raw.from : undefined;
+    const to =
+      typeof raw.to === "string" && raw.to.length > 0 ? raw.to : undefined;
+    return { status, page, email, from, to };
+  },
+  component: OrdersPage,
+});
+
+const orderDetailRoute = createRoute({
+  getParentRoute: () => gatedRoute,
+  path: "/pesanan/$orderNumber",
+  component: OrderDetailPage,
 });
 
 const customersRoute = createRoute({
@@ -159,6 +199,7 @@ const routeTree = rootRoute.addChildren([
     productNewRoute,
     productEditRoute,
     ordersRoute,
+    orderDetailRoute,
     customersRoute,
     settingsRoute,
   ]),

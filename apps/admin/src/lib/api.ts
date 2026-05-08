@@ -14,14 +14,23 @@
 import { createClient } from "@mt-commerce/sdk";
 export { ApiError } from "@mt-commerce/sdk";
 export type {
+  AdminListOrdersQuery,
   AdminListProductsQuery,
   AuthMe,
+  CancelOrderAdminInput,
   Category,
+  Order,
+  OrderActorKind,
+  OrderAddressSnapshot,
+  OrderItem,
+  OrderStatus,
+  OrderStatusEvent,
   Paginated,
   Product,
   ProductSort,
   ProductStatus,
   Role,
+  TransitionOrderInput,
 } from "@mt-commerce/sdk";
 
 const DEFAULT_API_URL = "http://localhost:8000";
