@@ -2,10 +2,16 @@
  * CartDrawer — slide-in panel that mirrors `useCart()` state.
  *
  * Visibility:
- *   - Mounts hidden. Listens for the `mt:cart-open` window event (dispatched
- *     by AddToCartButton on success and by the header bag-link's data-attr
- *     handler) to slide in. Closes on Escape, on backdrop click, and on the
- *     in-panel close button.
+ *   - Always mounted (so a CSS `transform` transition can animate the
+ *     slide). The `data-state="open|closed"` attribute on the panel drives
+ *     the visual state via `global.css`. A backdrop and the panel both
+ *     toggle in sync.
+ *   - Listens for the `mt:cart-open` window event (dispatched by
+ *     AddToCartButton on success) to slide in. Closes on Escape, on
+ *     backdrop click, on the in-panel close button, and on an automatic
+ *     ~3 s timer set immediately after an add — *unless* the user
+ *     hovers, focuses, or interacts with the panel within that window,
+ *     in which case the timer is cancelled and the drawer stays open.
  *
  * Accessibility:
  *   - `role="dialog"`, `aria-modal="true"`, `aria-labelledby` pointing at the
@@ -13,22 +19,34 @@
  *   - Focus trap: on open, focus moves to the close button. Tab/Shift+Tab
  *     cycles within the dialog.
  *   - Escape closes. Body scroll is locked while open; restored on close.
- *   - Empty/list/error states all live inside the dialog so a screen reader
- *     reads the new state when it opens.
+ *   - `aria-hidden="true"` flips on the panel when closed so screen
+ *     readers don't surface the drawer's content while it's offscreen.
+ *   - `inert` is set on the panel when closed so it cannot receive focus
+ *     either (Tab from the page chrome doesn't fall into the closed drawer).
+ *   - `overscroll-behavior: contain` on the panel so dragging at the
+ *     bottom of a long line-item list doesn't bounce-scroll the body.
  *
  * Layout:
  *   - Mobile: full-screen sheet (right edge slides to cover the viewport).
  *   - Desktop ≥768px: 480px-wide right rail with a translucent backdrop.
+ *   - The panel carries a subtle shadow on desktop. The brand normally
+ *     forbids drop shadows; the drawer is the only documented exception
+ *     (it must lift off the page so the backdrop reads as a layer).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { format as formatMoney } from "@mt-commerce/core/money";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import {
+  CART_CHANGED_EVENT_NAME,
   CART_OPEN_EVENT_NAME,
   CartProvider,
   useCart,
+  type CartChangedDetail,
 } from "./CartProvider.js";
+
+/** Auto-close window after add-to-cart, in ms. */
+const AUTO_CLOSE_DELAY_MS = 3000;
 
 export type CartDrawerProps = {
   /** BCP 47 locale for currency formatting (e.g. "id-ID"). */
@@ -80,18 +98,62 @@ function CartDrawerInner(props: CartDrawerProps) {
   } = props;
   const { cart, loading, updateItem, removeItem } = useCart();
   const [open, setOpen] = useState(false);
+  // The most recently added variant id, used to highlight the matching
+  // line item briefly. Cleared whenever the drawer closes.
+  const [highlightedVariantId, setHighlightedVariantId] = useState<
+    string | null
+  >(null);
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const autoCloseTimerRef = useRef<number | null>(null);
 
-  // Listen for the open signal dispatched by AddToCartButton (and the header's
-  // bag-icon click handler attached in Header.astro).
+  // Helper — cancels a pending auto-close timer. Called on user interaction
+  // so the drawer doesn't slide away from underneath someone who's reading
+  // the just-added line.
+  const cancelAutoClose = useCallback(() => {
+    if (autoCloseTimerRef.current !== null) {
+      window.clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
+    }
+  }, []);
+
+  // Schedules a one-shot close after the auto-close window. Replaces any
+  // existing timer so successive adds reset the countdown.
+  const scheduleAutoClose = useCallback(() => {
+    cancelAutoClose();
+    autoCloseTimerRef.current = window.setTimeout(() => {
+      setOpen(false);
+      autoCloseTimerRef.current = null;
+    }, AUTO_CLOSE_DELAY_MS);
+  }, [cancelAutoClose]);
+
+  // Listen for the open signal dispatched by AddToCartButton.
   useEffect(() => {
     function onOpen() {
       setOpen(true);
+      scheduleAutoClose();
     }
     window.addEventListener(CART_OPEN_EVENT_NAME, onOpen);
     return () => window.removeEventListener(CART_OPEN_EVENT_NAME, onOpen);
+  }, [scheduleAutoClose]);
+
+  // Track the most recently added variant for the highlight stripe.
+  useEffect(() => {
+    function onChange(e: Event) {
+      const detail = (e as CustomEvent<CartChangedDetail>).detail;
+      if (!detail || detail.delta <= 0 || !detail.variantId) return;
+      setHighlightedVariantId(detail.variantId);
+    }
+    window.addEventListener(CART_CHANGED_EVENT_NAME, onChange);
+    return () => window.removeEventListener(CART_CHANGED_EVENT_NAME, onChange);
   }, []);
+
+  // Fade the highlight after a short window so it doesn't linger.
+  useEffect(() => {
+    if (!highlightedVariantId) return;
+    const t = window.setTimeout(() => setHighlightedVariantId(null), 1500);
+    return () => window.clearTimeout(t);
+  }, [highlightedVariantId]);
 
   // Focus management + body scroll lock + Escape-to-close.
   useEffect(() => {
@@ -133,31 +195,61 @@ function CartDrawerInner(props: CartDrawerProps) {
     };
   }, [open]);
 
-  const close = useCallback(() => setOpen(false), []);
-
-  if (!open) return null;
+  // Close the drawer cleanup — also clears the highlight so the next open
+  // doesn't flash a stale line.
+  const close = useCallback(() => {
+    cancelAutoClose();
+    setOpen(false);
+    setHighlightedVariantId(null);
+  }, [cancelAutoClose]);
 
   const items = cart?.items ?? [];
   const isEmpty = items.length === 0;
 
   return (
     <div
-      className="fixed inset-0 z-50"
-      // Backdrop click closes; the panel below stops propagation.
-      onClick={close}
+      // Container is always in the DOM so the slide transition has
+      // somewhere to animate. `pointer-events: none` when closed means
+      // the page underneath is not blocked.
+      className={
+        open ? "fixed inset-0 z-50" : "pointer-events-none fixed inset-0 z-50"
+      }
+      aria-hidden={!open}
     >
-      {/* Backdrop — translucent cream wash, matches site palette. */}
-      <div className="absolute inset-0 bg-fg/35" aria-hidden="true" />
+      {/* Backdrop — translucent fg wash. Click closes. */}
+      <div
+        data-cart-drawer-backdrop
+        className={
+          open
+            ? "bg-fg/35 absolute inset-0"
+            : "bg-fg/35 absolute inset-0 opacity-0"
+        }
+        onClick={close}
+        aria-hidden="true"
+      />
 
       <div
         ref={panelRef}
+        data-cart-drawer-panel
+        data-state={open ? "open" : "closed"}
         role="dialog"
-        aria-modal="true"
+        aria-modal={open ? "true" : undefined}
         aria-labelledby="cart-drawer-title"
-        className="absolute right-0 top-0 flex h-full w-full flex-col border-l border-line bg-cream md:w-[480px]"
+        // `inert` keeps focus from falling into the closed drawer when a
+        // user tabs through the page. (`inert` is the React 19 attribute
+        // form; React passes it through to the DOM.)
+        // @ts-expect-error — `inert` lands as a typed prop in @types/react 19.x; stay forward-compatible.
+        inert={open ? undefined : ""}
+        // overscroll-behavior keeps mobile bounce from leaking to the body
+        // while the user scrolls a long item list.
+        style={{ overscrollBehavior: "contain" }}
+        className="border-line bg-cream absolute top-0 right-0 flex h-full w-full flex-col border-l shadow-[-12px_0_24px_-16px_rgba(26,26,26,0.18)] md:w-[480px]"
         onClick={(e) => e.stopPropagation()}
+        onMouseEnter={cancelAutoClose}
+        onFocus={cancelAutoClose}
+        onPointerDown={cancelAutoClose}
       >
-        <header className="flex items-center justify-between border-b border-line px-5 py-4 md:px-6">
+        <header className="border-line flex items-center justify-between border-b px-5 py-4 md:px-6">
           <h2 id="cart-drawer-title" className="t-h1 text-fg">
             {titleLabel}
           </h2>
@@ -166,7 +258,7 @@ function CartDrawerInner(props: CartDrawerProps) {
             type="button"
             onClick={close}
             aria-label={closeLabel}
-            className="-mr-2 flex h-9 w-9 items-center justify-center text-fg transition-colors duration-150 hover:text-accent"
+            className="text-fg hover:text-accent -mr-2 flex h-9 w-9 items-center justify-center transition-colors duration-150"
           >
             {/* Hugeicons Cancel01 — decorative; the button's aria-label
                 describes the close action. */}
@@ -179,64 +271,95 @@ function CartDrawerInner(props: CartDrawerProps) {
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-5 py-6 md:px-6" aria-busy={loading}>
+        <div
+          className="flex-1 overflow-y-auto px-5 py-6 md:px-6"
+          aria-busy={loading}
+        >
           {isEmpty ? (
             <div className="flex h-full flex-col items-start justify-center">
               <p className="t-body text-muted">{emptyLabel}</p>
               <a
                 href={productsHref}
-                className="mt-4 t-body text-fg underline-offset-[6px] transition-colors duration-150 hover:text-accent hover:underline"
+                className="t-body text-fg hover:text-accent mt-4 underline-offset-[6px] transition-colors duration-150 hover:underline"
               >
                 {emptyCtaLabel} &rarr;
               </a>
             </div>
           ) : (
             <ul className="space-y-6">
-              {items.map((item) => (
-                <li key={item.id} className="flex items-start gap-4">
-                  {/* Image placeholder; the cart item DTO doesn't carry the
-                      product image yet. The drawer keeps a calm cream square so
-                      the layout doesn't reflow when an image lands later. */}
-                  <div className="h-16 w-16 shrink-0 bg-line" aria-hidden="true" />
-                  <div className="flex-1 space-y-2">
-                    <p className="t-body text-fg">{item.variantId}</p>
-                    <div className="flex items-center gap-3">
-                      <label className="sr-only" htmlFor={`qty-${item.id}`}>
-                        {quantityLabel}
-                      </label>
-                      <input
-                        id={`qty-${item.id}`}
-                        type="number"
-                        min={0}
-                        value={item.quantity}
-                        onChange={(e) => {
-                          const next = Math.max(0, Number.parseInt(e.target.value, 10) || 0);
-                          void updateItem(item.id, next);
-                        }}
-                        className="h-8 w-14 border border-line bg-transparent px-2 t-body text-fg outline-none focus:border-fg"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void removeItem(item.id)}
-                        className="t-caption text-muted underline-offset-[4px] transition-colors duration-150 hover:text-accent hover:underline"
-                      >
-                        {removeLabel}
-                      </button>
+              {items.map((item) => {
+                const isHighlighted = item.variantId === highlightedVariantId;
+                return (
+                  <li
+                    key={item.id}
+                    // The highlight is a calm cream-deepened tint via a
+                    // negative-margin padded box; we animate `background-color`
+                    // (a colour transition is permitted because it's the only
+                    // property changing — no `transition: all`).
+                    className={
+                      isHighlighted
+                        ? "bg-line/50 -mx-3 flex items-start gap-4 rounded-sm px-3 py-2 transition-colors duration-300"
+                        : "flex items-start gap-4 transition-colors duration-300"
+                    }
+                  >
+                    {/* Image placeholder; the cart item DTO doesn't carry the
+                        product image yet. */}
+                    <div
+                      className="bg-line h-16 w-16 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <div className="flex-1 space-y-2">
+                      <p className="t-body text-fg">{item.variantId}</p>
+                      <div className="flex items-center gap-3">
+                        <label className="sr-only" htmlFor={`qty-${item.id}`}>
+                          {quantityLabel}
+                        </label>
+                        <input
+                          id={`qty-${item.id}`}
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const next = Math.max(
+                              0,
+                              Number.parseInt(e.target.value, 10) || 0,
+                            );
+                            void updateItem(item.id, next);
+                          }}
+                          className="border-line t-body text-fg focus:border-fg h-8 w-14 border bg-transparent px-2 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void removeItem(item.id)}
+                          className="t-caption text-muted hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
+                        >
+                          {removeLabel}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <p className="price-figure t-body text-fg">
-                    {formatMoney(item.lineTotal, { locale })}
-                  </p>
-                </li>
-              ))}
+                    <p className="price-figure t-body text-fg">
+                      {formatMoney(item.lineTotal, { locale })}
+                    </p>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
 
         {!isEmpty && cart && (
-          <footer className="border-t border-line px-5 py-5 md:px-6">
-            <dl className="space-y-2 t-body">
-              <div className="flex justify-between text-muted">
+          <footer
+            className="border-line border-t px-5 py-5 md:px-6"
+            // Sticky CTAs below an iPhone home indicator need the safe-area
+            // inset; the drawer footer is one of those because the panel
+            // covers the full viewport height on mobile.
+            style={{
+              paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom, 0px))",
+            }}
+          >
+            <dl className="t-body space-y-2">
+              <div className="text-muted flex justify-between">
                 <dt className="flex flex-col">
                   <span>{subtotalIncludingTaxLabel}</span>
                   {/*
@@ -255,28 +378,25 @@ function CartDrawerInner(props: CartDrawerProps) {
                   {formatMoney(cart.totals.subtotalIncludingTax, { locale })}
                 </dd>
               </div>
-              <div className="flex justify-between text-muted">
+              <div className="text-muted flex justify-between">
                 <dt>{shippingLabel}</dt>
                 <dd className="price-figure">
                   {formatMoney(cart.totals.shipping, { locale })}
                 </dd>
               </div>
-              <div className="flex justify-between border-t border-line pt-3 text-fg">
+              <div className="border-line text-fg flex justify-between border-t pt-3">
                 <dt>{totalLabel}</dt>
                 <dd className="price-figure">
                   {formatMoney(cart.totals.total, { locale })}
                 </dd>
               </div>
             </dl>
-            <a
-              href={checkoutHref}
-              className="btn-primary mt-5 w-full"
-            >
+            <a href={checkoutHref} className="btn-primary mt-5 w-full">
               {checkoutCtaLabel}
             </a>
             <a
               href={cartHref}
-              className="mt-3 block text-center t-caption text-muted transition-colors duration-150 hover:text-accent"
+              className="t-caption text-muted hover:text-accent mt-3 block text-center transition-colors duration-150"
             >
               {titleLabel} &rarr;
             </a>

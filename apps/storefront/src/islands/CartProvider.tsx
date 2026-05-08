@@ -98,9 +98,29 @@ function writePersistedCartId(id: string | null): void {
   }
 }
 
-function broadcastCartChange(): void {
+/**
+ * Detail payload broadcast on `mt:cart-changed`. Listeners that only need
+ * to refresh state can ignore it; the count badge uses `delta` to decide
+ * whether to play the bump animation (positive delta = a successful add).
+ */
+export interface CartChangedDetail {
+  /** Item-count delta. Positive on `addItem`, negative on remove/clear. */
+  delta: number;
+  /** New total quantity in the cart after the change. */
+  itemCount: number;
+  /**
+   * The variant the change was about, if known. Used by the drawer to
+   * highlight the just-added line. Optional — clears/removes don't always
+   * have a meaningful variant id (e.g. "clear" sets it to null).
+   */
+  variantId: string | null;
+}
+
+function broadcastCartChange(detail: CartChangedDetail): void {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(CART_CHANGED_EVENT));
+  window.dispatchEvent(
+    new CustomEvent<CartChangedDetail>(CART_CHANGED_EVENT, { detail }),
+  );
 }
 
 export function openCartDrawer(): void {
@@ -212,10 +232,21 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     return created.id;
   }, [client, updateCart]);
 
+  // Total quantity helper. Used to compute deltas before/after a
+  // mutation so the broadcast carries the change the badge needs to
+  // decide whether to bump.
+  const totalQuantity = useCallback((c: Cart | null): number => {
+    if (!c) return 0;
+    let n = 0;
+    for (const item of c.items) n += item.quantity;
+    return n;
+  }, []);
+
   const addItem = useCallback(
     async (variantId: string, quantity = 1) => {
       setError(null);
       setLoading(true);
+      const before = totalQuantity(cart);
       try {
         const id = await ensureCart();
         const next = await client.storefront.cart.addItem(id, {
@@ -223,7 +254,12 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
           quantity,
         });
         updateCart(next);
-        broadcastCartChange();
+        const after = totalQuantity(next);
+        broadcastCartChange({
+          delta: after - before,
+          itemCount: after,
+          variantId,
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "cart_add_failed");
         throw err;
@@ -231,7 +267,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         setLoading(false);
       }
     },
-    [client, ensureCart, updateCart],
+    [cart, client, ensureCart, totalQuantity, updateCart],
   );
 
   const updateItem = useCallback(
@@ -240,12 +276,20 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
       if (!id) return;
       setError(null);
       setLoading(true);
+      const before = totalQuantity(cart);
+      const variantId =
+        cart?.items.find((i) => i.id === itemId)?.variantId ?? null;
       try {
         const next = await client.storefront.cart.updateItem(id, itemId, {
           quantity,
         });
         updateCart(next);
-        broadcastCartChange();
+        const after = totalQuantity(next);
+        broadcastCartChange({
+          delta: after - before,
+          itemCount: after,
+          variantId,
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "cart_update_failed");
         throw err;
@@ -253,7 +297,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         setLoading(false);
       }
     },
-    [client, updateCart],
+    [cart, client, totalQuantity, updateCart],
   );
 
   const removeItem = useCallback(
@@ -262,10 +306,18 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
       if (!id) return;
       setError(null);
       setLoading(true);
+      const before = totalQuantity(cart);
+      const variantId =
+        cart?.items.find((i) => i.id === itemId)?.variantId ?? null;
       try {
         const next = await client.storefront.cart.removeItem(id, itemId);
         updateCart(next);
-        broadcastCartChange();
+        const after = totalQuantity(next);
+        broadcastCartChange({
+          delta: after - before,
+          itemCount: after,
+          variantId,
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "cart_remove_failed");
         throw err;
@@ -273,7 +325,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         setLoading(false);
       }
     },
-    [client, updateCart],
+    [cart, client, totalQuantity, updateCart],
   );
 
   const clear = useCallback(async () => {
@@ -281,17 +333,23 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     if (!id) return;
     setError(null);
     setLoading(true);
+    const before = totalQuantity(cart);
     try {
       const next = await client.storefront.cart.clear(id);
       updateCart(next);
-      broadcastCartChange();
+      const after = totalQuantity(next);
+      broadcastCartChange({
+        delta: after - before,
+        itemCount: after,
+        variantId: null,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "cart_clear_failed");
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [client, updateCart]);
+  }, [cart, client, totalQuantity, updateCart]);
 
   const itemCount = useMemo(() => {
     if (!cart) return 0;

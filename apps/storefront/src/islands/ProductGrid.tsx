@@ -394,6 +394,12 @@ export default function ProductGrid({
                         return next;
                       });
                     }}
+                    // Pairs with the matching name on the PDP hero so a
+                    // click-through morphs the card image into the hero.
+                    // Same pattern as `ProductCard.astro`; the React
+                    // grid is what the home page and listing page use,
+                    // so the wiring needs to live here too.
+                    style={{ viewTransitionName: `pdp-image-${p.slug}` }}
                     className="h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
                   />
                 ) : (

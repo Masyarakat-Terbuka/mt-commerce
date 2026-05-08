@@ -6,6 +6,7 @@
   "nav.search": "Cari",
   "nav.account": "Akun",
   "nav.menu": "Menu",
+  "nav.skip_to_content": "Lewati ke konten utama",
   "nav.help": "Bantuan",
   "nav.privacy": "Kebijakan privasi",
   "nav.terms": "Syarat layanan",
@@ -50,7 +51,6 @@
   "search.loading": "Memuat hasil…",
   "search.count": "{count} hasil",
   "search.browse_all": "Lihat semua produk",
-
 
   "products.list.title": "Semua produk",
   "products.list.empty": "Belum ada produk yang cocok dengan pencarian Anda.",
@@ -104,6 +104,7 @@
   "cart.quantity": "Jumlah",
   "cart.close": "Tutup",
   "cart.error_generic": "Tidak bisa menambah ke keranjang. Coba lagi sebentar.",
+  "cart.count_announce": "Keranjang: {count}",
 
   "checkout.title": "Pembayaran",
   "checkout.steps.address": "Alamat",

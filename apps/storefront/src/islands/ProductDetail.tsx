@@ -393,6 +393,11 @@ export default function ProductDetail(props: ProductDetailProps) {
               fetchPriority="high"
               width={1600}
               height={900}
+              // Pairs with the matching name on `ProductCard.astro` —
+              // the browser morphs a clicked card image into this hero
+              // across the Astro view-transition swap. Unsupporting
+              // browsers fall through to a normal swap.
+              style={{ viewTransitionName: `pdp-image-${product.slug}` }}
               className="h-full w-full object-cover"
             />
           ) : (
@@ -441,7 +446,16 @@ export default function ProductDetail(props: ProductDetailProps) {
               />
             </div>
 
-            <div className="border-line bg-cream sticky bottom-0 -mx-5 mt-10 border-t px-5 py-4 md:static md:m-0 md:mt-12 md:border-0 md:bg-transparent md:p-0">
+            <div
+              className="border-line bg-cream sticky bottom-0 -mx-5 mt-10 border-t px-5 py-4 md:static md:m-0 md:mt-12 md:border-0 md:bg-transparent md:p-0"
+              // env(safe-area-inset-bottom) keeps the sticky CTA above the
+              // iPhone home indicator on mobile. The 1rem (16px) constant
+              // matches the existing py-4 padding so the visual height
+              // doesn't change on devices without an inset.
+              style={{
+                paddingBottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
+              }}
+            >
               <AddToCartButton
                 productId={product.id}
                 variantId={firstVariant.id}
