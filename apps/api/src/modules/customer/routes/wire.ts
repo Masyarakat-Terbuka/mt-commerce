@@ -43,6 +43,16 @@ export interface WireCustomerAddress {
   kotaKabupatenId: string;
   kecamatanId: string;
   kelurahanId: string | null;
+  /**
+   * Resolved region names. Sibling-of-id rather than a nested object so
+   * older clients keep working — they only see fields they already know.
+   * `undefined` (omitted from JSON) if the region row could not be
+   * resolved at read time; the UI falls back to the id field in that case.
+   */
+  provinsiName?: string;
+  kotaKabupatenName?: string;
+  kecamatanName?: string;
+  kelurahanName?: string;
   postalCode: string;
   notes: string | null;
   createdAt: string;
@@ -108,6 +118,19 @@ export function toWireAddress(a: CustomerAddress): WireCustomerAddress {
     kotaKabupatenId: a.kotaKabupatenId,
     kecamatanId: a.kecamatanId,
     kelurahanId: a.kelurahanId,
+    // Pass-through of resolved region names. Spread-with-conditional keeps
+    // each field omitted from the JSON when undefined, so old clients
+    // see the wire shape they already know.
+    ...(a.provinsiName !== undefined ? { provinsiName: a.provinsiName } : {}),
+    ...(a.kotaKabupatenName !== undefined
+      ? { kotaKabupatenName: a.kotaKabupatenName }
+      : {}),
+    ...(a.kecamatanName !== undefined
+      ? { kecamatanName: a.kecamatanName }
+      : {}),
+    ...(a.kelurahanName !== undefined
+      ? { kelurahanName: a.kelurahanName }
+      : {}),
     postalCode: a.postalCode,
     notes: a.notes,
     createdAt: a.createdAt.toISOString(),

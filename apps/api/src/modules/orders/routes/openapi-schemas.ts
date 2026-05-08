@@ -31,6 +31,14 @@ const OrderAddressSnapshotWire = z
     kotaKabupatenId: z.string(),
     kecamatanId: z.string(),
     kelurahanId: z.string().nullable(),
+    // Resolved region names captured AT WRITE TIME (snapshot semantics —
+    // a later region rename does not rewrite past orders). Optional so
+    // pre-existing orders that lack the names parse cleanly; UI clients
+    // fall back to the BPS id field.
+    provinsiName: z.string().optional(),
+    kotaKabupatenName: z.string().optional(),
+    kecamatanName: z.string().optional(),
+    kelurahanName: z.string().optional(),
     postalCode: z.string(),
     notes: z.string().nullable(),
   })

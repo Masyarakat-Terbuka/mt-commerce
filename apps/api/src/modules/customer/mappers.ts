@@ -64,6 +64,39 @@ export function toCustomerAddress(row: CustomerAddressRow): CustomerAddress {
   };
 }
 
+/**
+ * Row shape returned by repository read paths that LEFT JOIN the four
+ * region tables. Each `*_name` column comes from the joined table and
+ * is `null` when the region row was missing (e.g. a deleted province
+ * referenced by a stale address) — we collapse to `undefined` at the
+ * domain edge so the optional-field semantics line up with the wire
+ * shape (omitted from JSON, falls back to the id at the UI).
+ */
+export interface CustomerAddressRowWithRegions extends CustomerAddressRow {
+  provinsiName: string | null;
+  kotaKabupatenName: string | null;
+  kecamatanName: string | null;
+  kelurahanName: string | null;
+}
+
+export function toCustomerAddressWithRegions(
+  row: CustomerAddressRowWithRegions,
+): CustomerAddress {
+  return {
+    ...toCustomerAddress(row),
+    ...(row.provinsiName !== null ? { provinsiName: row.provinsiName } : {}),
+    ...(row.kotaKabupatenName !== null
+      ? { kotaKabupatenName: row.kotaKabupatenName }
+      : {}),
+    ...(row.kecamatanName !== null
+      ? { kecamatanName: row.kecamatanName }
+      : {}),
+    ...(row.kelurahanName !== null
+      ? { kelurahanName: row.kelurahanName }
+      : {}),
+  };
+}
+
 export function toProvince(row: ProvinsiRow): Province {
   return {
     id: row.id,

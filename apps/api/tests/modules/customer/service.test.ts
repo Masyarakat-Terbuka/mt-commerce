@@ -9,7 +9,10 @@
  */
 import { describe, expect, it } from "vitest";
 import { CustomerServiceImpl } from "../../../src/modules/customer/service.js";
-import type { CustomerRepository } from "../../../src/modules/customer/repository.js";
+import type {
+  CustomerAddressRowWithRegions,
+  CustomerRepository,
+} from "../../../src/modules/customer/repository.js";
 import type {
   CustomerAddressRow,
   CustomerRow,
@@ -46,6 +49,28 @@ function createStore(): FakeStore {
 }
 
 const fixedNow = (): Date => new Date("2026-05-07T12:00:00.000Z");
+
+/**
+ * Stand-in for the four-LEFT-JOIN read in the real repository. Looks
+ * each region name up in the in-memory store; returns `null` for any
+ * level that is not seeded — matching the production behaviour for a
+ * stale region FK.
+ */
+function withRegionNames(
+  store: FakeStore,
+  row: CustomerAddressRow,
+): CustomerAddressRowWithRegions {
+  return {
+    ...row,
+    provinsiName: store.provinsi.get(row.provinsiId)?.name ?? null,
+    kotaKabupatenName:
+      store.kotaKabupaten.get(row.kotaKabupatenId)?.name ?? null,
+    kecamatanName: store.kecamatan.get(row.kecamatanId)?.name ?? null,
+    kelurahanName: row.kelurahanId
+      ? store.kelurahan.get(row.kelurahanId)?.name ?? null
+      : null,
+  };
+}
 
 function createFakeRepo(store: FakeStore): CustomerRepository {
   const repo: CustomerRepository = {
@@ -153,12 +178,13 @@ function createFakeRepo(store: FakeStore): CustomerRepository {
       return address;
     },
     async getAddressById(id) {
-      return store.addresses.get(id) ?? null;
+      const row = store.addresses.get(id);
+      return row ? withRegionNames(store, row) : null;
     },
     async listAddressesForCustomer(customerId) {
-      return [...store.addresses.values()].filter(
-        (a) => a.customerId === customerId && a.deletedAt === null,
-      );
+      return [...store.addresses.values()]
+        .filter((a) => a.customerId === customerId && a.deletedAt === null)
+        .map((row) => withRegionNames(store, row));
     },
     async updateAddress(id, patch) {
       const existing = store.addresses.get(id);
@@ -486,6 +512,70 @@ describe("CustomerService.listKotaKabupaten", () => {
       provinsiId: jabar.provinsiId,
     });
     expect(jabarCities.map((c) => c.id)).toEqual([jabar.kotaKabupatenId]);
+  });
+});
+
+describe("CustomerService address read paths surface region names", () => {
+  it("listAddresses returns each address with the four resolved region names", async () => {
+    const { service, store } = buildService();
+    const region = seedJakartaTree(store);
+    const customer = await service.createCustomer({
+      email: "names@example.com",
+    });
+    await service.createAddress(customer.id, validAddressBody(region));
+
+    const addresses = await service.listAddresses(customer.id);
+    expect(addresses).toHaveLength(1);
+    const a = addresses[0]!;
+    // Names are populated alongside the BPS ids — both are present.
+    expect(a.provinsiName).toBe("DKI Jakarta");
+    expect(a.kotaKabupatenName).toBe("Jakarta Pusat");
+    expect(a.kecamatanName).toBe("Gambir");
+    expect(a.kelurahanName).toBe("Gambir");
+    expect(a.provinsiId).toBe(region.provinsiId);
+    expect(a.kotaKabupatenId).toBe(region.kotaKabupatenId);
+  });
+
+  it("getAddressById surfaces names when present", async () => {
+    const { service, store } = buildService();
+    const region = seedJakartaTree(store);
+    const customer = await service.createCustomer({
+      email: "by-id@example.com",
+    });
+    const created = await service.createAddress(
+      customer.id,
+      validAddressBody(region),
+    );
+
+    const refetched = await service.getAddressById(created.id);
+    expect(refetched).not.toBeNull();
+    expect(refetched!.provinsiName).toBe("DKI Jakarta");
+    expect(refetched!.kelurahanName).toBe("Gambir");
+  });
+
+  it("omits the kelurahan name when the address has no kelurahanId", async () => {
+    const { service, store } = buildService();
+    const region = seedJakartaTree(store);
+    const customer = await service.createCustomer({
+      email: "no-kel@example.com",
+    });
+    // Drop kelurahan from the body — the schema makes it optional, and a
+    // P.O.-box-style address can sit at the kecamatan level.
+    const body = validAddressBody(region);
+    const { kelurahanId: _omit, ...rest } = body;
+    await service.createAddress(customer.id, {
+      ...rest,
+      kelurahanId: null,
+    });
+
+    // The mutation response is intentionally bare (no JOIN); region
+    // names are only populated on the read paths (`listAddresses` /
+    // `getAddressById`). Refetch to assert the JOIN behaviour.
+    const [refetched] = await service.listAddresses(customer.id);
+    expect(refetched).toBeDefined();
+    expect(refetched!.provinsiName).toBe("DKI Jakarta");
+    // Kelurahan name is absent (not `null`) when the source id is null.
+    expect(refetched!.kelurahanName).toBeUndefined();
   });
 });
 

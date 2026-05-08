@@ -344,12 +344,13 @@ function AddressesCard({
 
 function AddressRow({ address }: { address: CustomerAddress }) {
   const t = useTranslator();
-  // The kelurahan id is the most specific BPS code; we surface it alongside
-  // the postal code so an operator who needs to verify an address against
-  // the BPS dataset can do so without leaving the page. The human-readable
-  // names are not on the address row itself — that would require a
-  // region-name lookup, which the API does not expose at v0.1. A separate
-  // follow-up adds region resolution; for now we render the codes.
+  // Region rows render `name ?? id` — names come from the API's read-time
+  // JOIN against the four region tables. The fall-back to the BPS code
+  // matters for two cases:
+  //   - older API deployments that have not yet shipped the JOIN
+  //   - addresses pointing at a region row that was pruned (the JOIN
+  //     surfaces `undefined` and the operator still sees the raw code,
+  //     which is enough to debug the dangling reference).
   return (
     <div className="flex items-start gap-2">
       <HugeiconsIcon
@@ -385,19 +386,25 @@ function AddressRow({ address }: { address: CustomerAddress }) {
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-4">
           <RegionCell
             label={t("customers.detail.provinsi")}
-            value={address.provinsiId}
+            value={address.provinsiName ?? address.provinsiId}
+            hasName={address.provinsiName !== undefined}
           />
           <RegionCell
             label={t("customers.detail.kota")}
-            value={address.kotaKabupatenId}
+            value={address.kotaKabupatenName ?? address.kotaKabupatenId}
+            hasName={address.kotaKabupatenName !== undefined}
           />
           <RegionCell
             label={t("customers.detail.kecamatan")}
-            value={address.kecamatanId}
+            value={address.kecamatanName ?? address.kecamatanId}
+            hasName={address.kecamatanName !== undefined}
           />
           <RegionCell
             label={t("customers.detail.kelurahan")}
-            value={address.kelurahanId ?? "—"}
+            value={
+              address.kelurahanName ?? address.kelurahanId ?? "—"
+            }
+            hasName={address.kelurahanName !== undefined}
           />
         </div>
         <div className="text-xs text-muted-foreground">
@@ -414,11 +421,25 @@ function AddressRow({ address }: { address: CustomerAddress }) {
   );
 }
 
-function RegionCell({ label, value }: { label: string; value: string }) {
+function RegionCell({
+  label,
+  value,
+  hasName,
+}: {
+  label: string;
+  value: string;
+  /**
+   * When the resolved region name is available we render it as plain
+   * text; the BPS-id fall-back keeps the monospace treatment so an
+   * operator can immediately see "this is an unresolved code, not a
+   * name".
+   */
+  hasName: boolean;
+}) {
   return (
     <div className="flex flex-col">
       <span className="text-[0.6875rem] uppercase tracking-wide">{label}</span>
-      <span className="font-mono">{value}</span>
+      <span className={hasName ? undefined : "font-mono"}>{value}</span>
     </div>
   );
 }

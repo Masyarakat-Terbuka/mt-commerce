@@ -39,6 +39,12 @@ export const AddressWire = z
     kotaKabupatenId: z.string(),
     kecamatanId: z.string(),
     kelurahanId: z.string().nullable(),
+    // Resolved region names — sibling fields, optional so the wire shape
+    // stays backwards-compatible (older clients ignore unknown keys).
+    provinsiName: z.string().optional(),
+    kotaKabupatenName: z.string().optional(),
+    kecamatanName: z.string().optional(),
+    kelurahanName: z.string().optional(),
     postalCode: z.string(),
     notes: z.string().nullable(),
     createdAt: z.string(),

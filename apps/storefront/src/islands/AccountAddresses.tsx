@@ -270,9 +270,25 @@ export default function AccountAddresses({
                   .filter(Boolean)
                   .join(", ")}
               </p>
+              {/*
+               * Resolved region names land alongside the BPS ids when the
+               * API has them (the customer-address read path JOINs the four
+               * region tables). The `?? <id>` fall-back keeps the layout
+               * stable against an older API or a stale region FK — the
+               * raw code is at least debuggable, and the storefront
+               * never blanks out the address line.
+               */}
               <p className="t-caption text-muted">
-                {address.kotaKabupatenId} · {address.postalCode}
+                {[
+                  address.kelurahanName ?? address.kelurahanId,
+                  address.kecamatanName ?? address.kecamatanId,
+                  address.kotaKabupatenName ?? address.kotaKabupatenId,
+                  address.provinsiName ?? address.provinsiId,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
               </p>
+              <p className="t-caption text-muted">{address.postalCode}</p>
               <p className="t-caption text-faint">{address.phone}</p>
 
               <div className="mt-3 flex flex-wrap gap-2 t-caption text-muted">

@@ -73,6 +73,19 @@ export interface CustomerListResult {
  * shape without TypeScript walking into a circularity warning. Tests also
  * implement this interface to stand up an in-memory fake.
  */
+/**
+ * Address row enriched with the four resolved region names. Used by the
+ * read paths (`getAddressById`, `listAddressesForCustomer`) so the UI does
+ * not have to make a second round-trip per dropdown level. Each name is
+ * `null` when the join finds no matching region row.
+ */
+export type CustomerAddressRowWithRegions = CustomerAddressRow & {
+  provinsiName: string | null;
+  kotaKabupatenName: string | null;
+  kecamatanName: string | null;
+  kelurahanName: string | null;
+};
+
 export interface CustomerRepository {
   insertCustomer(row: NewCustomerRow): Promise<CustomerRow>;
   getCustomerById(id: string): Promise<CustomerRow | null>;
@@ -86,8 +99,16 @@ export interface CustomerRepository {
   softDeleteCustomer(id: string): Promise<void>;
 
   insertAddress(row: NewCustomerAddressRow): Promise<CustomerAddressRow>;
-  getAddressById(id: string): Promise<CustomerAddressRow | null>;
-  listAddressesForCustomer(customerId: string): Promise<CustomerAddressRow[]>;
+  /**
+   * Returns the address row with resolved region names from a single
+   * LEFT-JOIN read. The four `*_name` columns are populated from the
+   * joined region tables; any of them may be `null` if the corresponding
+   * region row is missing (e.g. a stale FK that survived a region prune).
+   */
+  getAddressById(id: string): Promise<CustomerAddressRowWithRegions | null>;
+  listAddressesForCustomer(
+    customerId: string,
+  ): Promise<CustomerAddressRowWithRegions[]>;
   updateAddress(
     id: string,
     patch: Partial<NewCustomerAddressRow>,
@@ -222,21 +243,19 @@ export function createCustomerRepository(
       return inserted;
     },
 
-    async getAddressById(id: string): Promise<CustomerAddressRow | null> {
-      const [row] = await db
-        .select()
-        .from(customerAddresses)
+    async getAddressById(
+      id: string,
+    ): Promise<CustomerAddressRowWithRegions | null> {
+      const [row] = await selectAddressesWithRegions(db)
         .where(eq(customerAddresses.id, id))
         .limit(1);
-      return row ?? null;
+      return row ? flattenAddressJoin(row) : null;
     },
 
     async listAddressesForCustomer(
       customerId: string,
-    ): Promise<CustomerAddressRow[]> {
-      return db
-        .select()
-        .from(customerAddresses)
+    ): Promise<CustomerAddressRowWithRegions[]> {
+      const rows = await selectAddressesWithRegions(db)
         .where(
           and(
             eq(customerAddresses.customerId, customerId),
@@ -244,6 +263,7 @@ export function createCustomerRepository(
           ),
         )
         .orderBy(desc(customerAddresses.createdAt));
+      return rows.map(flattenAddressJoin);
     },
 
     async updateAddress(
@@ -388,5 +408,73 @@ export function createCustomerRepository(
         .where(eq(kelurahan.postalCode, postalCode))
         .orderBy(asc(kelurahan.name));
     },
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Address-with-regions JOIN helpers
+//
+// JOIN ORDER MATTERS — the four LEFT JOINs walk the BPS hierarchy
+// top-down: provinsi → kota_kabupaten → kecamatan → kelurahan. Reordering
+// (e.g. joining kelurahan first) silently flips the semantics: kelurahan
+// is the only nullable level on `customer_addresses`, so an address with
+// `kelurahan_id IS NULL` would correctly miss the kelurahan name but
+// could lose its other names too if the chain is rewired through the
+// nullable column. Keep the order intact.
+//
+// Each LEFT JOIN keys off the address's own region FK rather than walking
+// the hierarchy (e.g. `kota.provinsi_id = provinsi.id`). The customer
+// service validates hierarchy consistency on write (see
+// `validateAddress`), so the address row already carries each level's
+// canonical id; joining straight from the address row keeps the SQL flat
+// and avoids surfacing pre-existing inconsistencies as missing names.
+//
+// Resulting Drizzle JOIN (paraphrased):
+//
+//   SELECT customer_addresses.*,
+//          provinsi.name        AS provinsi_name,
+//          kota_kabupaten.name  AS kota_kabupaten_name,
+//          kecamatan.name       AS kecamatan_name,
+//          kelurahan.name       AS kelurahan_name
+//   FROM   customer_addresses
+//   LEFT JOIN provinsi       ON provinsi.id       = customer_addresses.provinsi_id
+//   LEFT JOIN kota_kabupaten ON kota_kabupaten.id = customer_addresses.kota_kabupaten_id
+//   LEFT JOIN kecamatan      ON kecamatan.id      = customer_addresses.kecamatan_id
+//   LEFT JOIN kelurahan      ON kelurahan.id      = customer_addresses.kelurahan_id
+//   WHERE  ...
+// ----------------------------------------------------------------------------
+
+function selectAddressesWithRegions(db: Db) {
+  return db
+    .select({
+      address: customerAddresses,
+      provinsiName: provinsi.name,
+      kotaKabupatenName: kotaKabupaten.name,
+      kecamatanName: kecamatan.name,
+      kelurahanName: kelurahan.name,
+    })
+    .from(customerAddresses)
+    .leftJoin(provinsi, eq(provinsi.id, customerAddresses.provinsiId))
+    .leftJoin(
+      kotaKabupaten,
+      eq(kotaKabupaten.id, customerAddresses.kotaKabupatenId),
+    )
+    .leftJoin(kecamatan, eq(kecamatan.id, customerAddresses.kecamatanId))
+    .leftJoin(kelurahan, eq(kelurahan.id, customerAddresses.kelurahanId));
+}
+
+function flattenAddressJoin(row: {
+  address: CustomerAddressRow;
+  provinsiName: string | null;
+  kotaKabupatenName: string | null;
+  kecamatanName: string | null;
+  kelurahanName: string | null;
+}): CustomerAddressRowWithRegions {
+  return {
+    ...row.address,
+    provinsiName: row.provinsiName,
+    kotaKabupatenName: row.kotaKabupatenName,
+    kecamatanName: row.kecamatanName,
+    kelurahanName: row.kelurahanName,
   };
 }

@@ -935,6 +935,63 @@ describe("createClient — storefront.checkout", () => {
     const headers = new Headers(calls[0]!.init?.headers as HeadersInit);
     expect(headers.get("x-customer-id")).toBe("cus_01J");
   });
+
+  it("passes resolved region names through the wire→domain converter when the API returns them", async () => {
+    // The API's read-time JOIN populates the four `*Name` siblings. The
+    // SDK's converter must surface them on the domain shape, and absent
+    // names must NOT crash older callers.
+    const { fetch } = mockFetch({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: "adr_named",
+            customerId: "cus_01J",
+            kind: "shipping",
+            isDefaultShipping: false,
+            isDefaultBilling: false,
+            recipientName: "Sari",
+            phone: "+6281234567890",
+            addressLine1: "Jl. Melati 1",
+            addressLine2: null,
+            provinsiId: "31",
+            kotaKabupatenId: "3171",
+            kecamatanId: "317101",
+            kelurahanId: "3171011001",
+            provinsiName: "DKI Jakarta",
+            kotaKabupatenName: "Jakarta Pusat",
+            kecamatanName: "Gambir",
+            kelurahanName: "Gambir",
+            postalCode: "10110",
+            notes: null,
+            createdAt: "2026-05-01T08:00:00.000Z",
+            updatedAt: "2026-05-01T08:00:00.000Z",
+            deletedAt: null,
+          },
+        ],
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const addresses = await client.storefront.customer.myAddresses({
+      customerId: "cus_01J",
+    });
+
+    const a = addresses[0]!;
+    expect(a.provinsiName).toBe("DKI Jakarta");
+    expect(a.kotaKabupatenName).toBe("Jakarta Pusat");
+    expect(a.kecamatanName).toBe("Gambir");
+    expect(a.kelurahanName).toBe("Gambir");
+    // Type-only: the optional fields must be reachable on the public
+    // domain shape without a cast. `satisfies` doubles as a compile-time
+    // assertion that no `any` fall-back is hiding a type regression.
+    a satisfies {
+      provinsiName?: string;
+      kotaKabupatenName?: string;
+      kecamatanName?: string;
+      kelurahanName?: string;
+    };
+  });
 });
 
 // ---------------------------------------------------------------------------

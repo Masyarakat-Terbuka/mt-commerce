@@ -24,12 +24,16 @@ import { and, asc, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-or
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as defaultDb } from "../../db/client.js";
 import {
+  kecamatan,
+  kelurahan,
+  kotaKabupaten,
   orderIntents,
   orderItems,
   orderStatusHistory,
   orders,
   productVariants,
   products,
+  provinsi,
   type NewOrderItemRow,
   type NewOrderRow,
   type NewOrderStatusHistoryRow,
@@ -131,6 +135,28 @@ export interface OrdersRepository {
   getVariantsWithProductsByIds(
     variantIds: string[],
   ): Promise<VariantWithProduct[]>;
+  /**
+   * Resolve the four BPS-keyed region names in a single round-trip.
+   * Called by `OrderService.createFromIntent` to enrich the address
+   * snapshot AT WRITE TIME so the JSONB blob carries the names alongside
+   * the ids — this is what makes the snapshot self-contained against
+   * later region renames.
+   *
+   * Any input id may be `null` (kelurahan can be missing on an address);
+   * the corresponding output is `null`. Unknown ids also produce `null`
+   * — we surface the gap rather than fabricate a fallback.
+   */
+  resolveRegionNames(input: {
+    provinsiId: string;
+    kotaKabupatenId: string;
+    kecamatanId: string;
+    kelurahanId: string | null;
+  }): Promise<{
+    provinsiName: string | null;
+    kotaKabupatenName: string | null;
+    kecamatanName: string | null;
+    kelurahanName: string | null;
+  }>;
 
   withTransaction<T>(fn: (tx: OrdersRepository) => Promise<T>): Promise<T>;
 }
@@ -337,6 +363,79 @@ export function createOrdersRepository(db: Db = defaultDb): OrdersRepository {
         .innerJoin(products, eq(productVariants.productId, products.id))
         .where(inArray(productVariants.id, variantIds));
       return rows.map((r) => ({ variant: r.variant, product: r.product }));
+    },
+
+    async resolveRegionNames(input) {
+      // Single query with four LEFT JOINs against a synthetic 1-row source.
+      //
+      // JOIN ORDER MATTERS — the LEFT JOINs walk the BPS hierarchy
+      // top-down: provinsi → kota_kabupaten → kecamatan → kelurahan. The
+      // joins are independent (each keys off its own input id), so
+      // reordering wouldn't change correctness today; keeping them in
+      // hierarchy order makes the SQL self-documenting and means adding
+      // a future hierarchy-walking variant (e.g. "join kota only when
+      // its provinsi_id matches") doesn't need to reshuffle anything.
+      //
+      // SQL (paraphrased):
+      //
+      //   SELECT provinsi.name        AS provinsi_name,
+      //          kota_kabupaten.name  AS kota_kabupaten_name,
+      //          kecamatan.name       AS kecamatan_name,
+      //          kelurahan.name       AS kelurahan_name
+      //   FROM   (SELECT 1) src
+      //   LEFT JOIN provinsi       ON provinsi.id       = $1
+      //   LEFT JOIN kota_kabupaten ON kota_kabupaten.id = $2
+      //   LEFT JOIN kecamatan      ON kecamatan.id      = $3
+      //   LEFT JOIN kelurahan      ON kelurahan.id      = $4
+      //
+      // postgres-js exposes `db.execute` with a tagged template; we use
+      // it here because Drizzle's query builder does not model FROM
+      // (SELECT 1) sources elegantly. The four ids travel as bind
+      // parameters — no string concatenation.
+      const result = await db.execute<{
+        provinsi_name: string | null;
+        kota_kabupaten_name: string | null;
+        kecamatan_name: string | null;
+        kelurahan_name: string | null;
+      }>(sql`
+        SELECT
+          provinsi.name        AS provinsi_name,
+          kota_kabupaten.name  AS kota_kabupaten_name,
+          kecamatan.name       AS kecamatan_name,
+          kelurahan.name       AS kelurahan_name
+        FROM (SELECT 1) AS src
+        LEFT JOIN provinsi       ON provinsi.id       = ${input.provinsiId}
+        LEFT JOIN kota_kabupaten ON kota_kabupaten.id = ${input.kotaKabupatenId}
+        LEFT JOIN kecamatan      ON kecamatan.id      = ${input.kecamatanId}
+        LEFT JOIN kelurahan      ON kelurahan.id      = ${
+          input.kelurahanId ?? null
+        }
+      `);
+
+      // postgres-js returns rows directly array-like; defensive narrow
+      // because driver shapes vary.
+      const row = (result as unknown as Array<{
+        provinsi_name: string | null;
+        kota_kabupaten_name: string | null;
+        kecamatan_name: string | null;
+        kelurahan_name: string | null;
+      }>)[0];
+
+      if (!row) {
+        return {
+          provinsiName: null,
+          kotaKabupatenName: null,
+          kecamatanName: null,
+          kelurahanName: null,
+        };
+      }
+
+      return {
+        provinsiName: row.provinsi_name,
+        kotaKabupatenName: row.kota_kabupaten_name,
+        kecamatanName: row.kecamatan_name,
+        kelurahanName: row.kelurahan_name,
+      };
     },
 
     async withTransaction<T>(
