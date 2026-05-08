@@ -251,11 +251,27 @@ function toCartItem(w: WireCartItem): CartItem {
 }
 
 function toCartTotals(w: WireCartTotals): CartTotals {
+  const subtotal = moneyFromJSON(w.subtotal);
+  const tax = moneyFromJSON(w.tax);
+  // `subtotalIncludingTax` is optional on the wire so an older API
+  // deployment that hasn't shipped the field yet still parses cleanly;
+  // we coalesce to `subtotal + tax` in that case so consumers always
+  // receive a defined Money value.
+  const subtotalIncludingTax = w.subtotalIncludingTax
+    ? moneyFromJSON(w.subtotalIncludingTax)
+    : { amount: subtotal.amount + tax.amount, currency: subtotal.currency };
+  // `taxRate` (nested) is the canonical source; the flat fields are
+  // mirrored for convenience. Read either; coalesce missing → null.
+  const taxRate = w.taxRate ?? null;
   return {
-    subtotal: moneyFromJSON(w.subtotal),
-    tax: moneyFromJSON(w.tax),
+    subtotal,
+    tax,
     shipping: moneyFromJSON(w.shipping),
+    subtotalIncludingTax,
     total: moneyFromJSON(w.total),
+    taxRate,
+    taxRateCode: w.taxRateCode ?? taxRate?.code ?? null,
+    taxRateBasisPoints: w.taxRateBasisPoints ?? taxRate?.basisPoints ?? null,
   };
 }
 

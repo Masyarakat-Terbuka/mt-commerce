@@ -152,6 +152,11 @@ interface OrderIntentSnapshotShape {
     tax: { amount: string | number | bigint; currency: string };
     shipping: { amount: string | number | bigint; currency: string };
     total: { amount: string | number | bigint; currency: string };
+    // Optional on read so older snapshots written before this change
+    // parse cleanly; the `?? null` at the call site collapses missing /
+    // null into the same "no rate captured" shape on the order row.
+    taxRateCode?: string | null;
+    taxRateBasisPoints?: number | null;
   };
   shippingAddressSnapshot: OrderAddressSnapshot;
   billingAddressSnapshot: OrderAddressSnapshot | null;
@@ -205,6 +210,12 @@ export class OrderServiceImpl implements OrderService {
       const shipping = readMoney(snapshot.totalsSnapshot.shipping);
       const total = readMoney(snapshot.totalsSnapshot.total);
       const currency = total.currency;
+      // Tax-rate metadata is captured at checkout-completion time on
+      // the snapshot. Read it forward into the order row; null is the
+      // honest answer for older snapshots that pre-date the column.
+      const taxRateCode = snapshot.totalsSnapshot.taxRateCode ?? null;
+      const taxRateBasisPoints =
+        snapshot.totalsSnapshot.taxRateBasisPoints ?? null;
 
       // Sanity-check totals: subtotal + tax + shipping should equal
       // total. If the checkout snapshot disagrees we DO NOT silently
@@ -261,12 +272,13 @@ export class OrderServiceImpl implements OrderService {
         status: "pending_payment",
         subtotalAmount: subtotal.amount,
         taxAmount: tax.amount,
-        // Tax rate metadata is not carried on the order_intent in v0.1;
-        // capture nulls and let a future tax-module integration backfill
-        // (or have checkout snapshot the rate row). Surfacing the null
+        // Tax rate metadata is captured by the checkout snapshot — see
+        // `apps/api/src/modules/checkout/service.ts:mergeShippingIntoTotals`.
+        // Null when no rate was applied (env-var fallback path or no
+        // default seeded for the cart's currency); surfacing the null
         // explicitly is more honest than fabricating a code.
-        taxRateCode: null,
-        taxRateBasisPoints: null,
+        taxRateCode,
+        taxRateBasisPoints,
         shippingAmount: shipping.amount,
         shippingMethodCode: intent.shippingMethodCode,
         totalAmount: total.amount,

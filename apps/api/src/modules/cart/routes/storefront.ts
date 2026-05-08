@@ -29,7 +29,8 @@ import {
   errorResponse,
 } from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
-import type { CartService } from "../service.js";
+import type { Cart } from "../types.js";
+import type { CartService, GetTotalsOptions } from "../service.js";
 import {
   addItemSchema,
   createCartSchema,
@@ -37,6 +38,25 @@ import {
 } from "../types.js";
 import { toWireCart } from "./wire.js";
 import { CartWire } from "./openapi-schemas.js";
+
+/**
+ * Resolves the `taxRate` option for `getTotals` for a given currency. Per
+ * ADR-0005 (modular monolith), the cart routes do not import the tax
+ * module directly — the route builder accepts a resolver function so the
+ * dependency direction stays cart → opaque function (and the test surface
+ * stays a single-function fake).
+ *
+ * Returning `null` is the documented fallback path: `getTotals` then
+ * applies `env.taxPpnRate`. Throws bubble up as 5xx — the route layer
+ * does not swallow them; an unreachable tax service should surface
+ * loudly so operators see it on the dashboards rather than silently
+ * shipping carts with wrong totals.
+ */
+export type TaxRateResolver = (
+  currency: string,
+) => Promise<GetTotalsOptions["taxRate"] | null>;
+
+const noTaxResolver: TaxRateResolver = async () => null;
 
 const TAG = "cart (storefront)";
 
@@ -65,10 +85,25 @@ async function resolveCurrentCustomerId(
 
 export function buildCartStorefrontRoutes(
   service: CartService,
+  resolveTaxRate: TaxRateResolver = noTaxResolver,
 ): OpenAPIHono<AppBindings> {
   const router = new OpenAPIHono<AppBindings>({
     defaultHook: defaultValidationHook,
   });
+
+  /**
+   * Resolve the tax rate for this cart's currency once per request and
+   * pass it to `getTotals`. Per-request resolution (not cart-row caching)
+   * is deliberate: operators may flip the default rate at any time via
+   * the admin UI, and a cached value would silently apply the wrong rate
+   * to a cart created before the flip. The lookup is a single SELECT
+   * against a partial unique index — the tax module's README documents
+   * this as the cart-totals hot path.
+   */
+  async function totalsFor(cart: Cart) {
+    const taxRate = await resolveTaxRate(cart.currency);
+    return service.getTotals(cart, taxRate ? { taxRate } : undefined);
+  }
 
   // -------------------------------------------------------------------
   // Cart CRUD — public; ULID id is the bearer
@@ -95,7 +130,7 @@ export function buildCartStorefrontRoutes(
     async (c) => {
       const input = c.req.valid("json");
       const cart = await service.createGuestCart(input.currency);
-      return c.json(toWireCart(cart, service.getTotals(cart)), 201);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 201);
     },
   );
 
@@ -117,7 +152,7 @@ export function buildCartStorefrontRoutes(
     async (c) => {
       const cart = await service.getCartById(c.req.param("id"));
       if (!cart) throw new NotFoundError("Cart not found.");
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 
@@ -146,7 +181,7 @@ export function buildCartStorefrontRoutes(
     async (c) => {
       const input = c.req.valid("json");
       const cart = await service.addItem(c.req.param("id"), input);
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 
@@ -179,7 +214,7 @@ export function buildCartStorefrontRoutes(
         c.req.param("itemId"),
         input.quantity,
       );
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 
@@ -203,7 +238,7 @@ export function buildCartStorefrontRoutes(
         c.req.param("id"),
         c.req.param("itemId"),
       );
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 
@@ -225,7 +260,7 @@ export function buildCartStorefrontRoutes(
     }),
     async (c) => {
       const cart = await service.clear(c.req.param("id"));
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 
@@ -252,7 +287,7 @@ export function buildCartStorefrontRoutes(
       const customerId = await resolveCurrentCustomerId(c);
       const cart = await service.getActiveCartForCustomer(customerId);
       if (!cart) throw new NotFoundError("No active cart for this customer.");
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 
@@ -295,10 +330,10 @@ export function buildCartStorefrontRoutes(
       const input = c.req.valid("json");
       const existing = await service.getActiveCartForCustomer(customerId);
       if (existing) {
-        return c.json(toWireCart(existing, service.getTotals(existing)), 200);
+        return c.json(toWireCart(existing, await totalsFor(existing)), 200);
       }
       const cart = await service.createCustomerCart(customerId, input.currency);
-      return c.json(toWireCart(cart, service.getTotals(cart)), 201);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 201);
     },
   );
 

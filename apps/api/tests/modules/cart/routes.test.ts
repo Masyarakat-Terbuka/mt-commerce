@@ -16,6 +16,7 @@ import { installBigIntJsonSerializer } from "../../../src/lib/json.js";
 import { authService } from "../../../src/modules/auth/index.js";
 import { buildCartAdminRoutes } from "../../../src/modules/cart/routes/admin.js";
 import { buildCartStorefrontRoutes } from "../../../src/modules/cart/routes/storefront.js";
+import { CartServiceImpl } from "../../../src/modules/cart/service.js";
 import type { AppBindings } from "../../../src/lib/types.js";
 import type {
   Cart,
@@ -101,7 +102,9 @@ function createFakeService(opts: FakeOpts = {}): CartService {
     subtotal: { amount: 0n, currency: cart.currency },
     tax: { amount: 0n, currency: cart.currency },
     shipping: { amount: 0n, currency: cart.currency },
+    subtotalIncludingTax: { amount: 0n, currency: cart.currency },
     total: { amount: 0n, currency: cart.currency },
+    taxRate: null,
   });
 
   const base: CartService = {
@@ -161,16 +164,26 @@ function createFakeService(opts: FakeOpts = {}): CartService {
   return { ...base, ...opts.overrides };
 }
 
-function buildAdminApp(service: CartService): Hono<AppBindings> {
+type TaxRateResolver = (
+  currency: string,
+) => Promise<{ code: string; rateBasisPoints: number } | null>;
+
+function buildAdminApp(
+  service: CartService,
+  resolveTaxRate?: TaxRateResolver,
+): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
-  app.route("/admin/v1", buildCartAdminRoutes(service));
+  app.route("/admin/v1", buildCartAdminRoutes(service, resolveTaxRate));
   app.onError(errorHandler);
   return app;
 }
 
-function buildStorefrontApp(service: CartService): Hono<AppBindings> {
+function buildStorefrontApp(
+  service: CartService,
+  resolveTaxRate?: TaxRateResolver,
+): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
-  app.route("/storefront/v1", buildCartStorefrontRoutes(service));
+  app.route("/storefront/v1", buildCartStorefrontRoutes(service, resolveTaxRate));
   app.onError(errorHandler);
   return app;
 }
@@ -228,7 +241,9 @@ describe("storefront cart routes", () => {
             subtotal: { amount: 500_000n, currency: "IDR" },
             tax: { amount: 55_000n, currency: "IDR" },
             shipping: { amount: 0n, currency: "IDR" },
+            subtotalIncludingTax: { amount: 555_000n, currency: "IDR" },
             total: { amount: 555_000n, currency: "IDR" },
+            taxRate: null,
           };
         },
       },
@@ -302,6 +317,106 @@ describe("storefront cart routes", () => {
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("unauthorized");
+  });
+
+  it("populates the new tax fields on the wire shape when the resolver returns a rate", async () => {
+    // Replace the fake service's getTotals with the real one so the
+    // route's `await totalsFor(cart)` flows the resolved rate end-to-end
+    // through getTotals → toWireCart, exactly as production does.
+    const realService = new CartServiceImpl({} as never) as CartService;
+
+    const cart = makeCart({
+      id: "cart_with_items",
+      items: [
+        {
+          id: "ci_1",
+          cartId: "cart_with_items",
+          variantId: "var_1",
+          quantity: 1,
+          unitPrice: { amount: 100_000n, currency: "IDR" },
+          lineTotal: { amount: 100_000n, currency: "IDR" },
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+    });
+    const service: CartService = {
+      ...createFakeService({ initial: [cart] }),
+      getTotals: realService.getTotals.bind(realService),
+    };
+    const app = buildStorefrontApp(service, async (currency) => {
+      // Simulate the production resolver bound to taxService.getDefaultRate.
+      if (currency === "IDR") return { code: "PPN_11", rateBasisPoints: 1100 };
+      return null;
+    });
+
+    const res = await app.request("/storefront/v1/carts/cart_with_items");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      totals: {
+        subtotal: { amount: string; currency: string };
+        tax: { amount: string; currency: string };
+        shipping: { amount: string; currency: string };
+        subtotalIncludingTax: { amount: string; currency: string };
+        total: { amount: string; currency: string };
+        taxRate: { code: string; basisPoints: number } | null;
+        taxRateCode: string | null;
+        taxRateBasisPoints: number | null;
+      };
+    };
+    // 100_000 × 11% = 11_000 → subtotalIncludingTax = 111_000.
+    expect(body.totals.subtotal.amount).toBe("100000");
+    expect(body.totals.tax.amount).toBe("11000");
+    expect(body.totals.subtotalIncludingTax.amount).toBe("111000");
+    expect(body.totals.shipping.amount).toBe("0");
+    expect(body.totals.total.amount).toBe("111000");
+    // Both shapes (nested + flat) are populated together.
+    expect(body.totals.taxRate).toEqual({ code: "PPN_11", basisPoints: 1100 });
+    expect(body.totals.taxRateCode).toBe("PPN_11");
+    expect(body.totals.taxRateBasisPoints).toBe(1100);
+  });
+
+  it("falls back to env-var tax (taxRate fields null) when the resolver returns null", async () => {
+    const realService = new CartServiceImpl({} as never) as CartService;
+
+    const cart = makeCart({
+      id: "cart_no_rate",
+      items: [
+        {
+          id: "ci_1",
+          cartId: "cart_no_rate",
+          variantId: "var_1",
+          quantity: 1,
+          unitPrice: { amount: 100_000n, currency: "IDR" },
+          lineTotal: { amount: 100_000n, currency: "IDR" },
+          createdAt: NOW,
+          updatedAt: NOW,
+        },
+      ],
+    });
+    const service: CartService = {
+      ...createFakeService({ initial: [cart] }),
+      getTotals: realService.getTotals.bind(realService),
+    };
+    // Resolver returns null → cart falls back to env.taxPpnRate (0.11
+    // in the vitest environment) but reports `taxRate: null` on the wire
+    // since no module-supplied rate was actually applied.
+    const app = buildStorefrontApp(service, async () => null);
+
+    const res = await app.request("/storefront/v1/carts/cart_no_rate");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      totals: {
+        subtotalIncludingTax: { amount: string; currency: string };
+        taxRate: unknown;
+        taxRateCode: string | null;
+        taxRateBasisPoints: number | null;
+      };
+    };
+    expect(body.totals.subtotalIncludingTax.amount).toBe("111000");
+    expect(body.totals.taxRate).toBeNull();
+    expect(body.totals.taxRateCode).toBeNull();
+    expect(body.totals.taxRateBasisPoints).toBeNull();
   });
 });
 

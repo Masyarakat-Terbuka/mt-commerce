@@ -137,6 +137,14 @@ export type CheckoutLabels = {
   totals: {
     subtotal: string;
     tax: string;
+    /**
+     * Tax-inclusive items line label (subtotal + tax). Indonesian retail
+     * conventionally displays tax-inclusive prices for the items
+     * themselves; the explicit tax line is dropped from the summary.
+     */
+    subtotalIncludingTax: string;
+    /** Inline note (e.g. "termasuk PPN") shown below the tax-inclusive line. */
+    taxIncludedNote: string;
     shipping: string;
     total: string;
   };
@@ -687,8 +695,11 @@ function ReviewStep({
 }: ReviewStepProps) {
   const total = useMemo<Money>(() => {
     if (!shippingAmount) return cart.totals.total;
+    // Use the precomputed `subtotalIncludingTax` line from the API so the
+    // client never has to re-derive (subtotal + tax) — the same value the
+    // summary block displays.
     return {
-      amount: cart.totals.subtotal.amount + cart.totals.tax.amount + shippingAmount.amount,
+      amount: cart.totals.subtotalIncludingTax.amount + shippingAmount.amount,
       currency: cart.totals.total.currency,
     };
   }, [cart, shippingAmount]);
@@ -770,12 +781,17 @@ function ReviewStep({
 
       <dl className="space-y-2 border-t border-line pt-6 t-body">
         <div className="flex justify-between text-muted">
-          <dt>{labels.totals.subtotal}</dt>
-          <dd className="price-figure">{formatMoney(cart.totals.subtotal, { locale })}</dd>
-        </div>
-        <div className="flex justify-between text-muted">
-          <dt>{labels.totals.tax}</dt>
-          <dd className="price-figure">{formatMoney(cart.totals.tax, { locale })}</dd>
+          <dt className="flex flex-col">
+            <span>{labels.totals.subtotalIncludingTax}</span>
+            <span className="t-caption text-muted/70">
+              {cart.totals.taxRateBasisPoints !== null
+                ? `${labels.totals.taxIncludedNote} ${cart.totals.taxRateBasisPoints / 100}%`
+                : labels.totals.taxIncludedNote}
+            </span>
+          </dt>
+          <dd className="price-figure">
+            {formatMoney(cart.totals.subtotalIncludingTax, { locale })}
+          </dd>
         </div>
         <div className="flex justify-between text-muted">
           <dt>{labels.totals.shipping}</dt>
@@ -1152,14 +1168,17 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
           <h2 className="t-caption text-muted">{labels.totals.total}</h2>
           <dl className="mt-4 space-y-2 t-body">
             <div className="flex justify-between text-muted">
-              <dt>{labels.totals.subtotal}</dt>
+              <dt className="flex flex-col">
+                <span>{labels.totals.subtotalIncludingTax}</span>
+                <span className="t-caption text-muted/70">
+                  {cart.totals.taxRateBasisPoints !== null
+                    ? `${labels.totals.taxIncludedNote} ${cart.totals.taxRateBasisPoints / 100}%`
+                    : labels.totals.taxIncludedNote}
+                </span>
+              </dt>
               <dd className="price-figure">
-                {formatMoney(cart.totals.subtotal, { locale })}
+                {formatMoney(cart.totals.subtotalIncludingTax, { locale })}
               </dd>
-            </div>
-            <div className="flex justify-between text-muted">
-              <dt>{labels.totals.tax}</dt>
-              <dd className="price-figure">{formatMoney(cart.totals.tax, { locale })}</dd>
             </div>
             <div className="flex justify-between text-muted">
               <dt>{labels.totals.shipping}</dt>
@@ -1176,8 +1195,7 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
                   ? formatMoney(
                       {
                         amount:
-                          cart.totals.subtotal.amount +
-                          cart.totals.tax.amount +
+                          cart.totals.subtotalIncludingTax.amount +
                           checkout.shippingAmount.amount,
                         currency: cart.totals.total.currency,
                       },

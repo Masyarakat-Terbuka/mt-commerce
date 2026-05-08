@@ -402,6 +402,48 @@ describe("createFromIntent", () => {
     expect(placed).toContain(order.id);
   });
 
+  it("freezes the tax-rate metadata from the totals snapshot onto the order row", async () => {
+    // The checkout module captures the rate that produced `tax` on the
+    // intent's totalsSnapshot. The orders service forwards it onto the
+    // permanent order row so the wire shape can render "PPN 11%" and so
+    // audit code can recompute the tax later.
+    const { service, store } = buildService();
+    const intent = makeIntent({
+      id: "oint_with_rate",
+      checkoutId: "chk_with_rate",
+      totalsSnapshot: {
+        subtotal: { amount: "100000", currency: "IDR" },
+        tax: { amount: "11000", currency: "IDR" },
+        shipping: { amount: "10000", currency: "IDR" },
+        total: { amount: "121000", currency: "IDR" },
+        // The new rate-metadata fields the checkout snapshot now carries.
+        taxRateCode: "PPN_11",
+        taxRateBasisPoints: 1100,
+      } as unknown as OrderIntentRow["totalsSnapshot"],
+    });
+    store.intents.set(intent.id, intent);
+
+    const order = await service.createFromIntent("oint_with_rate", {
+      actorKind: "customer",
+    });
+
+    expect(order.tax.amount).toBe(11_000n);
+    expect(order.taxRateCode).toBe("PPN_11");
+    expect(order.taxRateBasisPoints).toBe(1100);
+  });
+
+  it("frozen taxRate is null when the snapshot has no rate metadata (env-var fallback path)", async () => {
+    // Older snapshots written before the rate metadata landed (or the
+    // env-var fallback path inside getTotals) carry no `taxRateCode`.
+    // The order row preserves null rather than fabricating a code.
+    const { service } = buildService();
+    const order = await service.createFromIntent("oint_1", {
+      actorKind: "customer",
+    });
+    expect(order.taxRateCode).toBeNull();
+    expect(order.taxRateBasisPoints).toBeNull();
+  });
+
   it("rejects a duplicate intent with intent_already_consumed", async () => {
     const { service } = buildService();
     await service.createFromIntent("oint_1", { actorKind: "customer" });

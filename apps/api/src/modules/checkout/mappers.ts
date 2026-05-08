@@ -93,7 +93,13 @@ function toOrderIntentTotals(raw: unknown): OrderIntentTotals {
   const obj = raw as Record<
     "subtotal" | "tax" | "shipping" | "total",
     { amount: string | number | bigint; currency: string }
-  >;
+  > & {
+    // Optional on read for forward compatibility with snapshots written
+    // before the rate metadata was captured. The orders module collapses
+    // missing → null at materialisation time.
+    taxRateCode?: string | null;
+    taxRateBasisPoints?: number | null;
+  };
   return {
     subtotal: { amount: BigInt(obj.subtotal.amount), currency: obj.subtotal.currency },
     tax: { amount: BigInt(obj.tax.amount), currency: obj.tax.currency },
@@ -102,6 +108,8 @@ function toOrderIntentTotals(raw: unknown): OrderIntentTotals {
       currency: obj.shipping.currency,
     },
     total: { amount: BigInt(obj.total.amount), currency: obj.total.currency },
+    taxRateCode: obj.taxRateCode ?? null,
+    taxRateBasisPoints: obj.taxRateBasisPoints ?? null,
   };
 }
 

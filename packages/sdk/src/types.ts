@@ -220,11 +220,37 @@ export interface WireCartItem {
   updatedAt: string;
 }
 
+export interface WireAppliedTaxRate {
+  code: string;
+  basisPoints: number;
+}
+
 export interface WireCartTotals {
   subtotal: MoneyJSON;
   tax: MoneyJSON;
   shipping: MoneyJSON;
+  /**
+   * Convenience: `subtotal + tax` (excludes shipping). Indonesian retail
+   * conventionally displays tax-inclusive prices for the items themselves.
+   * Optional in the wire shape so older API deployments that haven't shipped
+   * the field yet still parse cleanly; the SDK coalesces missing values to
+   * a derived `subtotal + tax` on the domain side.
+   */
+  subtotalIncludingTax?: MoneyJSON;
   total: MoneyJSON;
+  /**
+   * Applied tax rate metadata. Both the nested `taxRate` object and the
+   * flat `taxRateCode` / `taxRateBasisPoints` fields carry the same
+   * value — flat fields are convenient for clients that only need one
+   * piece. All three are populated together (or all null when no rate
+   * was applied).
+   *
+   * Optional on the wire so older API deployments parse cleanly; the
+   * SDK coalesces missing values to `null` on the domain side.
+   */
+  taxRate?: WireAppliedTaxRate | null;
+  taxRateCode?: string | null;
+  taxRateBasisPoints?: number | null;
 }
 
 export interface WireCart {
@@ -335,13 +361,35 @@ export interface CartItem {
   updatedAt: Date;
 }
 
+export interface AppliedTaxRate {
+  code: string;
+  basisPoints: number;
+}
+
 export interface CartTotals {
+  /** Items only, excluding tax + shipping. */
   subtotal: Money;
-  /** PPN placeholder; service contract owns the rate. */
+  /** Tax amount. The applied rate is described by `taxRate` (when known). */
   tax: Money;
-  /** Always zero at v0.1. */
+  /** Shipping amount in the cart's currency. Zero when none has been quoted. */
   shipping: Money;
+  /**
+   * Convenience: `subtotal + tax`, in the cart's currency. Indonesian retail
+   * conventionally shows the tax-inclusive line for items themselves; the
+   * storefront uses this to render "Subtotal (termasuk PPN)" without
+   * re-deriving the math on the client.
+   */
+  subtotalIncludingTax: Money;
   total: Money;
+  /**
+   * The rate used to compute `tax`, or `null` when no rate was applied
+   * (env-var fallback path or no default rate seeded for the cart's
+   * currency). `taxRateCode` and `taxRateBasisPoints` flatten the same
+   * value for clients that prefer not to unwrap the nested object.
+   */
+  taxRate: AppliedTaxRate | null;
+  taxRateCode: string | null;
+  taxRateBasisPoints: number | null;
 }
 
 export interface Cart {

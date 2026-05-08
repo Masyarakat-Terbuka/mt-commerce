@@ -35,16 +35,34 @@ export interface WireAppliedTaxRate {
 }
 
 export interface WireCartTotals {
+  /** Items only, excluding tax + shipping. */
   subtotal: MoneyJSON;
+  /** Tax amount in the cart's currency. */
   tax: MoneyJSON;
+  /** Shipping amount in the cart's currency. */
   shipping: MoneyJSON;
+  /**
+   * Convenience: `subtotal + tax`, in the cart's currency. Indonesian
+   * retail conventionally shows tax-inclusive prices ("the price you
+   * see is the price you pay"); the storefront uses this so it does not
+   * have to re-derive the tax-inclusive line on the client.
+   */
+  subtotalIncludingTax: MoneyJSON;
+  /** `subtotal + tax + shipping`. */
   total: MoneyJSON;
   /**
    * The tax rate that produced `tax`, when one was supplied. Null when
    * the env-var fallback was used (e.g. tests / unseeded dev DBs) or
    * no default rate is configured for the cart's currency.
+   *
+   * `taxRateCode` and `taxRateBasisPoints` flatten the same value so
+   * clients that only need one piece can read it directly without
+   * unwrapping the nested object. Both shapes are populated together
+   * (or both null) — they never disagree.
    */
   taxRate: WireAppliedTaxRate | null;
+  taxRateCode: string | null;
+  taxRateBasisPoints: number | null;
 }
 
 export interface WireCart {
@@ -73,14 +91,26 @@ export function toWireCartItem(item: CartItem): WireCartItem {
 }
 
 export function toWireCartTotals(totals: CartTotals): WireCartTotals {
+  // `subtotalIncludingTax` is computed inside `getTotals` (single source
+  // of truth); we surface it on the wire as-is. If a caller hands us a
+  // legacy `CartTotals` without the field — possible during the
+  // transitional release — fall back to subtotal + tax so the wire
+  // shape is always populated.
+  const includingTax = totals.subtotalIncludingTax ?? {
+    amount: totals.subtotal.amount + totals.tax.amount,
+    currency: totals.subtotal.currency,
+  };
   return {
     subtotal: moneyToJSON(totals.subtotal),
     tax: moneyToJSON(totals.tax),
     shipping: moneyToJSON(totals.shipping),
+    subtotalIncludingTax: moneyToJSON(includingTax),
     total: moneyToJSON(totals.total),
     taxRate: totals.taxRate
       ? { code: totals.taxRate.code, basisPoints: totals.taxRate.basisPoints }
       : null,
+    taxRateCode: totals.taxRate?.code ?? null,
+    taxRateBasisPoints: totals.taxRate?.basisPoints ?? null,
   };
 }
 

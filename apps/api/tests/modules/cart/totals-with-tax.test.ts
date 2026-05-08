@@ -65,6 +65,24 @@ describe("getTotals with opts.taxRate (tax module integration)", () => {
     expect(totals.tax.amount).toBe(11_000n);
     expect(totals.total.amount).toBe(111_000n);
     expect(totals.taxRate).toEqual({ code: "PPN_11", basisPoints: 1100 });
+    // `subtotalIncludingTax` is the tax-inclusive items line (excludes
+    // shipping). Storefront displays this as "Subtotal (termasuk PPN)".
+    expect(totals.subtotalIncludingTax.amount).toBe(111_000n);
+    expect(totals.subtotalIncludingTax.currency).toBe("IDR");
+  });
+
+  it("subtotalIncludingTax adds shipping-free", async () => {
+    // Even when shipping is supplied, `subtotalIncludingTax` excludes
+    // shipping so the storefront can render the items-only "you-pay"
+    // line separately from shipping.
+    const cart = makeCart([makeItem(100_000n, 1)]);
+    const totals = service.getTotals(cart, {
+      taxRate: PPN_11,
+      shipping: { amount: 15_000n, currency: "IDR" },
+    });
+    expect(totals.subtotalIncludingTax.amount).toBe(111_000n);
+    expect(totals.shipping.amount).toBe(15_000n);
+    expect(totals.total.amount).toBe(126_000n);
   });
 
   it("rounds halfEven on a remainder-past-half subtotal", async () => {

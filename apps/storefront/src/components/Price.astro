@@ -12,6 +12,19 @@
  *   - muted   → `text-muted` (used on cards — Saturdays NYC mutes prices
  *               below the title so the photo and title do the heavy lifting)
  *   - strike  → faint with line-through (compare-at)
+ *
+ * Indonesian tax convention
+ * -------------------------
+ * Indonesian retail conventionally displays tax-inclusive prices: the
+ * sticker price IS the price the shopper pays. PDPs (`<Price money={variant.price} />`)
+ * and product cards therefore show `variant.price` as-is — those values
+ * are treated as the "displayed" tax-inclusive price.
+ *
+ * Cart and checkout summaries show the items line as `subtotalIncludingTax`
+ * (computed server-side; see `apps/api/src/modules/cart/service.ts`) plus
+ * a small "termasuk PPN" note. Shipping is added on top because shipping
+ * is not a tax-inclusive line; the total of the order is still
+ * `subtotal + tax + shipping`.
  */
 import { format as formatMoney, type Money } from "@mt-commerce/core/money";
 

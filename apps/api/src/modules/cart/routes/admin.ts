@@ -21,17 +21,22 @@ import {
 } from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import { requireAuth, requireRole } from "../../auth/index.js";
+import type { Cart } from "../types.js";
 import type { CartService } from "../service.js";
 import { listCartsQuerySchema } from "../types.js";
 import { toWireCart } from "./wire.js";
 import { CartWire, PaginatedCartWire } from "./openapi-schemas.js";
+import type { TaxRateResolver } from "./storefront.js";
 
 const TAG = "cart (admin)";
 
 const IdParam = z.object({ id: z.string().min(1) });
 
+const noTaxResolver: TaxRateResolver = async () => null;
+
 export function buildCartAdminRoutes(
   service: CartService,
+  resolveTaxRate: TaxRateResolver = noTaxResolver,
 ): OpenAPIHono<AppBindings> {
   const router = new OpenAPIHono<AppBindings>({
     defaultHook: defaultValidationHook,
@@ -41,6 +46,21 @@ export function buildCartAdminRoutes(
   // c.var.authUser and check the staff profile's role.
   router.use("*", requireAuth());
   router.use("*", requireRole("owner", "admin", "staff"));
+
+  /**
+   * Resolve the tax rate for this cart's currency once per request and
+   * pass it to `getTotals`. Same rationale as storefront — see
+   * `routes/storefront.ts` for the full reasoning.
+   *
+   * Listing N carts: rates are resolved per-currency, so a 100-cart page
+   * does at most one tax-rate lookup per distinct currency in the page
+   * (memoised inside the loop). For the v0.1 single-currency setup this
+   * collapses to exactly one DB hit per `GET /carts` call.
+   */
+  async function totalsFor(cart: Cart) {
+    const taxRate = await resolveTaxRate(cart.currency);
+    return service.getTotals(cart, taxRate ? { taxRate } : undefined);
+  }
 
   router.openapi(
     createRoute({
@@ -64,11 +84,29 @@ export function buildCartAdminRoutes(
     async (c) => {
       const query = c.req.valid("query");
       const result = await service.listCarts(query);
+
+      // Memoise tax-rate lookups by currency so a 100-cart page in a
+      // single-currency setup does exactly one tax-module call (and N
+      // calls only if the page mixes currencies — multi-currency stores
+      // are out of scope for v0.1, so the typical case is N=1).
+      const ratesByCurrency = new Map<
+        string,
+        Awaited<ReturnType<TaxRateResolver>>
+      >();
+      const distinctCurrencies = new Set(result.data.map((c) => c.currency));
+      for (const currency of distinctCurrencies) {
+        ratesByCurrency.set(currency, await resolveTaxRate(currency));
+      }
+
       return c.json(
         {
-          data: result.data.map((cart) =>
-            toWireCart(cart, service.getTotals(cart)),
-          ),
+          data: result.data.map((cart) => {
+            const taxRate = ratesByCurrency.get(cart.currency) ?? null;
+            return toWireCart(
+              cart,
+              service.getTotals(cart, taxRate ? { taxRate } : undefined),
+            );
+          }),
           total: result.total,
           page: result.page,
           pageSize: result.pageSize,
@@ -98,7 +136,7 @@ export function buildCartAdminRoutes(
     async (c) => {
       const cart = await service.getCartById(c.req.param("id"));
       if (!cart) throw new NotFoundError("Cart not found.");
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 
@@ -124,7 +162,7 @@ export function buildCartAdminRoutes(
     }),
     async (c) => {
       const cart = await service.markAbandoned(c.req.param("id"));
-      return c.json(toWireCart(cart, service.getTotals(cart)), 200);
+      return c.json(toWireCart(cart, await totalsFor(cart)), 200);
     },
   );
 

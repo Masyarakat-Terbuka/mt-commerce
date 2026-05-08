@@ -65,6 +65,15 @@ export interface OrderIntentTotals {
   tax: Money;
   shipping: Money;
   total: Money;
+  /**
+   * The tax rate that produced `tax`, captured at completion time so
+   * the materialised order can render "PPN 11%" alongside the amount
+   * and so audit code can recompute the tax later. Both fields are
+   * populated together (or both null when no rate was applied — env-var
+   * fallback path or no default rate seeded for the cart's currency).
+   */
+  taxRateCode: string | null;
+  taxRateBasisPoints: number | null;
 }
 
 /**

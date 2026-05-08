@@ -92,6 +92,8 @@
   "cart.empty_cta": "Browse products",
   "cart.subtotal": "Subtotal",
   "cart.tax": "Tax",
+  "cart.subtotal_including_tax": "Subtotal (incl. tax)",
+  "cart.tax_included_note": "incl. tax",
   "cart.shipping": "Shipping",
   "cart.total": "Total",
   "cart.checkout": "Continue to checkout",

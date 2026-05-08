@@ -391,7 +391,9 @@ function makeFakeCartService(carts: Map<string, Cart>): CartService {
         subtotal: { amount: subtotal, currency: cart.currency },
         tax: { amount: tax, currency: cart.currency },
         shipping: { amount: 0n, currency: cart.currency },
+        subtotalIncludingTax: { amount: subtotal + tax, currency: cart.currency },
         total: { amount: subtotal + tax, currency: cart.currency },
+        taxRate: null,
       };
     },
   };

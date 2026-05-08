@@ -604,9 +604,24 @@ export class CartServiceImpl implements CartService {
       shipping = moneyZero(currency);
     }
 
-    const total = moneyAdd(moneyAdd(subtotal, tax), shipping);
+    // Compute `subtotalIncludingTax` once here so every caller that wants
+    // the "items + tax, before shipping" line — storefront cart drawer,
+    // invoices, the order summary — agrees on the math without each
+    // client re-deriving from `(subtotal, tax)`. The value is derived
+    // through `Money.add` so currency parity is asserted (subtotal and
+    // tax are both currency-locked to the cart already, so this is
+    // belt-and-suspenders).
+    const subtotalIncludingTax = moneyAdd(subtotal, tax);
+    const total = moneyAdd(subtotalIncludingTax, shipping);
 
-    return { subtotal, tax, shipping, total, taxRate: appliedRate };
+    return {
+      subtotal,
+      tax,
+      shipping,
+      subtotalIncludingTax,
+      total,
+      taxRate: appliedRate,
+    };
   }
 }
 

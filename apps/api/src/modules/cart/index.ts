@@ -13,8 +13,12 @@
  *   - Route builders (`buildCartAdminRoutes`, `buildCartStorefrontRoutes`)
  *     plus pre-built singletons (`adminRoutes`, `storefrontRoutes`).
  */
+import { taxService } from "../tax/index.js";
 import { buildCartAdminRoutes } from "./routes/admin.js";
-import { buildCartStorefrontRoutes } from "./routes/storefront.js";
+import {
+  buildCartStorefrontRoutes,
+  type TaxRateResolver,
+} from "./routes/storefront.js";
 import { cartService } from "./service.js";
 
 export type {
@@ -31,10 +35,31 @@ export type {
 } from "./types.js";
 
 export type { CartService, GetTotalsOptions } from "./service.js";
+export type { TaxRateResolver } from "./routes/storefront.js";
 export { CartServiceImpl } from "./service.js";
 
 export { cartService };
 export { buildCartAdminRoutes, buildCartStorefrontRoutes };
 
-export const adminRoutes = buildCartAdminRoutes(cartService);
-export const storefrontRoutes = buildCartStorefrontRoutes(cartService);
+/**
+ * Default tax-rate resolver bound to the live tax service. Per the tax
+ * module's contract `getDefaultRate(currency)` returns the configured
+ * default rate (or null when none is configured); we map the rate's
+ * `(code, rateBasisPoints)` into the shape `getTotals` accepts so the
+ * cart module stays unaware of `TaxRate`'s full domain shape (per
+ * ADR-0005, modules talk through narrow interfaces).
+ */
+const defaultTaxRateResolver: TaxRateResolver = async (currency) => {
+  const rate = await taxService.getDefaultRate(currency);
+  if (!rate) return null;
+  return { code: rate.code, rateBasisPoints: rate.rateBasisPoints };
+};
+
+export const adminRoutes = buildCartAdminRoutes(
+  cartService,
+  defaultTaxRateResolver,
+);
+export const storefrontRoutes = buildCartStorefrontRoutes(
+  cartService,
+  defaultTaxRateResolver,
+);

@@ -92,6 +92,8 @@
   "cart.empty_cta": "Lihat semua produk",
   "cart.subtotal": "Subtotal",
   "cart.tax": "PPN",
+  "cart.subtotal_including_tax": "Subtotal (termasuk PPN)",
+  "cart.tax_included_note": "termasuk PPN",
   "cart.shipping": "Pengiriman",
   "cart.total": "Total",
   "cart.checkout": "Lanjut ke pembayaran",

@@ -51,6 +51,10 @@ import {
   shippingService as defaultShippingService,
   type ShippingService,
 } from "../shipping/index.js";
+import {
+  taxService as defaultTaxService,
+  type TaxService,
+} from "../tax/index.js";
 import { events, type EventName, type EventPayload } from "./events.js";
 import {
   toCheckout,
@@ -159,6 +163,16 @@ export class CheckoutServiceImpl implements CheckoutService {
      * `order: null`.
      */
     private readonly orders: OrderService | null = null,
+    /**
+     * Optional. When provided, `complete()` resolves the default tax
+     * rate at completion time and passes it to the cart's `getTotals`
+     * so the materialised order's totals snapshot uses the same rate
+     * the storefront has been showing the customer. Omitting the
+     * argument falls back to the cart's env-var path (the legacy
+     * placeholder) so existing tests that build a checkout service
+     * without a tax module keep working.
+     */
+    private readonly tax: TaxService | null = null,
   ) {}
 
   /**
@@ -556,7 +570,32 @@ export class CheckoutServiceImpl implements CheckoutService {
           cartId: fresh.cartId,
         });
       }
-      const cartTotals = this.carts.getTotals(cart);
+
+      // Resolve the default tax rate ONCE here, at completion time. The
+      // resolved rate goes:
+      //   1. into `getTotals` so the snapshot's tax amount uses the same
+      //      rate the storefront has been showing the customer; AND
+      //   2. into the snapshot's `taxRateCode` / `taxRateBasisPoints`
+      //      so the materialised order can render the rate metadata
+      //      (e.g. "PPN 11%") and so audit code can recompute later.
+      // When no rate is configured for the cart's currency (no row
+      // seeded), `getTotals` falls back to the env-var placeholder and
+      // the snapshot carries null rate metadata — honest about what
+      // happened rather than fabricating a code.
+      const resolvedRate = this.tax
+        ? await this.tax.getDefaultRate(cart.currency)
+        : null;
+      const cartTotals = this.carts.getTotals(
+        cart,
+        resolvedRate
+          ? {
+              taxRate: {
+                code: resolvedRate.code,
+                rateBasisPoints: resolvedRate.rateBasisPoints,
+              },
+            }
+          : undefined,
+      );
       const shippingMoney: Money = {
         amount: fresh.shippingAmount as bigint,
         currency: fresh.shippingCurrency as string,
@@ -825,27 +864,31 @@ export class CheckoutServiceImpl implements CheckoutService {
 /**
  * Replace the placeholder `shipping = zero` produced by the cart's totals
  * computation with the real shipping captured at the `awaiting_payment`
- * transition, then re-derive the total. Tax is unchanged.
+ * transition, then re-derive the total. Tax is unchanged. The applied
+ * tax rate metadata (`code` / `basisPoints`) is forwarded onto the
+ * `OrderIntentTotals` so the materialised order can persist it.
  */
 function mergeShippingIntoTotals(
   cartTotals: CartTotals,
   shipping: Money,
 ): OrderIntentTotals {
   const total = moneyAdd(moneyAdd(cartTotals.subtotal, cartTotals.tax), shipping);
-  // Defense-in-depth: re-derive the cart's tax using the same flat-rate
-  // placeholder so that a future divergence in `getTotals` cannot silently
-  // drift the snapshot. v0.1 has a single tax module placeholder; the real
-  // tax module will replace this whole helper.
-  const recomputedTax = moneyMultiply(cartTotals.subtotal, env.taxPpnRate, {
-    rounding: "halfEven",
-  });
-  // Sanity check — if the cart's totals diverge from the recomputation by
-  // more than a rounding cent, surface it as a programming error.
+  // Sanity check: when the cart's totals carry an applied rate, recompute
+  // the tax via that rate and warn on divergence. When no rate is applied
+  // (env-var fallback), recompute via env.taxPpnRate to keep the
+  // historical guard. We never overwrite the cart's tax — the cart is
+  // the source of truth, and a divergence is a logged signal, not a
+  // silent fix.
+  const recomputedTax = cartTotals.taxRate
+    ? moneyMultiply(
+        cartTotals.subtotal,
+        cartTotals.taxRate.basisPoints / 10_000,
+        { rounding: "halfEven" },
+      )
+    : moneyMultiply(cartTotals.subtotal, env.taxPpnRate, {
+        rounding: "halfEven",
+      });
   if (recomputedTax.amount !== cartTotals.tax.amount) {
-    // We do NOT throw here — the cart layer is the source of truth for
-    // tax in v0.1. Log the divergence so operators can see it and the
-    // future tax module can be tuned. (The real tax module replaces
-    // this placeholder.)
     log.warn(
       {
         recomputed: {
@@ -856,6 +899,7 @@ function mergeShippingIntoTotals(
           amount: cartTotals.tax.amount.toString(),
           currency: cartTotals.tax.currency,
         },
+        rate: cartTotals.taxRate ?? null,
       },
       "tax divergence detected at completion",
     );
@@ -865,6 +909,8 @@ function mergeShippingIntoTotals(
     tax: cartTotals.tax,
     shipping,
     total,
+    taxRateCode: cartTotals.taxRate?.code ?? null,
+    taxRateBasisPoints: cartTotals.taxRate?.basisPoints ?? null,
   };
 }
 
@@ -874,6 +920,12 @@ function serializeTotals(totals: OrderIntentTotals): Record<string, unknown> {
     tax: { amount: totals.tax.amount.toString(), currency: totals.tax.currency },
     shipping: { amount: totals.shipping.amount.toString(), currency: totals.shipping.currency },
     total: { amount: totals.total.amount.toString(), currency: totals.total.currency },
+    // Persisted alongside the money amounts so the orders module can
+    // pick the rate metadata up at materialisation time without an
+    // extra read against the tax module. Null carries through honestly
+    // — the orders row's columns are nullable for the same reason.
+    taxRateCode: totals.taxRateCode,
+    taxRateBasisPoints: totals.taxRateBasisPoints,
   };
 }
 
@@ -958,4 +1010,5 @@ export const checkoutService: CheckoutService = new CheckoutServiceImpl(
   defaultCustomerService,
   defaultShippingService,
   defaultOrderService,
+  defaultTaxService,
 );

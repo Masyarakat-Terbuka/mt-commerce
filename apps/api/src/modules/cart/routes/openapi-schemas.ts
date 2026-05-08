@@ -27,7 +27,25 @@ export const CartTotalsWire = z
     subtotal: MoneyJson,
     tax: MoneyJson,
     shipping: MoneyJson,
+    /**
+     * Convenience: `subtotal + tax` (excludes shipping). Indonesian retail
+     * conventionally displays tax-inclusive prices for the items themselves.
+     */
+    subtotalIncludingTax: MoneyJson,
     total: MoneyJson,
+    /**
+     * Applied tax rate metadata. Both fields are populated together (or
+     * both null when no rate was applied — env-var fallback path or no
+     * default rate seeded for the cart's currency).
+     */
+    taxRate: z
+      .object({
+        code: z.string(),
+        basisPoints: z.number().int(),
+      })
+      .nullable(),
+    taxRateCode: z.string().nullable(),
+    taxRateBasisPoints: z.number().int().nullable(),
   })
   .openapi("CartTotals");
 

@@ -16,8 +16,15 @@ export type CartPageProps = {
   titleLabel: string;
   emptyLabel: string;
   emptyCtaLabel: string;
-  subtotalLabel: string;
-  taxLabel: string;
+  /**
+   * Renders the tax-inclusive items line (subtotal + tax). Indonesian
+   * retail conventionally shows tax-inclusive prices for the items
+   * themselves; the explicit tax line is dropped to keep the summary
+   * compact, with the rate echoed inline as a "termasuk PPN 11%" note.
+   */
+  subtotalIncludingTaxLabel: string;
+  /** Inline note after the tax-inclusive subtotal (e.g. "termasuk PPN"). */
+  taxIncludedNote: string;
   shippingLabel: string;
   totalLabel: string;
   checkoutCtaLabel: string;
@@ -33,8 +40,8 @@ function CartPageInner(props: CartPageProps) {
     titleLabel,
     emptyLabel,
     emptyCtaLabel,
-    subtotalLabel,
-    taxLabel,
+    subtotalIncludingTaxLabel,
+    taxIncludedNote,
     shippingLabel,
     totalLabel,
     checkoutCtaLabel,
@@ -117,15 +124,21 @@ function CartPageInner(props: CartPageProps) {
           <aside className="border-t border-line pt-6 md:border-l md:border-t-0 md:pl-8 md:pt-0">
             <dl className="space-y-3 t-body">
               <div className="flex justify-between text-muted">
-                <dt>{subtotalLabel}</dt>
+                <dt className="flex flex-col">
+                  <span>{subtotalIncludingTaxLabel}</span>
+                  {/*
+                   * Render the basis-points value as a percent (1100 → "11%")
+                   * when a rate is configured. Falls back to the generic
+                   * note when the rate is unknown (env-var fallback path).
+                   */}
+                  <span className="t-caption text-muted/70">
+                    {cart && cart.totals.taxRateBasisPoints !== null
+                      ? `${taxIncludedNote} ${cart.totals.taxRateBasisPoints / 100}%`
+                      : taxIncludedNote}
+                  </span>
+                </dt>
                 <dd className="price-figure">
-                  {cart && formatMoney(cart.totals.subtotal, { locale })}
-                </dd>
-              </div>
-              <div className="flex justify-between text-muted">
-                <dt>{taxLabel}</dt>
-                <dd className="price-figure">
-                  {cart && formatMoney(cart.totals.tax, { locale })}
+                  {cart && formatMoney(cart.totals.subtotalIncludingTax, { locale })}
                 </dd>
               </div>
               <div className="flex justify-between text-muted">

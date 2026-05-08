@@ -119,6 +119,8 @@ function makeOrderIntent(overrides: Partial<OrderIntent> = {}): OrderIntent {
       tax: { amount: 55_000n, currency: "IDR" },
       shipping: { amount: 10_000n, currency: "IDR" },
       total: { amount: 565_000n, currency: "IDR" },
+      taxRateCode: null,
+      taxRateBasisPoints: null,
     },
     shippingAddressSnapshot: overrides.shippingAddressSnapshot ?? {
       id: "adr_ship",

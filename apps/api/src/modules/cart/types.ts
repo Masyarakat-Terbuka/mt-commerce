@@ -62,12 +62,21 @@ export interface AppliedTaxRate {
 }
 
 export interface CartTotals {
-  /** Sum of `unit_price * quantity` across line items. */
+  /** Sum of `unit_price * quantity` across line items. Excludes tax + shipping. */
   subtotal: Money;
   /** Tax amount in the cart's currency. */
   tax: Money;
   /** Shipping amount in the cart's currency. Zero when none is supplied. */
   shipping: Money;
+  /**
+   * `subtotal + tax`, in the cart's currency. Carried as a precomputed
+   * convenience for clients (storefront, invoices) that display
+   * tax-inclusive prices — Indonesian retail conventionally shows the
+   * "you-pay" line for the items themselves separate from shipping. The
+   * value is derived inside `getTotals` in one place so every consumer
+   * agrees on the math (vs. each client re-deriving from raw amounts).
+   */
+  subtotalIncludingTax: Money;
   /** `subtotal + tax + shipping`. */
   total: Money;
   /**
