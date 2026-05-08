@@ -105,6 +105,47 @@ export interface WireListEnvelope<T> {
 }
 
 // ----------------------------------------------------------------------------
+// Inventory wire and domain shapes — mirror
+// `apps/api/src/modules/catalog/routes/wire.ts` (`WireInventoryLevel`).
+//
+// At v0.1 the API exposes only the adjust mutation
+// (`POST /admin/v1/variants/{id}/inventory/adjust`) and returns the resulting
+// level in the response body. There is no `GET` on inventory levels yet, so
+// the SDK only carries the response shape and the mutation input — there is
+// no `list` / `byVariant` reader. That gap is tracked against the v0.1
+// catalog checklist line "Implement inventory adjustment endpoints with audit
+// logging" and will close when the read surface and audit log land server-side.
+// ----------------------------------------------------------------------------
+
+export interface WireInventoryLevel {
+  id: string;
+  variantId: string;
+  /** NULL until multi-location inventory lands; v0.1 is single-location. */
+  locationId: string | null;
+  available: number;
+  reserved: number;
+  updatedAt: string;
+}
+
+export interface InventoryLevel {
+  id: string;
+  variantId: string;
+  locationId: string | null;
+  available: number;
+  reserved: number;
+  updatedAt: Date;
+}
+
+export interface AdjustInventoryInput {
+  /**
+   * Signed integer; positive adds stock, negative removes. The API rejects
+   * `0`, anything outside ±1,000,000, or any non-integer. The SDK forwards
+   * the value verbatim; the API is the validation source of truth.
+   */
+  delta: number;
+}
+
+// ----------------------------------------------------------------------------
 // Cart wire shapes — mirror `apps/api/src/modules/cart/routes/wire.ts`
 // ----------------------------------------------------------------------------
 

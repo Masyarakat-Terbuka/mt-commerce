@@ -28,6 +28,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
 import { ProductEditorPage } from "@/pages/ProductEditorPage";
+import { InventoryPage } from "@/pages/InventoryPage";
 import { ComingSoonPage } from "@/pages/ComingSoonPage";
 import { SignOutPage } from "@/pages/SignOutPage";
 
@@ -132,6 +133,12 @@ const productEditRoute = createRoute({
   component: () => <ProductEditorPage mode="edit" />,
 });
 
+const inventoryRoute = createRoute({
+  getParentRoute: () => gatedRoute,
+  path: "/inventaris",
+  component: InventoryPage,
+});
+
 const ordersRoute = createRoute({
   getParentRoute: () => gatedRoute,
   path: "/pesanan",
@@ -158,6 +165,7 @@ const routeTree = rootRoute.addChildren([
     productsRoute,
     productNewRoute,
     productEditRoute,
+    inventoryRoute,
     ordersRoute,
     customersRoute,
     settingsRoute,

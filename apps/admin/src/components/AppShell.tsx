@@ -27,6 +27,7 @@ import {
   Logout01Icon,
   UserCircleIcon,
   Search01Icon,
+  WarehouseIcon,
 } from "@hugeicons/core-free-icons";
 import {
   Sidebar,
@@ -68,6 +69,7 @@ interface NavItem {
 const NAV_ITEMS: readonly NavItem[] = [
   { to: "/", labelKey: "nav.home", icon: Home01Icon },
   { to: "/produk", labelKey: "nav.produk", icon: PackageIcon },
+  { to: "/inventaris", labelKey: "nav.inventaris", icon: WarehouseIcon },
   { to: "/pesanan", labelKey: "nav.pesanan", icon: ShoppingBag01Icon },
   { to: "/pelanggan", labelKey: "nav.pelanggan", icon: UserMultiple02Icon },
   { to: "/pengaturan", labelKey: "nav.pengaturan", icon: Settings02Icon },
