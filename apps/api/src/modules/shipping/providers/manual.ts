@@ -12,6 +12,7 @@
  * call site keeps working.
  */
 import type { Money } from "@mt-commerce/core/money";
+import type { ShippingQuoteContext } from "@mt-commerce/core/plugin";
 import type { ShippingMethod } from "../types.js";
 import type { ShippingProvider } from "./types.js";
 
@@ -23,11 +24,16 @@ export class ManualShippingProvider implements ShippingProvider {
    * parity is asserted at the service boundary (the caller passes the
    * cart's currency); the provider trusts that contract and surfaces a
    * programming error if the row's flat-rate currency does not match.
+   *
+   * The optional `destination` and `items` on the context are ignored —
+   * manual flat-rate methods do not vary by buyer location or parcel
+   * weight; the caller forwards them anyway so the same call shape works
+   * for plugin providers too.
    */
   // eslint-disable-next-line @typescript-eslint/require-await
   async quote(
     method: ShippingMethod,
-    _opts: { currency: string },
+    _ctx: ShippingQuoteContext,
   ): Promise<Money> {
     if (method.providerKind !== "manual") {
       throw new Error(

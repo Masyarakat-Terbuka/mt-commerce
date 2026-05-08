@@ -411,9 +411,27 @@ export class CheckoutServiceImpl implements CheckoutService {
     //     currency differs from the cart's currency
     // All three already wear the standard error envelope; we let them
     // surface unchanged so callers see consistent error codes.
+    //
+    // Forward the buyer destination + cart items so plugin providers
+    // (Biteship, JNE direct) can compute real rates. Manual providers
+    // ignore both fields. The destination is resolved from the
+    // checkout's chosen shipping address (set in `setAddresses`); when
+    // it's missing (revision flow re-entered before address selection)
+    // the call shape still has currency, and the manual provider's
+    // flat-rate path keeps working.
+    const destination = row.shippingAddressId
+      ? await this.resolveQuoteDestination(row.shippingAddressId)
+      : undefined;
+    const items = cart.items.map((item) => ({
+      variantId: item.variantId,
+      quantity: item.quantity,
+      value: item.unitPrice.amount,
+    }));
     const shippingAmount = await this.shipping.quote({
       methodCode: input.shippingMethodCode,
       currency: cart.currency,
+      ...(destination ? { destination } : {}),
+      items,
     });
     // Defense-in-depth: the shipping service asserts currency parity
     // already, but we re-check at the boundary so a misbehaving provider
@@ -854,6 +872,36 @@ export class CheckoutServiceImpl implements CheckoutService {
         addressId,
       });
     }
+  }
+
+  /**
+   * Resolve the shipping address row into the BPS-coded destination shape
+   * that plugin shipping providers expect. Returns undefined if the
+   * address can't be looked up — the manual provider ignores the field
+   * and the plugin providers throw a clear "needs destination" error if
+   * they require it.
+   */
+  private async resolveQuoteDestination(
+    addressId: string,
+  ): Promise<
+    | {
+        provinsiId?: string | null;
+        kotaKabupatenId?: string | null;
+        kecamatanId?: string | null;
+        kelurahanId?: string | null;
+        postalCode?: string | null;
+      }
+    | undefined
+  > {
+    const addr = await this.customers.getAddressById(addressId);
+    if (!addr) return undefined;
+    return {
+      provinsiId: addr.provinsiId ?? null,
+      kotaKabupatenId: addr.kotaKabupatenId ?? null,
+      kecamatanId: addr.kecamatanId ?? null,
+      kelurahanId: addr.kelurahanId ?? null,
+      postalCode: addr.postalCode ?? null,
+    };
   }
 }
 
