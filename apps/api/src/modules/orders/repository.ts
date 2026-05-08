@@ -117,6 +117,14 @@ export interface OrdersRepository {
    * conflict cleanly before attempting an insert.
    */
   getOrderByIntentId(orderIntentId: string): Promise<OrderRow | null>;
+  /**
+   * Resolve the order materialised from a checkout. Used by the
+   * payments module's storefront `initiate` route — the checkout id
+   * is in the URL but the canonical record is the order. The link is
+   * written to `order_status_history.details.checkoutId` by
+   * `createFromIntent`; we query that JSONB key.
+   */
+  getOrderByCheckoutId(checkoutId: string): Promise<OrderRow | null>;
   listOrders(filters: OrderListFilters): Promise<OrderListResult>;
   listCustomerOrders(
     customerId: string,
@@ -231,6 +239,22 @@ export function createOrdersRepository(db: Db = defaultDb): OrdersRepository {
         .from(orderStatusHistory)
         .where(
           sql`${orderStatusHistory.details} ->> 'orderIntentId' = ${orderIntentId}`,
+        )
+        .limit(1);
+      const first = rows[0];
+      if (!first) return null;
+      return this.getOrderById(first.orderId);
+    },
+
+    async getOrderByCheckoutId(checkoutId: string): Promise<OrderRow | null> {
+      // Same JSONB-key trick as `getOrderByIntentId` but keyed off
+      // `details.checkoutId`, which is also written by the initial
+      // `createFromIntent` transaction.
+      const rows = await db
+        .select({ orderId: orderStatusHistory.orderId })
+        .from(orderStatusHistory)
+        .where(
+          sql`${orderStatusHistory.details} ->> 'checkoutId' = ${checkoutId}`,
         )
         .limit(1);
       const first = rows[0];

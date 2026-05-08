@@ -195,6 +195,15 @@ function createFakeRepo(store: FakeStore): OrdersRepository {
       }
       return null;
     },
+    async getOrderByCheckoutId(checkoutId) {
+      for (const event of store.history) {
+        const details = (event.details ?? {}) as { checkoutId?: string };
+        if (details.checkoutId === checkoutId) {
+          return store.orders.get(event.orderId) ?? null;
+        }
+      }
+      return null;
+    },
     async listOrders(filters: OrderListFilters): Promise<OrderListResult> {
       let rows = [...store.orders.values()];
       if (filters.status) rows = rows.filter((r) => r.status === filters.status);

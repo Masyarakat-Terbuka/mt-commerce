@@ -100,6 +100,16 @@ export interface OrderService {
     orderNumber: string,
     opts?: { locale?: string },
   ): Promise<Order | null>;
+  /**
+   * Resolve the order materialised from a checkout. Used by the
+   * payments module's storefront `initiate` route. Returns null when
+   * the checkout has not produced an order yet (still in flight, or
+   * the materialisation failed and is queued for retry).
+   */
+  getOrderByCheckoutId(
+    checkoutId: string,
+    opts?: { locale?: string },
+  ): Promise<Order | null>;
 
   listOrders(
     query: ListOrdersQuery,
@@ -373,6 +383,16 @@ export class OrderServiceImpl implements OrderService {
     opts: { locale?: string } = {},
   ): Promise<Order | null> {
     const row = await this.repo.getOrderByNumber(orderNumber);
+    if (!row) return null;
+    const items = await this.repo.listItemsForOrder(row.id);
+    return toOrder(row, items, opts.locale ?? DEFAULT_LOCALE);
+  }
+
+  async getOrderByCheckoutId(
+    checkoutId: string,
+    opts: { locale?: string } = {},
+  ): Promise<Order | null> {
+    const row = await this.repo.getOrderByCheckoutId(checkoutId);
     if (!row) return null;
     const items = await this.repo.listItemsForOrder(row.id);
     return toOrder(row, items, opts.locale ?? DEFAULT_LOCALE);

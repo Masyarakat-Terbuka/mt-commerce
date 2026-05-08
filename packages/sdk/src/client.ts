@@ -40,12 +40,14 @@ import type {
   AdminListInventoryAuditQuery,
   AdminListInventoryQuery,
   AdminListOrdersQuery,
+  AdminListPaymentsQuery,
   AdminListProductsQuery,
   AdminUpdateCustomerInput,
   AuthMe,
   AuthSession,
   CancelCheckoutInput,
   CancelOrderAdminInput,
+  CapturePaymentInput,
   Cart,
   CartItem,
   CartTotals,
@@ -63,6 +65,7 @@ import type {
   CustomerAddress,
   CustomerWithAddresses,
   District,
+  InitiatePaymentInput,
   InventoryAuditEntry,
   InventoryLevel,
   ListKecamatanQuery,
@@ -80,7 +83,12 @@ import type {
   OrderItem,
   OrderStatusEvent,
   Paginated,
+  Payment,
+  PaymentAttempt,
+  PaymentInitiateOutcome,
+  PaymentWithAttempts,
   Product,
+  RefundPaymentInput,
   SetDefaultAddressInput,
   SignUpInput,
   StorefrontMe,
@@ -123,6 +131,10 @@ import type {
   WireOrderIntentTotals,
   WireOrderStatusEvent,
   WirePaginated,
+  WirePayment,
+  WirePaymentAttempt,
+  WirePaymentInitiateOutcome,
+  WirePaymentWithAttempts,
   WireProduct,
   WireProvince,
   WireShippingMethod,
@@ -499,6 +511,68 @@ function toOrderIntent(w: WireOrderIntent): OrderIntent {
     paymentMethod: w.paymentMethod,
     createdAt: new Date(w.createdAt),
   };
+}
+
+function toPayment(w: WirePayment): Payment {
+  return {
+    id: w.id,
+    orderId: w.orderId,
+    provider: w.provider,
+    providerRef: w.providerRef,
+    amount: moneyFromJSON(w.amount),
+    status: w.status,
+    idempotencyKey: w.idempotencyKey,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toPaymentAttempt(w: WirePaymentAttempt): PaymentAttempt {
+  return {
+    id: w.id,
+    paymentId: w.paymentId,
+    kind: w.kind,
+    status: w.status,
+    requestPayload: w.requestPayload,
+    responsePayload: w.responsePayload,
+    errorMessage: w.errorMessage,
+    createdAt: new Date(w.createdAt),
+  };
+}
+
+function toPaymentWithAttempts(
+  w: WirePaymentWithAttempts,
+): PaymentWithAttempts {
+  return {
+    ...toPayment(w),
+    attempts: w.attempts.map(toPaymentAttempt),
+  };
+}
+
+function toPaymentInitiateOutcome(
+  w: WirePaymentInitiateOutcome,
+): PaymentInitiateOutcome {
+  switch (w.status) {
+    case "redirect":
+      // The wire shape marks `redirectUrl` optional for the union;
+      // narrow at the boundary so consumers do not have to.
+      if (!w.redirectUrl) {
+        throw new ApiError({
+          code: "decode_error",
+          message: "Payment initiate outcome 'redirect' is missing redirectUrl.",
+          status: 0,
+        });
+      }
+      return {
+        status: "redirect",
+        paymentId: w.paymentId,
+        redirectUrl: w.redirectUrl,
+      };
+    case "captured":
+      return { status: "captured", paymentId: w.paymentId };
+    case "pending":
+      return { status: "pending", paymentId: w.paymentId };
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -1016,6 +1090,25 @@ export interface StorefrontCheckoutApi {
     input?: CancelCheckoutInput,
     options?: RequestOptions,
   ): Promise<Checkout>;
+  /**
+   * POST /storefront/v1/checkouts/:id/payment/initiate.
+   *
+   * Sends `Idempotency-Key`. Returns a redirect URL (hosted-checkout
+   * flows), an immediate captured outcome, or a pending state. The
+   * caller chooses what to render based on `outcome.status`.
+   */
+  initiatePayment(
+    checkoutId: string,
+    input: InitiatePaymentInput,
+    options?: RequestOptions,
+  ): Promise<PaymentInitiateOutcome>;
+  /**
+   * GET /storefront/v1/checkouts/:id/payment — fetch the payment row
+   * attached to the order this checkout produced. 404 (surfaced as an
+   * `ApiError` with `status === 404`) when no payment has been
+   * initiated yet.
+   */
+  getPayment(checkoutId: string, options?: RequestOptions): Promise<Payment>;
 }
 
 export interface StorefrontApi {
@@ -1209,6 +1302,39 @@ export interface AdminInventoryApi {
   ): Promise<Paginated<InventoryAuditEntry>>;
 }
 
+export interface AdminPaymentsApi {
+  /** GET /admin/v1/payments — paginated list with optional filters. */
+  list(
+    query?: AdminListPaymentsQuery,
+    options?: RequestOptions,
+  ): Promise<Paginated<Payment>>;
+  /** GET /admin/v1/payments/:id — payment row + attempt history. */
+  byId(
+    id: string,
+    options?: RequestOptions,
+  ): Promise<PaymentWithAttempts>;
+  /**
+   * POST /admin/v1/payments/:id/capture. Sends `Idempotency-Key`.
+   * Capture-on-initiate providers do not need this — it exists for
+   * the authorise-then-capture flow.
+   */
+  capture(
+    id: string,
+    input: CapturePaymentInput,
+    options?: RequestOptions,
+  ): Promise<Payment>;
+  /**
+   * POST /admin/v1/payments/:id/refund. Sends `Idempotency-Key`.
+   * Optional `amount` (decimal string, smallest currency unit) for
+   * partial refunds; optional `reason` for the audit trail.
+   */
+  refund(
+    id: string,
+    input: RefundPaymentInput,
+    options?: RequestOptions,
+  ): Promise<Payment>;
+}
+
 export interface AdminApi {
   auth: AdminAuthApi;
   products: AdminProductsApi;
@@ -1216,6 +1342,7 @@ export interface AdminApi {
   customers: AdminCustomersApi;
   orders: AdminOrdersApi;
   inventory: AdminInventoryApi;
+  payments: AdminPaymentsApi;
 }
 
 export interface MtCommerceClient {
@@ -1473,6 +1600,28 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           },
         );
         return toCheckout(wire);
+      },
+      async initiatePayment(checkoutId, input, requestOptions) {
+        const { idempotencyKey, providerCode, metadata } = input;
+        const wire = await request<WirePaymentInitiateOutcome>(
+          ctx,
+          `/storefront/v1/checkouts/${encodeURIComponent(checkoutId)}/payment/initiate`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({ providerCode, metadata }),
+            headers: { "Idempotency-Key": idempotencyKey },
+          },
+        );
+        return toPaymentInitiateOutcome(wire);
+      },
+      async getPayment(checkoutId, requestOptions) {
+        const wire = await request<WirePayment>(
+          ctx,
+          `/storefront/v1/checkouts/${encodeURIComponent(checkoutId)}/payment`,
+          requestOptions,
+        );
+        return toPayment(wire);
       },
     },
     shipping: {
@@ -2317,6 +2466,64 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           page: wire.page,
           pageSize: wire.pageSize,
         };
+      },
+    },
+    payments: {
+      async list(query, requestOptions) {
+        const qs = buildQuery({
+          orderId: query?.orderId,
+          status: query?.status,
+          provider: query?.provider,
+          page: query?.page,
+          pageSize: query?.pageSize,
+        });
+        const wire = await request<WirePaginated<WirePayment>>(
+          adminCtx,
+          `/admin/v1/payments${qs}`,
+          requestOptions,
+        );
+        return {
+          data: wire.data.map(toPayment),
+          total: wire.total,
+          page: wire.page,
+          pageSize: wire.pageSize,
+        };
+      },
+      async byId(id, requestOptions) {
+        const wire = await request<WirePaymentWithAttempts>(
+          adminCtx,
+          `/admin/v1/payments/${encodeURIComponent(id)}`,
+          requestOptions,
+        );
+        return toPaymentWithAttempts(wire);
+      },
+      async capture(id, input, requestOptions) {
+        const { idempotencyKey, amount } = input;
+        const wire = await request<WirePayment>(
+          adminCtx,
+          `/admin/v1/payments/${encodeURIComponent(id)}/capture`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({ amount }),
+            headers: { "Idempotency-Key": idempotencyKey },
+          },
+        );
+        return toPayment(wire);
+      },
+      async refund(id, input, requestOptions) {
+        const { idempotencyKey, amount, reason } = input;
+        const wire = await request<WirePayment>(
+          adminCtx,
+          `/admin/v1/payments/${encodeURIComponent(id)}/refund`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({ amount, reason }),
+            headers: { "Idempotency-Key": idempotencyKey },
+          },
+        );
+        return toPayment(wire);
       },
     },
   };

@@ -32,3 +32,4 @@ export * from "./orders.js";
 export * from "./order_items.js";
 export * from "./order_status_history.js";
 export * from "./audit_log.js";
+export * from "./payments.js";

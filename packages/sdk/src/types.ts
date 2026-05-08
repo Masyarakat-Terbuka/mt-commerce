@@ -1302,6 +1302,124 @@ export interface ListMyOrdersQuery {
 }
 
 // ----------------------------------------------------------------------------
+// Payments — admin surface + storefront initiate / read.
+//
+// Mirrors `apps/api/src/modules/payments/routes/wire.ts`. Money values
+// land as `MoneyJSON` on the wire and become `Money` on the domain
+// side — same boundary handling as Order.
+// ----------------------------------------------------------------------------
+
+export type PaymentStatus =
+  | "pending"
+  | "authorized"
+  | "captured"
+  | "failed"
+  | "refunded"
+  | "cancelled";
+
+export type PaymentAttemptKind =
+  | "initiate"
+  | "capture"
+  | "refund"
+  | "webhook";
+
+export type PaymentAttemptStatus = "pending" | "success" | "failure";
+
+export interface WirePayment {
+  id: string;
+  orderId: string;
+  provider: string;
+  providerRef: string | null;
+  amount: MoneyJSON;
+  status: PaymentStatus;
+  idempotencyKey: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WirePaymentAttempt {
+  id: string;
+  paymentId: string;
+  kind: PaymentAttemptKind;
+  status: PaymentAttemptStatus;
+  requestPayload: Record<string, unknown>;
+  responsePayload: Record<string, unknown> | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface WirePaymentWithAttempts extends WirePayment {
+  attempts: WirePaymentAttempt[];
+}
+
+export interface WirePaymentInitiateOutcome {
+  status: "redirect" | "captured" | "pending";
+  paymentId: string;
+  redirectUrl?: string;
+}
+
+export interface Payment {
+  id: string;
+  orderId: string;
+  provider: string;
+  providerRef: string | null;
+  amount: Money;
+  status: PaymentStatus;
+  idempotencyKey: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PaymentAttempt {
+  id: string;
+  paymentId: string;
+  kind: PaymentAttemptKind;
+  status: PaymentAttemptStatus;
+  requestPayload: Record<string, unknown>;
+  responsePayload: Record<string, unknown> | null;
+  errorMessage: string | null;
+  createdAt: Date;
+}
+
+export interface PaymentWithAttempts extends Payment {
+  attempts: PaymentAttempt[];
+}
+
+export type PaymentInitiateOutcome =
+  | { status: "redirect"; paymentId: string; redirectUrl: string }
+  | { status: "captured"; paymentId: string }
+  | { status: "pending"; paymentId: string };
+
+export interface AdminListPaymentsQuery {
+  orderId?: string;
+  status?: PaymentStatus;
+  provider?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface InitiatePaymentInput {
+  providerCode: string;
+  /** Required HTTP-layer key; passed through as the business-level dedupe handle on `payments.idempotency_key`. */
+  idempotencyKey: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CapturePaymentInput {
+  /** Optional partial-capture amount as a decimal string. */
+  amount?: string;
+  /** Required HTTP-layer key. */
+  idempotencyKey: string;
+}
+
+export interface RefundPaymentInput {
+  amount?: string;
+  reason?: string;
+  /** Required HTTP-layer key. */
+  idempotencyKey: string;
+}
+
+// ----------------------------------------------------------------------------
 // Per-call options
 // ----------------------------------------------------------------------------
 
