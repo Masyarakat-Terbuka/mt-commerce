@@ -42,6 +42,7 @@ import type {
   AdminListOrdersQuery,
   AdminListPaymentsQuery,
   AdminListProductsQuery,
+  AdminListTaxRatesQuery,
   AdminUpdateCustomerInput,
   AuthMe,
   AuthSession,
@@ -97,7 +98,10 @@ import type {
   SetDefaultAddressInput,
   SignUpInput,
   StorefrontMe,
+  StoreSettings,
+  TaxRate,
   TransitionOrderInput,
+  UpdateStoreSettingsInput,
   Province,
   RequestOptions,
   SetCheckoutAddressesInput,
@@ -145,7 +149,9 @@ import type {
   WireProvince,
   WireShippingMethod,
   WireStorefrontMeResponse,
+  WireStoreSettings,
   WireSubdistrict,
+  WireTaxRate,
   WireVariant,
 } from "./types.js";
 
@@ -252,6 +258,65 @@ function toSubdistrict(w: WireSubdistrict): Subdistrict {
     kecamatanId: w.kecamatanId,
     name: w.name,
     postalCode: w.postalCode,
+  };
+}
+
+/**
+ * Convert the wire store settings to the SDK domain shape.
+ *
+ * Resolved region NAMES are sibling, optional fields. We forward only the
+ * present ones (omit-when-undefined) so consumers can do
+ * `s.shippingOriginProvinsiName ?? s.shippingOriginProvinsiId` without
+ * special-casing "name === null".
+ */
+function toStoreSettings(w: WireStoreSettings): StoreSettings {
+  return {
+    storeName: w.storeName,
+    defaultCurrency: w.defaultCurrency,
+    defaultLocale: w.defaultLocale,
+
+    defaultTaxRateId: w.defaultTaxRateId,
+
+    shippingOriginProvinsiId: w.shippingOriginProvinsiId,
+    shippingOriginKotaKabupatenId: w.shippingOriginKotaKabupatenId,
+    shippingOriginKecamatanId: w.shippingOriginKecamatanId,
+    shippingOriginKelurahanId: w.shippingOriginKelurahanId,
+    shippingOriginPostalCode: w.shippingOriginPostalCode,
+    shippingOriginAddressLine1: w.shippingOriginAddressLine1,
+    shippingOriginPhone: w.shippingOriginPhone,
+
+    ...(w.shippingOriginProvinsiName !== undefined
+      ? { shippingOriginProvinsiName: w.shippingOriginProvinsiName }
+      : {}),
+    ...(w.shippingOriginKotaKabupatenName !== undefined
+      ? { shippingOriginKotaKabupatenName: w.shippingOriginKotaKabupatenName }
+      : {}),
+    ...(w.shippingOriginKecamatanName !== undefined
+      ? { shippingOriginKecamatanName: w.shippingOriginKecamatanName }
+      : {}),
+    ...(w.shippingOriginKelurahanName !== undefined
+      ? { shippingOriginKelurahanName: w.shippingOriginKelurahanName }
+      : {}),
+
+    notificationEmailEnabled: w.notificationEmailEnabled,
+    notificationWhatsappEnabled: w.notificationWhatsappEnabled,
+
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toTaxRate(w: WireTaxRate): TaxRate {
+  return {
+    id: w.id,
+    code: w.code,
+    name: w.name,
+    rateBasisPoints: w.rateBasisPoints,
+    currency: w.currency,
+    isDefault: w.isDefault,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+    archivedAt: w.archivedAt ? new Date(w.archivedAt) : null,
   };
 }
 
@@ -1414,6 +1479,40 @@ export interface AdminFulfillmentsApi {
   ): Promise<Fulfillment>;
 }
 
+/**
+ * Admin-side store settings.
+ *
+ * The settings row is a singleton — there is no `byId` here. The API
+ * lazily inserts the default row on first read, so `get()` never
+ * returns `null` and there is no "uninitialised" branch to handle.
+ */
+export interface AdminSettingsApi {
+  /** GET /admin/v1/settings — returns the singleton, embedding region NAMES. */
+  get(options?: RequestOptions): Promise<StoreSettings>;
+  /**
+   * PATCH /admin/v1/settings — partial update; at least one field. Pass
+   * `null` to clear a nullable field (e.g. `defaultTaxRateId: null`).
+   */
+  update(
+    patch: UpdateStoreSettingsInput,
+    options?: RequestOptions,
+  ): Promise<StoreSettings>;
+}
+
+/**
+ * Admin-side tax surface — read-only at v0.1. The settings page uses
+ * `list()` to populate the "default tax rate" Select. Mutations (create/
+ * update/archive/set-default) live on the API but are not yet surfaced
+ * through the SDK because there is no admin UI driving them.
+ */
+export interface AdminTaxApi {
+  /** GET /admin/v1/tax/rates — `activeOnly` defaults true server-side. */
+  list(
+    query?: AdminListTaxRatesQuery,
+    options?: RequestOptions,
+  ): Promise<TaxRate[]>;
+}
+
 export interface AdminApi {
   auth: AdminAuthApi;
   products: AdminProductsApi;
@@ -1423,6 +1522,8 @@ export interface AdminApi {
   inventory: AdminInventoryApi;
   payments: AdminPaymentsApi;
   fulfillments: AdminFulfillmentsApi;
+  settings: AdminSettingsApi;
+  tax: AdminTaxApi;
 }
 
 export interface MtCommerceClient {
@@ -2670,6 +2771,55 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           { ...(requestOptions ?? {}), method: "POST", body },
         );
         return toFulfillment(wire);
+      },
+    },
+    settings: {
+      async get(requestOptions) {
+        const wire = await request<WireStoreSettings>(
+          adminCtx,
+          "/admin/v1/settings",
+          requestOptions,
+        );
+        return toStoreSettings(wire);
+      },
+      async update(patch, requestOptions) {
+        // `omitUndefined` keeps `null` (the explicit clear signal) and
+        // drops only unset keys, matching the API's PATCH semantics.
+        const wire = await request<WireStoreSettings>(
+          adminCtx,
+          "/admin/v1/settings",
+          {
+            ...(requestOptions ?? {}),
+            method: "PATCH",
+            body: omitUndefined({
+              storeName: patch.storeName,
+              defaultCurrency: patch.defaultCurrency,
+              defaultLocale: patch.defaultLocale,
+              defaultTaxRateId: patch.defaultTaxRateId,
+              shippingOriginProvinsiId: patch.shippingOriginProvinsiId,
+              shippingOriginKotaKabupatenId: patch.shippingOriginKotaKabupatenId,
+              shippingOriginKecamatanId: patch.shippingOriginKecamatanId,
+              shippingOriginKelurahanId: patch.shippingOriginKelurahanId,
+              shippingOriginPostalCode: patch.shippingOriginPostalCode,
+              shippingOriginAddressLine1: patch.shippingOriginAddressLine1,
+              shippingOriginPhone: patch.shippingOriginPhone,
+              notificationEmailEnabled: patch.notificationEmailEnabled,
+              notificationWhatsappEnabled: patch.notificationWhatsappEnabled,
+            }),
+          },
+        );
+        return toStoreSettings(wire);
+      },
+    },
+    tax: {
+      async list(query, requestOptions) {
+        const qs = buildQuery({ activeOnly: query?.activeOnly });
+        const wire = await request<WireListEnvelope<WireTaxRate>>(
+          adminCtx,
+          `/admin/v1/tax/rates${qs}`,
+          requestOptions,
+        );
+        return wire.data.map(toTaxRate);
       },
     },
   };

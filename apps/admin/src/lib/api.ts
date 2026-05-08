@@ -46,7 +46,10 @@ export type {
   ProductSort,
   ProductStatus,
   Role,
+  StoreSettings,
+  TaxRate,
   TransitionOrderInput,
+  UpdateStoreSettingsInput,
   Variant,
 } from "@mt-commerce/sdk";
 
