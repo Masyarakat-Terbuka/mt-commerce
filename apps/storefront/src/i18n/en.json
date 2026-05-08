@@ -34,6 +34,14 @@
   "home.featured": "Featured products",
   "home.featured.title": "New arrivals",
   "home.categories.title": "Categories",
+  "home.strips.newest": "New arrivals",
+  "home.strips.newest_link": "See all →",
+  "home.strips.best_price": "Best prices",
+  "home.strips.best_price_link": "See all →",
+  "home.strips.by_category.kopi": "Category — Coffee",
+  "home.strips.by_category.batik": "Category — Batik",
+  "home.strips.by_category.kerajinan": "Category — Handicrafts",
+  "home.strips.by_category.see_all": "See all →",
 
   "products.card.photo_coming_soon": "Photo coming soon",
 

@@ -34,6 +34,14 @@
   "home.featured": "Produk pilihan",
   "home.featured.title": "Pilihan terbaru",
   "home.categories.title": "Kategori",
+  "home.strips.newest": "Pilihan terbaru",
+  "home.strips.newest_link": "Lihat semua →",
+  "home.strips.best_price": "Harga terbaik",
+  "home.strips.best_price_link": "Lihat semua →",
+  "home.strips.by_category.kopi": "Kategori — Kopi",
+  "home.strips.by_category.batik": "Kategori — Batik",
+  "home.strips.by_category.kerajinan": "Kategori — Kerajinan",
+  "home.strips.by_category.see_all": "Lihat semua →",
 
   "products.card.photo_coming_soon": "Foto segera hadir",
 
