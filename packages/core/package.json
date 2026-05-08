@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./money": "./src/money.ts",
     "./ulid": "./src/ulid.ts",
-    "./errors": "./src/errors.ts"
+    "./errors": "./src/errors.ts",
+    "./plugin": "./src/plugin.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
