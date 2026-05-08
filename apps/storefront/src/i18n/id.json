@@ -12,6 +12,10 @@
   "nav.privacy": "Kebijakan privasi",
   "nav.terms": "Syarat layanan",
 
+  "mega_menu.featured": "Pilihan",
+  "mega_menu.see_all_link": "Lihat semua produk →",
+  "mega_menu.aria_label": "Menu produk",
+
   "promo_banner.text": "Pengiriman gratis untuk pesanan di atas Rp 250.000",
   "promo_banner.dismiss": "Tutup banner",
   "promo_banner.region_label": "Promosi",
