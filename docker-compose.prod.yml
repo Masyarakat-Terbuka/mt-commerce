@@ -1,0 +1,145 @@
+# Production compose for mt-commerce.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# All variables are read from the file passed to `--env-file`. See
+# `.env.production.example` at the repo root for the full list.
+#
+# Topology:
+#   caddy (TLS)
+#     ├── ${DOMAIN}            → storefront:8080
+#     ├── admin.${DOMAIN}      → admin:8080
+#     └── api.${DOMAIN}        → api:8000
+#   api → postgres + redis on the internal network only
+#
+# Postgres and Redis publish NO host ports in production. They are only
+# reachable inside the `mt-commerce` bridge network.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mt-commerce
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mt-commerce
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: mt-commerce/api:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: https://api.${DOMAIN}
+      CORS_ORIGIN: https://${DOMAIN},https://admin.${DOMAIN}
+      TRUST_PROXY: "true"
+      SESSION_COOKIE_SECURE: "true"
+      TAX_PPN_RATE: ${TAX_PPN_RATE:-0.11}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      NOTIFICATION_DEFAULT_CHANNEL: ${NOTIFICATION_DEFAULT_CHANNEL:-smtp}
+      MIDTRANS_SERVER_KEY: ${MIDTRANS_SERVER_KEY:-}
+      MIDTRANS_CLIENT_KEY: ${MIDTRANS_CLIENT_KEY:-}
+      MIDTRANS_MODE: ${MIDTRANS_MODE:-sandbox}
+      BITESHIP_API_KEY: ${BITESHIP_API_KEY:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mt-commerce
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        VITE_API_URL: https://api.${DOMAIN}
+    image: mt-commerce/admin:latest
+    restart: unless-stopped
+    networks:
+      - mt-commerce
+
+  storefront:
+    build:
+      context: .
+      dockerfile: apps/storefront/Dockerfile
+      args:
+        PUBLIC_API_URL: https://api.${DOMAIN}
+        SITE: https://${DOMAIN}
+    image: mt-commerce/storefront:latest
+    restart: unless-stopped
+    networks:
+      - mt-commerce
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+      - admin
+      - storefront
+    networks:
+      - mt-commerce
+
+volumes:
+  postgres-data:
+    name: mt-commerce-postgres-data
+  redis-data:
+    name: mt-commerce-redis-data
+  caddy-data:
+    name: mt-commerce-caddy-data
+  caddy-config:
+    name: mt-commerce-caddy-config
+
+networks:
+  mt-commerce:
+    driver: bridge

@@ -19,8 +19,10 @@ coverage/
 # Environment files
 .env
 .env.local
+.env.production
 .env.*.local
 !.env.example
+!.env.production.example
 
 # Operator-supplied plugin config (canonical and root-fallback locations).
 # The `.example` template is checked in; the real file is per-deployment.
