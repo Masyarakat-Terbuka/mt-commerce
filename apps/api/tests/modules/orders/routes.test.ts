@@ -161,6 +161,12 @@ function createFakeService(opts: FakeOpts = {}): {
       }
       return null;
     },
+    async getOrderByCheckoutId() {
+      // Not exercised by the orders route tests — the payments module
+      // owns the checkout-keyed lookup. Default null keeps the fake
+      // exhaustively typed against the OrderService interface.
+      return null;
+    },
     async listOrders(query): Promise<Paginated<Order>> {
       let all = [...orders.values()];
       if (query.status) all = all.filter((o) => o.status === query.status);

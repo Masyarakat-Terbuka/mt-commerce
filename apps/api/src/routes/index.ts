@@ -26,6 +26,11 @@ import { adminRoutes as taxAdminRoutes, storefrontRoutes as taxStorefrontRoutes 
 import { adminRoutes as shippingAdminRoutes, storefrontRoutes as shippingStorefrontRoutes } from "../modules/shipping/index.js";
 import { buildAdminRoutes as buildNotificationAdminRoutesLazy } from "../modules/notification/wire.js";
 import { adminRoutes as ordersAdminRoutes, storefrontRoutes as ordersStorefrontRoutes } from "../modules/orders/index.js";
+import {
+  adminRoutes as paymentsAdminRoutes,
+  storefrontRoutes as paymentsStorefrontRoutes,
+  webhookRoutes as paymentsWebhookRoutes,
+} from "../modules/payments/index.js";
 import type { AppBindings } from "../lib/types.js";
 
 // OpenAPIHono so nested OpenAPIHono routers — health, /v1, and every
@@ -58,6 +63,11 @@ export function buildRoutes(): OpenAPIHono<AppBindings> {
   router.route("/admin/v1", buildNotificationAdminRoutesLazy());
   router.route("/admin/v1", ordersAdminRoutes);
   router.route("/storefront/v1", ordersStorefrontRoutes);
+  router.route("/admin/v1", paymentsAdminRoutes);
+  router.route("/storefront/v1", paymentsStorefrontRoutes);
+  // Webhook routes mount at the top level (not under /admin or
+  // /storefront) — providers need a stable, unversioned path.
+  router.route("/", paymentsWebhookRoutes);
 
   return router;
 }
