@@ -825,6 +825,12 @@ export interface AdminListOrdersQuery {
   status?: OrderStatus;
   customerId?: string;
   email?: string;
+  /**
+   * Exact customer-facing order number, e.g. `ORD-2026-000123`. The
+   * server normalises (trim + upper-case) and folds an empty string to
+   * "no filter", so passing the raw user input is safe.
+   */
+  orderNumber?: string;
   /** ISO 8601 timestamp; coerced server-side. */
   createdFrom?: string | Date;
   createdTo?: string | Date;

@@ -11,11 +11,13 @@
  *    `replace: true` while the user types so the browser history isn't
  *    polluted with one entry per keystroke.
  *
- *  - Search semantics: the admin orders list endpoint accepts an `email`
- *    filter (no full-text search at v0.1). The input is therefore framed
- *    as "Search by customer email" so the operator's expectation matches
- *    what the API actually does. Searching by `orderNumber` happens via
- *    the breadcrumb / direct link to `/pesanan/<orderNumber>` instead.
+ *  - Search semantics: the admin orders list endpoint accepts both an
+ *    `email` filter and an exact `orderNumber` filter. A small Select
+ *    lets the operator pick which field the input dispatches into; the
+ *    chosen field lives in the URL as `searchKind` so refresh and link
+ *    sharing preserve it. We deliberately do NOT auto-redirect to the
+ *    detail page on a single-row exact match — silent navigations
+ *    surprise people. The operator can click through to the row.
  *
  *  - `keepPreviousData` (TanStack Query v5 → `placeholderData: keepPrevious`)
  *    keeps the previous page on screen while the next loads.
@@ -87,13 +89,26 @@ export const ORDER_LIST_STATUS_OPTIONS = [
 
 export type OrdersListStatus = (typeof ORDER_LIST_STATUS_OPTIONS)[number];
 
+/**
+ * Which field the free-text search input dispatches into. `email` is
+ * the default to preserve the previous behavior — the URL never carried
+ * `searchKind` before this change, and a missing param therefore maps
+ * back to the historical contract.
+ */
+export const ORDERS_SEARCH_KIND_OPTIONS = ["email", "orderNumber"] as const;
+export type OrdersSearchKind = (typeof ORDERS_SEARCH_KIND_OPTIONS)[number];
+
 export interface OrdersListSearch {
   /** Status filter; absent = no filter (the UI maps absent → "all"). */
   status?: OrdersListStatus;
   /** Page number; absent = page 1. */
   page?: number;
-  /** Customer email substring (exact match server-side). */
+  /** Which field the search input is bound to; absent = "email". */
+  searchKind?: OrdersSearchKind;
+  /** Customer email exact match. Server-side `eq(orders.email, …)`. */
   email?: string;
+  /** Exact order number, e.g. `ORD-2026-000123`. Server-side exact match. */
+  orderNumber?: string;
   /** ISO-8601 date string (YYYY-MM-DD) for the lower bound. */
   from?: string;
   /** ISO-8601 date string (YYYY-MM-DD) for the upper bound. */
@@ -171,35 +186,82 @@ export function OrdersPage() {
   const search = useSearch({ from: "/gated/pesanan" }) as OrdersListSearch;
   const navigate = useNavigate();
 
-  // Local input mirrors the URL `email` so the field is responsive while
-  // the URL sync stays debounced.
-  const [emailInput, setEmailInput] = React.useState(search.email ?? "");
-  const debouncedEmail = useDebouncedValue(emailInput.trim(), 300);
+  // Effective search kind — mirrors the URL `searchKind`, defaulting to
+  // "email" so the URL is round-trippable without the parameter.
+  const searchKind: OrdersSearchKind = search.searchKind ?? "email";
 
-  // Push the debounced email into the URL once it stabilises. Pushing on
-  // every keystroke would clobber browser history; pushing in an effect
-  // here keeps the URL the source of truth for query/cache keying.
+  // Local input mirrors whichever URL field the current `searchKind`
+  // points at. We read both URL fields and pick the active one so a
+  // toggle from one kind to the other does not lose the operator's
+  // already-typed value (we keep both in the URL only while a value is
+  // present — see the effect below).
+  const activeUrlValue =
+    searchKind === "email"
+      ? (search.email ?? "")
+      : (search.orderNumber ?? "");
+  const [searchInput, setSearchInput] = React.useState(activeUrlValue);
+  const debouncedSearch = useDebouncedValue(searchInput.trim(), 300);
+
+  // Push the debounced value into the URL under the active kind. Pushing
+  // on every keystroke would clobber browser history; pushing in an
+  // effect here keeps the URL the source of truth for query/cache
+  // keying. The OTHER kind's URL field is cleared on submit so a stale
+  // filter from a previous mode does not silently apply.
   React.useEffect(() => {
-    if ((search.email ?? "") === debouncedEmail) return;
+    const currentForKind =
+      searchKind === "email"
+        ? (search.email ?? "")
+        : (search.orderNumber ?? "");
+    if (currentForKind === debouncedSearch) return;
     void navigate({
       to: "/pesanan",
-      search: (prev) => ({
-        ...(prev as OrdersListSearch),
-        email: debouncedEmail.length > 0 ? debouncedEmail : undefined,
-        page: 1,
-      }),
+      search: (prev) => {
+        const next = { ...(prev as OrdersListSearch), page: 1 };
+        if (searchKind === "email") {
+          next.email = debouncedSearch.length > 0 ? debouncedSearch : undefined;
+          next.orderNumber = undefined;
+        } else {
+          next.orderNumber =
+            debouncedSearch.length > 0 ? debouncedSearch : undefined;
+          next.email = undefined;
+        }
+        return next;
+      },
       replace: true,
     });
-  }, [debouncedEmail, navigate, search.email]);
+  }, [debouncedSearch, navigate, search.email, search.orderNumber, searchKind]);
 
-  // If the URL email changes from the outside (e.g. back/forward), keep
-  // the input in sync so the field never disagrees with the URL.
+  // If the URL value changes from the outside (back/forward, kind
+  // switch), keep the input in sync so the field never disagrees with
+  // the URL.
   React.useEffect(() => {
-    setEmailInput((current) => {
-      const next = search.email ?? "";
+    setSearchInput((current) => {
+      const next = activeUrlValue;
       return current === next ? current : next;
     });
-  }, [search.email]);
+  }, [activeUrlValue]);
+
+  const setSearchKind = React.useCallback(
+    (next: OrdersSearchKind) => {
+      void navigate({
+        to: "/pesanan",
+        search: (prev) => {
+          const prevSearch = prev as OrdersListSearch;
+          // Switching kind clears the other kind's filter so the URL
+          // never carries a stale param the operator can't see.
+          return {
+            ...prevSearch,
+            searchKind: next === "email" ? undefined : next,
+            email: next === "email" ? prevSearch.email : undefined,
+            orderNumber: next === "orderNumber" ? prevSearch.orderNumber : undefined,
+            page: 1,
+          };
+        },
+        replace: true,
+      });
+    },
+    [navigate],
+  );
 
   const setStatus = React.useCallback(
     (next: OrdersListStatus) => {
@@ -262,6 +324,7 @@ export function OrdersPage() {
       page: currentPage,
       status: currentStatus,
       email: search.email ?? "",
+      orderNumber: search.orderNumber ?? "",
       from: search.from ?? "",
       to: search.to ?? "",
       customerId: search.customerId ?? "",
@@ -276,6 +339,7 @@ export function OrdersPage() {
         pageSize: PAGE_SIZE,
         ...(currentStatus !== "all" ? { status: currentStatus } : {}),
         ...(search.email ? { email: search.email } : {}),
+        ...(search.orderNumber ? { orderNumber: search.orderNumber } : {}),
         ...(search.customerId ? { customerId: search.customerId } : {}),
         // The API parses `createdFrom` / `createdTo` as RFC 3339; passing
         // a date-only string is accepted because Zod's `coerce.date()`
@@ -305,13 +369,45 @@ export function OrdersPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={searchKind}
+          onValueChange={(value) =>
+            setSearchKind(value as OrdersSearchKind)
+          }
+        >
+          <SelectTrigger
+            className="h-7 w-[150px]"
+            aria-label={t("orders.search_kind.label")}
+          >
+            <SelectValue
+              placeholder={t("orders.search_kind.label")}
+              aria-label={t("orders.search_kind.label")}
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="email">
+              {t("orders.search_kind.email")}
+            </SelectItem>
+            <SelectItem value="orderNumber">
+              {t("orders.search_kind.order_number")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
         <Input
           type="search"
-          inputMode="email"
-          placeholder={t("orders.search_placeholder")}
-          aria-label={t("orders.search_placeholder")}
-          value={emailInput}
-          onChange={(e) => setEmailInput(e.target.value)}
+          inputMode={searchKind === "email" ? "email" : "text"}
+          placeholder={t(
+            searchKind === "email"
+              ? "orders.search_placeholder.email"
+              : "orders.search_placeholder.order_number",
+          )}
+          aria-label={t(
+            searchKind === "email"
+              ? "orders.search_placeholder.email"
+              : "orders.search_placeholder.order_number",
+          )}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="h-7 w-full max-w-xs"
         />
         <Select

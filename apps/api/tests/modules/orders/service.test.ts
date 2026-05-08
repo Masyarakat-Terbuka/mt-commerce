@@ -194,6 +194,16 @@ function createFakeRepo(store: FakeStore): OrdersRepository {
       if (filters.customerId)
         rows = rows.filter((r) => r.customerId === filters.customerId);
       if (filters.email) rows = rows.filter((r) => r.email === filters.email);
+      if (filters.orderNumber)
+        rows = rows.filter((r) => r.orderNumber === filters.orderNumber);
+      if (filters.createdFrom) {
+        const from = filters.createdFrom.getTime();
+        rows = rows.filter((r) => r.createdAt.getTime() >= from);
+      }
+      if (filters.createdTo) {
+        const to = filters.createdTo.getTime();
+        rows = rows.filter((r) => r.createdAt.getTime() <= to);
+      }
       const total = rows.length;
       rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       const start = (filters.page - 1) * filters.pageSize;
@@ -533,5 +543,83 @@ describe("locale resolution on item titles", () => {
     // Unknown locale falls back to the default ("id").
     const unknown = await service.getOrderById(order.id, { locale: "fr" });
     expect(unknown?.items[0]!.title).toBe("Varian var_1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listOrders — orderNumber filter (paired with the new ?orderNumber= query)
+// ---------------------------------------------------------------------------
+
+describe("listOrders — orderNumber filter", () => {
+  // Seed two orders with deterministic numbers so we can target one
+  // exactly. We re-key the underlying rows (rather than relying on the
+  // sequence allocator) because the sequence advances per call and we
+  // want stable handles to assert against.
+  function seedTwoOrders(store: FakeStore, service: OrderServiceImpl) {
+    return Promise.all([
+      service.createFromIntent("oint_1", { actorKind: "customer" }),
+      (async () => {
+        // The second intent is created on the fly so the test does not
+        // depend on a second seeded entry in `buildService`.
+        const intent = makeIntent({ id: "oint_2", checkoutId: "chk_2" });
+        store.intents.set(intent.id, intent);
+        return service.createFromIntent("oint_2", { actorKind: "customer" });
+      })(),
+    ]);
+  }
+
+  it("returns the single matching row when the filter is set", async () => {
+    const { service, store } = buildService();
+    const [, second] = await seedTwoOrders(store, service);
+
+    const result = await service.listOrders({
+      orderNumber: second.orderNumber,
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]!.orderNumber).toBe(second.orderNumber);
+  });
+
+  it("returns zero rows for an order number that does not exist", async () => {
+    const { service, store } = buildService();
+    await seedTwoOrders(store, service);
+
+    const result = await service.listOrders({
+      orderNumber: "ORD-1999-999999",
+      page: 1,
+      pageSize: 20,
+    });
+    expect(result.total).toBe(0);
+    expect(result.data).toEqual([]);
+  });
+
+  it("composes with the status filter (both must match)", async () => {
+    const { service, store } = buildService();
+    const [first, second] = await seedTwoOrders(store, service);
+
+    // Move only the first order to `paid` so a {orderNumber: second,
+    // status: "paid"} query must return zero, and {orderNumber: first,
+    // status: "paid"} must return one.
+    await service.transitionStatus(first.id, "paid", { actorKind: "system" });
+
+    const noMatch = await service.listOrders({
+      orderNumber: second.orderNumber,
+      status: "paid",
+      page: 1,
+      pageSize: 20,
+    });
+    expect(noMatch.total).toBe(0);
+
+    const match = await service.listOrders({
+      orderNumber: first.orderNumber,
+      status: "paid",
+      page: 1,
+      pageSize: 20,
+    });
+    expect(match.total).toBe(1);
+    expect(match.data[0]!.orderNumber).toBe(first.orderNumber);
   });
 });

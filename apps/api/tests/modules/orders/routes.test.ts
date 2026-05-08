@@ -162,7 +162,11 @@ function createFakeService(opts: FakeOpts = {}): {
       return null;
     },
     async listOrders(query): Promise<Paginated<Order>> {
-      const all = [...orders.values()];
+      let all = [...orders.values()];
+      if (query.status) all = all.filter((o) => o.status === query.status);
+      if (query.email) all = all.filter((o) => o.email === query.email);
+      if (query.orderNumber)
+        all = all.filter((o) => o.orderNumber === query.orderNumber);
       return {
         data: all,
         total: all.length,
@@ -268,6 +272,109 @@ describe("admin orders — list", () => {
     expect(body.data[0]!.total.amount).toBe("565000");
     expect(body.page).toBe(1);
     expect(body.pageSize).toBe(20);
+  });
+
+  it("filters by exact orderNumber when ?orderNumber= is set", async () => {
+    const fake = createFakeService({
+      orders: [
+        makeOrder({ id: "ord_a", orderNumber: "ORD-2026-000100" }),
+        makeOrder({
+          id: "ord_b",
+          orderNumber: "ORD-2026-000200",
+          email: "other@example.com",
+        }),
+      ],
+    });
+    const app = buildAdminApp(fake.service);
+    const res = await app.request(
+      "/admin/v1/orders?orderNumber=ORD-2026-000200",
+      { headers: { authorization: "Bearer staff-key" } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ id: string; orderNumber: string }>;
+      total: number;
+    };
+    expect(body.total).toBe(1);
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]!.orderNumber).toBe("ORD-2026-000200");
+  });
+
+  it("returns an empty page when ?orderNumber= matches nothing", async () => {
+    const fake = createFakeService({
+      orders: [makeOrder({ id: "ord_a", orderNumber: "ORD-2026-000100" })],
+    });
+    const app = buildAdminApp(fake.service);
+    const res = await app.request(
+      "/admin/v1/orders?orderNumber=ORD-2026-999999",
+      { headers: { authorization: "Bearer staff-key" } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: unknown[]; total: number };
+    expect(body.total).toBe(0);
+    expect(body.data).toEqual([]);
+  });
+
+  it("normalises an orderNumber filter to upper-case, trimmed", async () => {
+    const fake = createFakeService({
+      orders: [makeOrder({ id: "ord_a", orderNumber: "ORD-2026-000100" })],
+    });
+    const app = buildAdminApp(fake.service);
+    // Lower-case + extra whitespace from URL-encoded input — the Zod
+    // transform on the route should fold it to the canonical handle.
+    const res = await app.request(
+      `/admin/v1/orders?orderNumber=${encodeURIComponent("  ord-2026-000100  ")}`,
+      { headers: { authorization: "Bearer staff-key" } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { total: number };
+    expect(body.total).toBe(1);
+  });
+
+  it("composes orderNumber with status (both filters apply)", async () => {
+    const fake = createFakeService({
+      orders: [
+        makeOrder({
+          id: "ord_a",
+          orderNumber: "ORD-2026-000100",
+          status: "paid",
+        }),
+        makeOrder({
+          id: "ord_b",
+          orderNumber: "ORD-2026-000100", // same number, different status — synthetic
+          status: "pending_payment",
+        }),
+      ],
+    });
+    const app = buildAdminApp(fake.service);
+    const res = await app.request(
+      "/admin/v1/orders?orderNumber=ORD-2026-000100&status=paid",
+      { headers: { authorization: "Bearer staff-key" } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ id: string; status: string }>;
+      total: number;
+    };
+    expect(body.total).toBe(1);
+    expect(body.data[0]!.id).toBe("ord_a");
+    expect(body.data[0]!.status).toBe("paid");
+  });
+
+  it("treats an empty ?orderNumber= as no filter", async () => {
+    const fake = createFakeService({
+      orders: [
+        makeOrder({ id: "ord_a", orderNumber: "ORD-2026-000100" }),
+        makeOrder({ id: "ord_b", orderNumber: "ORD-2026-000200" }),
+      ],
+    });
+    const app = buildAdminApp(fake.service);
+    const res = await app.request("/admin/v1/orders?orderNumber=", {
+      headers: { authorization: "Bearer staff-key" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { total: number };
+    expect(body.total).toBe(2);
   });
 });
 

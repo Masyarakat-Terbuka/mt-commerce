@@ -1072,6 +1072,63 @@ describe("createClient — admin.orders", () => {
     expect(body.details).toEqual({ providerReference: "MID-123" });
   });
 
+  it("byNumber issues exactly one list request with the orderNumber filter and returns the row", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: { data: [sampleOrderPayload], total: 1, page: 1, pageSize: 1 },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const order = await client.admin.orders.byNumber("ORD-2026-000123");
+
+    expect(calls).toHaveLength(1);
+    expect(order.orderNumber).toBe("ORD-2026-000123");
+    expect(order.total.amount).toBe(565_000n);
+
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe("/admin/v1/orders");
+    expect(url.searchParams.get("orderNumber")).toBe("ORD-2026-000123");
+    // pageSize=1 keeps the round trip cheap — that's the whole point of
+    // the new filter, so the test pins it.
+    expect(url.searchParams.get("pageSize")).toBe("1");
+    expect(url.searchParams.get("page")).toBe("1");
+  });
+
+  it("byNumber throws an ApiError(404) when the result list is empty", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: { data: [], total: 0, page: 1, pageSize: 1 },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(
+      client.admin.orders.byNumber("ORD-2026-999999"),
+    ).rejects.toMatchObject({
+      status: 404,
+      code: "not_found",
+    });
+    // One request only — the previous paged-walk implementation would
+    // have issued multiple. Pinning the count here guards the
+    // simplification from regressing.
+    expect(calls).toHaveLength(1);
+  });
+
+  it("byNumber refuses an empty / whitespace-only argument without hitting the network", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: { data: [sampleOrderPayload], total: 1, page: 1, pageSize: 1 },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(client.admin.orders.byNumber("   ")).rejects.toBeInstanceOf(
+      ApiError,
+    );
+    // The guard is local — no list request is made, otherwise the
+    // server would return the newest order and we'd hand back the wrong
+    // row.
+    expect(calls).toHaveLength(0);
+  });
+
   it("posts the cancel reason as JSON", async () => {
     const { fetch, calls } = mockFetch({
       status: 200,
