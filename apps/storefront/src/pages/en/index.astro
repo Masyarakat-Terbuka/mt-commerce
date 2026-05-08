@@ -6,6 +6,7 @@ import {
   listProducts,
   resolveApiUrl,
   toProductCardListing,
+  type StoreProductCardListing,
 } from "@/lib/api";
 import { createTranslator, localePath } from "@/lib/i18n";
 
@@ -17,6 +18,7 @@ const description = t("home.hero.subhead");
 
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath("en", "/products");
+const productsHref = localePath(locale, "/products");
 
 // Mirrors `pages/index.astro` — see comments there for rationale.
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
@@ -63,16 +65,49 @@ const heroSrc1200 = `${heroBase}?w=1200&q=72&auto=format&fit=crop`;
 const heroImageAlt =
   "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
 
-// Mirrors `pages/index.astro` — fetch categories and the featured grid in
-// parallel and seed the island so the home doesn't show the
-// "Loading products…" skeleton on first paint.
-const [categories, featured] = await Promise.all([
-  listCategories(locale),
-  listProducts(locale, { pageSize: 3, sort: "newest" }),
-]);
-const featuredCards = toProductCardListing(featured, locale);
-const featuredInitialData =
-  featuredCards.items.length > 0 ? featuredCards : undefined;
+// Mirrors `pages/index.astro` — five strips fetched in parallel plus
+// the category list. Each strip skips itself when its fetch returns
+// zero items. See the id home for the full rationale.
+const HOME_CATEGORY_SLUGS = ["kopi", "batik", "kerajinan"] as const;
+
+const [categories, newest, bestPrice, kopi, batik, kerajinan] =
+  await Promise.all([
+    listCategories(locale),
+    listProducts(locale, { pageSize: 6, sort: "newest" }),
+    listProducts(locale, { pageSize: 6, sort: "price_asc" }),
+    listProducts(locale, {
+      pageSize: 4,
+      sort: "newest",
+      category: HOME_CATEGORY_SLUGS[0],
+    }),
+    listProducts(locale, {
+      pageSize: 4,
+      sort: "newest",
+      category: HOME_CATEGORY_SLUGS[1],
+    }),
+    listProducts(locale, {
+      pageSize: 4,
+      sort: "newest",
+      category: HOME_CATEGORY_SLUGS[2],
+    }),
+  ]);
+
+function seedFor(result: typeof newest): StoreProductCardListing | undefined {
+  if (result.items.length === 0) return undefined;
+  return toProductCardListing(result, locale);
+}
+
+const newestSeed = seedFor(newest);
+const bestPriceSeed = seedFor(bestPrice);
+const kopiSeed = seedFor(kopi);
+const batikSeed = seedFor(batik);
+const kerajinanSeed = seedFor(kerajinan);
+
+const showNewest = newest.items.length > 0;
+const showBestPrice = bestPrice.items.length > 0;
+const showKopi = kopi.items.length > 0;
+const showBatik = batik.items.length > 0;
+const showKerajinan = kerajinan.items.length > 0;
 ---
 
 <BaseLayout title={title} description={description} jsonLd={jsonLd}>
@@ -113,36 +148,176 @@ const featuredInitialData =
     </div>
   </section>
 
-  <section
-    class="mx-auto max-w-[1280px] px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32"
-  >
-    <div class="flex items-baseline justify-between">
-      <h2 class="t-overline text-muted">{t("home.featured.title")}</h2>
-      <a
-        href={localePath(locale, "/products")}
-        class="t-body text-muted hover:text-accent transition-colors duration-150"
-      >
-        {t("products.list.title")} &rarr;
-      </a>
-    </div>
-    <div class="mt-10 md:mt-14">
-      <ProductGrid
-        client:load
-        apiUrl={apiUrl}
-        locale="en-US"
-        apiLocale={locale}
-        detailHrefBase={detailHrefBase}
-        emptyLabel={t("products.list.empty")}
-        errorLabel={t("products.list.error")}
-        skeletonLabel={t("products.list.skeleton_aria")}
-        photoComingSoonLabel={t("products.card.photo_coming_soon")}
-        query={{ pageSize: 3, sort: "newest" }}
-        limit={3}
-        skeletonCount={3}
-        initialData={featuredInitialData}
-      />
-    </div>
-  </section>
+  {
+    showNewest && (
+      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
+        <div class="flex items-baseline justify-between gap-4">
+          <h2 class="t-overline text-muted">{t("home.strips.newest")}</h2>
+          <a
+            href={`${productsHref}?sort=newest`}
+            class="t-body text-muted hover:text-accent transition-colors duration-150"
+          >
+            {t("home.strips.newest_link")}
+          </a>
+        </div>
+        <div class="mt-10 md:mt-14">
+          <ProductGrid
+            client:load
+            apiUrl={apiUrl}
+            locale="en-US"
+            apiLocale={locale}
+            detailHrefBase={detailHrefBase}
+            emptyLabel={t("products.list.empty")}
+            errorLabel={t("products.list.error")}
+            skeletonLabel={t("products.list.skeleton_aria")}
+            photoComingSoonLabel={t("products.card.photo_coming_soon")}
+            query={{ pageSize: 6, sort: "newest" }}
+            limit={6}
+            skeletonCount={6}
+            initialData={newestSeed}
+          />
+        </div>
+      </section>
+    )
+  }
+
+  {
+    showBestPrice && (
+      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
+        <div class="flex items-baseline justify-between gap-4">
+          <h2 class="t-overline text-muted">{t("home.strips.best_price")}</h2>
+          <a
+            href={`${productsHref}?sort=price_asc`}
+            class="t-body text-muted hover:text-accent transition-colors duration-150"
+          >
+            {t("home.strips.best_price_link")}
+          </a>
+        </div>
+        <div class="mt-10 md:mt-14">
+          <ProductGrid
+            client:load
+            apiUrl={apiUrl}
+            locale="en-US"
+            apiLocale={locale}
+            detailHrefBase={detailHrefBase}
+            emptyLabel={t("products.list.empty")}
+            errorLabel={t("products.list.error")}
+            skeletonLabel={t("products.list.skeleton_aria")}
+            photoComingSoonLabel={t("products.card.photo_coming_soon")}
+            query={{ pageSize: 6, sort: "price_asc" }}
+            limit={6}
+            skeletonCount={6}
+            initialData={bestPriceSeed}
+          />
+        </div>
+      </section>
+    )
+  }
+
+  {
+    showKopi && (
+      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
+        <div class="flex items-baseline justify-between gap-4">
+          <h2 class="t-overline text-muted">
+            {t("home.strips.by_category.kopi")}
+          </h2>
+          <a
+            href={`${productsHref}?category=kopi`}
+            class="t-body text-muted hover:text-accent transition-colors duration-150"
+          >
+            {t("home.strips.by_category.see_all")}
+          </a>
+        </div>
+        <div class="mt-10 md:mt-14">
+          <ProductGrid
+            client:load
+            apiUrl={apiUrl}
+            locale="en-US"
+            apiLocale={locale}
+            detailHrefBase={detailHrefBase}
+            emptyLabel={t("products.list.empty")}
+            errorLabel={t("products.list.error")}
+            skeletonLabel={t("products.list.skeleton_aria")}
+            photoComingSoonLabel={t("products.card.photo_coming_soon")}
+            query={{ pageSize: 4, sort: "newest", categorySlug: "kopi" }}
+            limit={4}
+            skeletonCount={4}
+            initialData={kopiSeed}
+          />
+        </div>
+      </section>
+    )
+  }
+
+  {
+    showBatik && (
+      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
+        <div class="flex items-baseline justify-between gap-4">
+          <h2 class="t-overline text-muted">
+            {t("home.strips.by_category.batik")}
+          </h2>
+          <a
+            href={`${productsHref}?category=batik`}
+            class="t-body text-muted hover:text-accent transition-colors duration-150"
+          >
+            {t("home.strips.by_category.see_all")}
+          </a>
+        </div>
+        <div class="mt-10 md:mt-14">
+          <ProductGrid
+            client:load
+            apiUrl={apiUrl}
+            locale="en-US"
+            apiLocale={locale}
+            detailHrefBase={detailHrefBase}
+            emptyLabel={t("products.list.empty")}
+            errorLabel={t("products.list.error")}
+            skeletonLabel={t("products.list.skeleton_aria")}
+            photoComingSoonLabel={t("products.card.photo_coming_soon")}
+            query={{ pageSize: 4, sort: "newest", categorySlug: "batik" }}
+            limit={4}
+            skeletonCount={4}
+            initialData={batikSeed}
+          />
+        </div>
+      </section>
+    )
+  }
+
+  {
+    showKerajinan && (
+      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
+        <div class="flex items-baseline justify-between gap-4">
+          <h2 class="t-overline text-muted">
+            {t("home.strips.by_category.kerajinan")}
+          </h2>
+          <a
+            href={`${productsHref}?category=kerajinan`}
+            class="t-body text-muted hover:text-accent transition-colors duration-150"
+          >
+            {t("home.strips.by_category.see_all")}
+          </a>
+        </div>
+        <div class="mt-10 md:mt-14">
+          <ProductGrid
+            client:load
+            apiUrl={apiUrl}
+            locale="en-US"
+            apiLocale={locale}
+            detailHrefBase={detailHrefBase}
+            emptyLabel={t("products.list.empty")}
+            errorLabel={t("products.list.error")}
+            skeletonLabel={t("products.list.skeleton_aria")}
+            photoComingSoonLabel={t("products.card.photo_coming_soon")}
+            query={{ pageSize: 4, sort: "newest", categorySlug: "kerajinan" }}
+            limit={4}
+            skeletonCount={4}
+            initialData={kerajinanSeed}
+          />
+        </div>
+      </section>
+    )
+  }
 
   {
     categories.length > 0 && (
