@@ -1,10 +1,22 @@
 /**
  * ProductGrid — client island.
  *
- * Why a React island instead of Astro server-render: the storefront builds
- * with `output: "static"` and the API may not be running at build time. The
- * static page renders a grid skeleton; this island fetches real data from
- * the API once it mounts in the browser.
+ * Why a React island instead of pure Astro server-render: the storefront
+ * builds with `output: "static"` and the API may not be running at build
+ * time. The page's frontmatter does fetch eagerly when the API is up — that
+ * data is forwarded as `initialData` and rendered synchronously, so the
+ * happy-path visitor never sees a "Memuat produk…" flash. When the build
+ * was offline (no API reachable) the page passes nothing and the island
+ * falls back to fetching from the SDK on mount, preserving the original
+ * progressive-hydration property.
+ *
+ * Invalidation rule for `initialData`:
+ *
+ *   `initialData` is the rendering of the URL query at *request time*. The
+ *   island treats it as a one-shot seed — keyed by a hash of the query that
+ *   produced it — and only refetches when the query (filters/sort/page)
+ *   actually changes. A static URL therefore never triggers a redundant
+ *   client fetch. Filter/sort/page changes drive the SDK call as before.
  *
  * Visual notes (post-redesign):
  *
@@ -27,9 +39,9 @@
  *     components cannot render inside React islands. They stay in sync via
  *     the shared utility classes (`t-body`, `price-figure`, etc.).
  */
-import { useEffect, useMemo, useState } from "react";
-import { format as formatMoney } from "@mt-commerce/core/money";
-import { createClient, type Product as SdkProduct } from "@mt-commerce/sdk";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { format as formatMoney, type Money } from "@mt-commerce/core/money";
+import { createClient } from "@mt-commerce/sdk";
 
 export type ProductGridQuery = {
   categorySlug?: string;
@@ -39,6 +51,39 @@ export type ProductGridQuery = {
   page?: number;
   pageSize?: number;
   sort?: "newest" | "price_asc" | "price_desc" | "oldest";
+};
+
+/**
+ * Minimal product shape the grid needs to render. Mirrors
+ * `StoreProductCard` from `lib/api.ts` exactly — the page passes the
+ * shape verbatim via `toProductCardListing`. Kept locally typed
+ * (rather than `import type { StoreProductCard }`) so the island stays
+ * self-describing: every prop the renderer reads is right here, not
+ * behind one more import hop.
+ */
+export type ProductGridItem = {
+  id: string;
+  slug: string;
+  /**
+   * Locale-resolved title. Pages on `/` use Indonesian and pages on
+   * `/en/` use English — the call site picks `title[locale]` before
+   * forwarding so the island doesn't need to know about locales.
+   */
+  title: string;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  variants: Array<{
+    price: Money;
+    compareAtPrice?: Money | null;
+  }>;
+};
+
+export type ProductGridInitialData = {
+  items: ProductGridItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 };
 
 export type ProductGridProps = {
@@ -88,20 +133,53 @@ export type ProductGridProps = {
    * to avoid churn in pages that already pass it.
    */
   photoComingSoonLabel?: string;
+  /**
+   * Optional request-time payload. When present, the island renders the
+   * cards synchronously on first mount — no skeleton flash. Subsequent
+   * query changes drive a client-side fetch as usual.
+   *
+   * When absent (e.g. an offline build where the build-time fetch
+   * returned no rows), the island falls back to fetching on mount —
+   * the original progressive-hydration behavior.
+   */
+  initialData?: ProductGridInitialData;
 };
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; products: SdkProduct[] }
+  | { status: "ready"; products: ProductGridItem[] }
   | { status: "error" };
 
-function lowestPrice(p: SdkProduct): { amount: bigint; currency: string } | null {
+function lowestPrice(p: ProductGridItem): Money | null {
   if (p.variants.length === 0) return null;
   let lowest = p.variants[0]!.price;
   for (const v of p.variants) {
     if (v.price.amount < lowest.amount) lowest = v.price;
   }
   return lowest;
+}
+
+/**
+ * Stable string key for a query — used to detect when the URL state
+ * has changed and a refetch is required, even though we have seeded data
+ * from a previous request.
+ */
+function querySignature(
+  query: ProductGridQuery | undefined,
+  limit: number | undefined,
+): string {
+  if (!query) return `|${limit ?? ""}`;
+  const parts = [
+    query.categorySlug ?? "",
+    query.search ?? "",
+    query.minPriceAmount ?? "",
+    query.maxPriceAmount ?? "",
+    query.page ?? "",
+    query.pageSize ?? "",
+    query.sort ?? "",
+    limit ?? "",
+  ];
+  return parts.join("|");
 }
 
 // 3 columns desktop, 2 columns mobile. Massive gap (12/16 desktop) — the
@@ -122,12 +200,36 @@ export default function ProductGrid({
   skeletonCount,
   showCount = false,
   showingCountTemplate,
+  initialData,
 }: ProductGridProps) {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
+  // The signature of the query that produced the seeded snapshot. While the
+  // current query still matches it, the seed is fresh and we skip the fetch.
+  const seededSignature = useMemo(
+    () => (initialData ? querySignature(query, limit) : null),
+    // initialData is a request-time prop and stays stable across re-renders
+    // for a given page render — capture the signature once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // Initial state: when the page handed us request-time data, render those
+  // cards immediately. Otherwise fall back to the original "loading" state
+  // and let the effect below fetch from the SDK (offline-build path).
+  const [state, setState] = useState<LoadState>(() => {
+    if (initialData) {
+      const items = limit
+        ? initialData.items.slice(0, limit)
+        : initialData.items;
+      return { status: "ready", products: items };
+    }
+    return { status: "loading" };
+  });
   // Track image URLs that fail to load so we can fall back to a clean
   // cream tile. A broken Unsplash URL or hotlink-block would otherwise
   // show a torn-image icon.
-  const [brokenImages, setBrokenImages] = useState<Set<string>>(() => new Set());
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   // Memoize once — the grid layout is consistent across product counts now
   // that the redesign locks columns at 3 desktop / 2 mobile. The previous
@@ -135,7 +237,24 @@ export default function ProductGrid({
   // tended to leave orphan rows; 3-up tolerates any count gracefully.
   const gridClasses = useMemo(() => GRID_CLASSES, []);
 
+  // Skip-the-first-fetch ref. When `initialData` was used to seed state,
+  // the first effect run must not fire a network request — otherwise we
+  // pay the same skeleton-flash cost we wanted to avoid. The ref clears
+  // on subsequent runs so user-driven query changes still refetch.
+  const skipNextFetchRef = useRef<boolean>(initialData != null);
+
+  const currentSignature = querySignature(query, limit);
+
   useEffect(() => {
+    // Honour the "we just seeded this" hint, but only when the query
+    // signature still matches the seed. If the user navigated to a
+    // different query (filters / page), bypass the skip.
+    if (skipNextFetchRef.current && seededSignature === currentSignature) {
+      skipNextFetchRef.current = false;
+      return;
+    }
+    skipNextFetchRef.current = false;
+
     const controller = new AbortController();
     // Bake the API locale into the client so every call from this island
     // hits the right translation. The page passes `apiLocale` explicitly;
@@ -144,25 +263,51 @@ export default function ProductGrid({
     // not match the URL prefix.
     const client = createClient({ baseUrl: apiUrl, locale: apiLocale });
 
+    // While in-flight, show the skeleton. Two cases reach here:
+    //   1. Offline-build fallback (no initialData) — we were already in
+    //      "loading" state, this is a no-op visually.
+    //   2. The user changed a filter/sort/page after a seeded render —
+    //      flipping back to loading is the correct UX (the previous
+    //      result no longer matches the current URL).
+    setState({ status: "loading" });
+
     async function load() {
       try {
         const result = await client.storefront.products.list(
           {
-            ...(query?.categorySlug ? { categorySlug: query.categorySlug } : {}),
+            ...(query?.categorySlug
+              ? { categorySlug: query.categorySlug }
+              : {}),
             ...(query?.search ? { search: query.search } : {}),
-            ...(query?.minPriceAmount ? { minPriceAmount: query.minPriceAmount } : {}),
-            ...(query?.maxPriceAmount ? { maxPriceAmount: query.maxPriceAmount } : {}),
+            ...(query?.minPriceAmount
+              ? { minPriceAmount: query.minPriceAmount }
+              : {}),
+            ...(query?.maxPriceAmount
+              ? { maxPriceAmount: query.maxPriceAmount }
+              : {}),
             ...(query?.page ? { page: query.page } : {}),
             ...(query?.pageSize ? { pageSize: query.pageSize } : {}),
             ...(query?.sort ? { sort: query.sort } : {}),
           },
           { signal: controller.signal },
         );
-        const products = limit ? result.data.slice(0, limit) : result.data;
-        setState({ status: "ready", products });
+        const products: ProductGridItem[] = result.data.map((p) => ({
+          id: p.id,
+          slug: p.slug,
+          title: p.title,
+          imageUrl: p.imageUrl,
+          imageAlt: p.imageAlt,
+          variants: p.variants.map((v) => ({
+            price: v.price,
+            compareAtPrice: v.compareAtPrice,
+          })),
+        }));
+        const sliced = limit ? products.slice(0, limit) : products;
+        setState({ status: "ready", products: sliced });
       } catch (err) {
         if ((err as { name?: string } | null)?.name === "AbortError") return;
-        if ((err as { code?: string } | null)?.code === "request_aborted") return;
+        if ((err as { code?: string } | null)?.code === "request_aborted")
+          return;
         console.error("[storefront] ProductGrid fetch failed:", err);
         setState({ status: "error" });
       }
@@ -170,18 +315,10 @@ export default function ProductGrid({
 
     void load();
     return () => controller.abort();
-  }, [
-    apiUrl,
-    apiLocale,
-    limit,
-    query?.categorySlug,
-    query?.search,
-    query?.minPriceAmount,
-    query?.maxPriceAmount,
-    query?.page,
-    query?.pageSize,
-    query?.sort,
-  ]);
+    // We deliberately depend on the query signature rather than each individual
+    // field — same effect, smaller deps array, and aligns with the seed-key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl, apiLocale, currentSignature]);
 
   if (state.status === "loading") {
     const cells = Math.max(2, skeletonCount ?? limit ?? query?.pageSize ?? 9);
@@ -194,10 +331,10 @@ export default function ProductGrid({
       >
         {Array.from({ length: cells }).map((_, idx) => (
           <div key={idx}>
-            <div className="aspect-square w-full skeleton"></div>
+            <div className="skeleton aspect-square w-full"></div>
             <div className="mt-4 space-y-2">
-              <div className="h-3 w-3/4 skeleton"></div>
-              <div className="h-3 w-1/4 skeleton"></div>
+              <div className="skeleton h-3 w-3/4"></div>
+              <div className="skeleton h-3 w-1/4"></div>
             </div>
           </div>
         ))}
@@ -207,18 +344,14 @@ export default function ProductGrid({
 
   if (state.status === "error") {
     return (
-      <p role="alert" className="py-16 t-body text-muted">
+      <p role="alert" className="t-body text-muted py-16">
         {errorLabel}
       </p>
     );
   }
 
   if (state.products.length === 0) {
-    return (
-      <p className="py-16 t-body text-muted">
-        {emptyLabel}
-      </p>
-    );
+    return <p className="t-body text-muted py-16">{emptyLabel}</p>;
   }
 
   // Visible-count caption. Reflects what's rendered (post-`limit` slice),
@@ -231,9 +364,7 @@ export default function ProductGrid({
 
   return (
     <>
-      {countLabel && (
-        <p className="t-caption mb-6 text-faint">{countLabel}</p>
-      )}
+      {countLabel && <p className="t-caption text-faint mb-6">{countLabel}</p>}
       <div className={gridClasses}>
         {state.products.map((p, idx) => {
           const price = lowestPrice(p);
@@ -248,7 +379,7 @@ export default function ProductGrid({
               href={`${detailHrefBase}/${p.slug}`}
               className="group block"
             >
-              <div className="aspect-square w-full overflow-hidden bg-cream">
+              <div className="bg-cream aspect-square w-full overflow-hidden">
                 {p.imageUrl && !brokenImages.has(p.id) ? (
                   <img
                     src={p.imageUrl}
@@ -267,17 +398,17 @@ export default function ProductGrid({
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center px-6 text-center">
-                    <span className="t-body line-clamp-2 text-fg">
+                    <span className="t-body text-fg line-clamp-2">
                       {p.title}
                     </span>
                   </div>
                 )}
               </div>
               <div className="mt-4 space-y-1">
-                <h3 className="t-body line-clamp-1 text-fg transition-colors duration-200 group-hover:text-accent">
+                <h3 className="t-body text-fg group-hover:text-accent line-clamp-1 transition-colors duration-200">
                   {p.title}
                 </h3>
-                <div className="flex items-baseline gap-2 t-body">
+                <div className="t-body flex items-baseline gap-2">
                   {price && (
                     <span className="price-figure text-muted">
                       {formatMoney(price, { locale })}

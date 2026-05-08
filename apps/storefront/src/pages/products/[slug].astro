@@ -1,8 +1,18 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProductDetail from "@/islands/ProductDetail.tsx";
-import { getProductBySlug, listProducts, resolveApiUrl } from "@/lib/api";
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  getProductBySlug,
+  listProducts,
+  resolveApiUrl,
+  toInitialProduct,
+} from "@/lib/api";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 
 /**
  * `getStaticPaths` runs at build time. It tries to enumerate slugs through
@@ -26,10 +36,13 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
 const { slug } = Astro.params as { slug: string };
 
-// Best-effort build-time fetch to populate <title>, <meta>, OG image, and
-// the JSON-LD product structured data. If the build-time fetch fails the
-// React island re-fetches on the client.
+// Best-effort build-time fetch — populates <title>, <meta>, OG image,
+// and the JSON-LD product payload, AND seeds the React island so the
+// happy path doesn't show a "Memuat produk…" skeleton on first paint.
+// If the build-time fetch fails the island falls back to a client-side
+// fetch by slug (preserves the offline-build property).
 const product = await getProductBySlug(locale, slug);
+const initialProduct = product ? toInitialProduct(product, locale) : undefined;
 
 const pageTitle = product ? product.title[locale] : slug;
 const description = product ? product.description[locale] : "";
@@ -45,7 +58,10 @@ const detailHrefBase = localePath(locale, "/products");
 // unset.
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
 const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
-const productsUrl = new URL(localePath(locale, "/products"), siteUrl).toString();
+const productsUrl = new URL(
+  localePath(locale, "/products"),
+  siteUrl,
+).toString();
 const productUrl = new URL(`${detailHrefBase}/${slug}`, siteUrl).toString();
 
 // `Product` schema — name, description, image, sku, brand, offers.
@@ -142,5 +158,6 @@ const jsonLd = product
     breadcrumbHomeLabel={t("products.detail.breadcrumbs.home")}
     relatedTitle={t("products.detail.related_title")}
     detailHrefBase={detailHrefBase}
+    initialProduct={initialProduct}
   />
 </BaseLayout>

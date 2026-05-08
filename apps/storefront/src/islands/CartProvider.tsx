@@ -46,6 +46,18 @@ const CART_OPEN_EVENT = "mt:cart-open";
 /** Single-source-of-truth currency for v0.1. */
 const DEFAULT_CURRENCY = "IDR";
 
+/**
+ * Module-level cache of the most recently observed cart. Survives island
+ * remount across `ClientRouter` view-transition swaps so the header badge
+ * doesn't blink to zero between pages while the network refresh runs.
+ *
+ * Lives on the JS module rather than `window` so test harnesses that
+ * import the file get a fresh slate per import. The localStorage cart id
+ * remains the cross-tab source of truth; this snapshot is purely an
+ * in-memory hint for synchronous re-render after a swap.
+ */
+let cachedCart: Cart | null = null;
+
 export interface CartContextValue {
   cart: Cart | null;
   loading: boolean;
@@ -109,8 +121,14 @@ export interface CartProviderProps {
  * `localStorage` cart id.
  */
 export function CartProvider({ children, apiUrl }: CartProviderProps) {
-  const [cart, setCart] = useState<Cart | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  // Seed from the module cache so a remount across a ClientRouter swap
+  // shows the previous cart (and badge count) immediately. The hydrate
+  // effect below will refresh in the background if a persisted id exists.
+  const [cart, setCart] = useState<Cart | null>(() => cachedCart);
+  // When we already have a cached cart, don't flip to "loading" — the UI
+  // would briefly read as empty otherwise. The hydrate effect promotes
+  // `loading` to false on completion regardless.
+  const [loading, setLoading] = useState<boolean>(() => cachedCart === null);
   const [error, setError] = useState<string | null>(null);
 
   // Keep `cartId` in a ref AND in localStorage. The ref lets callers read the
@@ -123,6 +141,15 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     [apiUrl],
   );
 
+  // Wrap state setter so the module cache stays in step with React state.
+  // Subsequent islands mounting after a ClientRouter swap read the cache
+  // synchronously and avoid the badge flicker that an empty initial render
+  // would produce.
+  const updateCart = useCallback((next: Cart | null) => {
+    cachedCart = next;
+    setCart(next);
+  }, []);
+
   // Hydrate from localStorage on mount; refresh whenever another island
   // signals a change.
   useEffect(() => {
@@ -133,7 +160,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
       cartIdRef.current = persistedId;
       if (!persistedId) {
         if (!cancelled) {
-          setCart(null);
+          updateCart(null);
           setLoading(false);
         }
         return;
@@ -141,7 +168,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
       try {
         const fetched = await client.storefront.cart.byId(persistedId);
         if (cancelled) return;
-        setCart(fetched);
+        updateCart(fetched);
         setLoading(false);
       } catch (err) {
         if (cancelled) return;
@@ -149,7 +176,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         if (err instanceof ApiError && err.code === "not_found") {
           writePersistedCartId(null);
           cartIdRef.current = null;
-          setCart(null);
+          updateCart(null);
           setLoading(false);
           return;
         }
@@ -170,7 +197,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
       cancelled = true;
       window.removeEventListener(CART_CHANGED_EVENT, onChanged);
     };
-  }, [client]);
+  }, [client, updateCart]);
 
   // Ensure a cart exists; returns the id for use by the caller. Persistence
   // is updated synchronously so a refresh mid-flight still finds the cart.
@@ -181,9 +208,9 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     });
     cartIdRef.current = created.id;
     writePersistedCartId(created.id);
-    setCart(created);
+    updateCart(created);
     return created.id;
-  }, [client]);
+  }, [client, updateCart]);
 
   const addItem = useCallback(
     async (variantId: string, quantity = 1) => {
@@ -195,7 +222,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
           variantId,
           quantity,
         });
-        setCart(next);
+        updateCart(next);
         broadcastCartChange();
       } catch (err) {
         setError(err instanceof Error ? err.message : "cart_add_failed");
@@ -204,7 +231,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         setLoading(false);
       }
     },
-    [client, ensureCart],
+    [client, ensureCart, updateCart],
   );
 
   const updateItem = useCallback(
@@ -217,7 +244,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         const next = await client.storefront.cart.updateItem(id, itemId, {
           quantity,
         });
-        setCart(next);
+        updateCart(next);
         broadcastCartChange();
       } catch (err) {
         setError(err instanceof Error ? err.message : "cart_update_failed");
@@ -226,7 +253,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         setLoading(false);
       }
     },
-    [client],
+    [client, updateCart],
   );
 
   const removeItem = useCallback(
@@ -237,7 +264,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
       setLoading(true);
       try {
         const next = await client.storefront.cart.removeItem(id, itemId);
-        setCart(next);
+        updateCart(next);
         broadcastCartChange();
       } catch (err) {
         setError(err instanceof Error ? err.message : "cart_remove_failed");
@@ -246,7 +273,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
         setLoading(false);
       }
     },
-    [client],
+    [client, updateCart],
   );
 
   const clear = useCallback(async () => {
@@ -256,7 +283,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     setLoading(true);
     try {
       const next = await client.storefront.cart.clear(id);
-      setCart(next);
+      updateCart(next);
       broadcastCartChange();
     } catch (err) {
       setError(err instanceof Error ? err.message : "cart_clear_failed");
@@ -264,7 +291,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, updateCart]);
 
   const itemCount = useMemo(() => {
     if (!cart) return 0;
