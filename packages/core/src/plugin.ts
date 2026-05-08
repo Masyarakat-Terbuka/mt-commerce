@@ -162,15 +162,96 @@ export interface ShippingMethodLike {
 }
 
 /**
+ * Destination descriptor passed to `ShippingProvider.quote`. The region
+ * ids are the operator's BPS codes (the same shape stored on the
+ * platform's `addresses` rows): provinsi (2 digits), kotaKabupaten
+ * (4 digits), kecamatan (6 digits), kelurahan (10 digits), plus the
+ * 5-digit postal code.
+ *
+ * All fields are optional from the contract's POV: a provider that needs
+ * a richer descriptor (Biteship needs the postal code; some couriers
+ * need lat/lon) should validate eagerly and throw a clear domain error
+ * when the field it needs is missing. The manual provider ignores them.
+ *
+ * Plugins MAY translate these BPS codes to their own region taxonomy
+ * (Biteship's internal area ids, JNE's destination tariff codes) — that
+ * translation is the plugin's responsibility, not the platform's.
+ */
+export interface ShippingQuoteDestination {
+  readonly provinsiId?: string | null;
+  readonly kotaKabupatenId?: string | null;
+  readonly kecamatanId?: string | null;
+  readonly kelurahanId?: string | null;
+  readonly postalCode?: string | null;
+}
+
+/**
+ * Subset of a cart-item shape that the platform forwards to the shipping
+ * provider when quoting. Mirrors what couriers actually need to price a
+ * shipment: identity (so the courier's catalog can lookup), quantity,
+ * weight (grams), and optional dimensions (cm).
+ *
+ * `productId` and `variantId` are surfaced because some couriers carry
+ * stable references for catalog items (Biteship's `sku` field). The
+ * provider may treat them as opaque ids.
+ *
+ * Weight and dimensions are optional because mt-commerce does not
+ * model them on every variant in v0.1; providers that REQUIRE them must
+ * fail loudly when missing rather than fabricating defaults.
+ */
+export interface ShippingQuoteItem {
+  readonly productId?: string;
+  readonly variantId?: string;
+  /** Number of this variant in the parcel. */
+  readonly quantity: number;
+  /** Per-item weight in grams. */
+  readonly weight?: number;
+  /** Per-item value in the smallest currency unit (matches the cart). */
+  readonly value?: bigint;
+  /** Per-item dimensions (cm). Forwarded only when all three are present. */
+  readonly length?: number;
+  readonly width?: number;
+  readonly height?: number;
+  /** Optional display name for couriers that include it on the manifest. */
+  readonly name?: string;
+}
+
+/**
+ * Context the platform's shipping service forwards to `quote` after
+ * resolving the cart's shipping address and items. All fields are
+ * optional so the manual provider (which only needs the method's flat
+ * rate) keeps working unchanged; plugin providers (Biteship, JNE
+ * direct) consume them to compute real rates.
+ *
+ * Currency is required — every provider must respect the requested
+ * currency or throw a `currency_mismatch` domain error.
+ */
+export interface ShippingQuoteContext {
+  /** ISO 4217 currency the caller expects the response in. */
+  readonly currency: string;
+  /** Buyer destination resolved from the cart's shipping address. */
+  readonly destination?: ShippingQuoteDestination;
+  /** Cart items projected onto the courier-facing subset. */
+  readonly items?: readonly ShippingQuoteItem[];
+}
+
+/**
  * Shipping provider plugin interface. A plugin shipping provider registers
  * with a unique `code`; the api's shipping service routes a method whose
  * row stores `provider_kind = 'plugin'` to the provider whose `code`
  * matches the method's `code` (one provider per method code).
  *
- * `quote` returns a `Money` whose currency MUST equal `opts.currency`. The
+ * `quote` returns a `Money` whose currency MUST equal `ctx.currency`. The
  * service double-checks at the boundary; providers should also throw
  * eagerly with a clear domain error when the method cannot quote in the
  * requested currency.
+ *
+ * The second argument was extended to `ShippingQuoteContext` (additive —
+ * `currency` remains the only required field) so plugin providers like
+ * Biteship can compute real rates from the buyer's destination + cart
+ * items without reaching back into the platform's database. Providers
+ * that don't need the context (manual flat-rate) ignore the new fields
+ * and the call shape is unchanged.
  */
 export interface ShippingProvider {
   /** Stable identifier, matching the `code` on the shipping method row. */
@@ -179,7 +260,7 @@ export interface ShippingProvider {
   readonly displayName: string;
   quote(
     method: ShippingMethodLike,
-    opts: { currency: string },
+    ctx: ShippingQuoteContext,
   ): Promise<Money>;
 }
 

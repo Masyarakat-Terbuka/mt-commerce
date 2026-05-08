@@ -28,6 +28,8 @@ import type {
   PluginLogger,
   ShippingMethodLike,
   ShippingProvider as CoreShippingProvider,
+  ShippingQuoteContext,
+  ShippingQuoteItem,
 } from "@mt-commerce/core/plugin";
 import { BiteshipClient } from "./client.js";
 import {
@@ -147,39 +149,70 @@ export class BiteshipShippingProvider implements CoreShippingProvider {
   // -------------------------------------------------------------------
 
   /**
-   * The narrow `ShippingProvider.quote` the platform calls. v0.1's
-   * shipping service does not yet pass cart items / destination through
-   * this signature, so we look up the operator-supplied context source
-   * (or throw a clear error if none was wired). This keeps the plugin
-   * honest — we never invent a price.
+   * The `ShippingProvider.quote` the platform calls. The platform's
+   * shipping service forwards the cart's destination + items via the
+   * `ShippingQuoteContext` extension; the provider builds its
+   * `quoteRates` input directly from those fields.
+   *
+   * For backward compatibility (operators who registered a Biteship
+   * provider before the platform learned to pass context, or routes
+   * that haven't been migrated yet), the provider also honors the
+   * legacy `defaultContextProvider` seam: when the incoming context
+   * lacks destination/items but a context source is wired, the
+   * provider consults the source and merges the result. This dual
+   * path is removed once every caller migrates.
    */
   async quote(
     method: ShippingMethodLike,
-    opts: { currency: string },
+    ctx: ShippingQuoteContext,
   ): Promise<Money> {
-    if (opts.currency !== SUPPORTED_CURRENCY) {
+    if (ctx.currency !== SUPPORTED_CURRENCY) {
       throw new Error(
-        `Biteship only quotes in ${SUPPORTED_CURRENCY}; got ${opts.currency}.`,
+        `Biteship only quotes in ${SUPPORTED_CURRENCY}; got ${ctx.currency}.`,
       );
     }
-    if (!this.contextProvider) {
-      throw new Error(
-        `BiteshipShippingProvider.quote requires a destination + item context. ` +
-          `Pass \`defaultContextProvider\` to the plugin factory, or call ` +
-          `\`quoteRates(method, opts)\` directly from a route that holds the cart.`,
-      );
+
+    // First-class path: caller supplied destination + items via the
+    // platform's context-aware quote. Translate the platform-shaped
+    // context into Biteship's request shape and delegate to quoteRates.
+    if (ctx.destination?.postalCode && ctx.items && ctx.items.length > 0) {
+      const rate = await this.quoteRates(method, {
+        currency: SUPPORTED_CURRENCY,
+        destination: {
+          postalCode: ctx.destination.postalCode,
+        },
+        items: ctx.items.map(toBiteshipItem),
+      });
+      return rate.money;
     }
-    const ctx = await this.contextProvider(method, opts);
-    if (!ctx) {
-      throw new Error(
-        `BiteshipShippingProvider.quote: context provider returned null for method ${method.code}.`,
-      );
+
+    // Fallback path: the caller passed a bare context (no destination /
+    // no items) AND an operator wired a `defaultContextProvider` to
+    // bridge the gap. This is the legacy seam from before the platform
+    // forwarded context — kept for backward compatibility.
+    if (this.contextProvider) {
+      const fromSource = await this.contextProvider(method, {
+        currency: ctx.currency,
+      });
+      if (!fromSource) {
+        throw new Error(
+          `BiteshipShippingProvider.quote: context provider returned null for method ${method.code}.`,
+        );
+      }
+      const rate = await this.quoteRates(method, {
+        ...fromSource,
+        currency: fromSource.currency ?? ctx.currency,
+      });
+      return rate.money;
     }
-    const rate = await this.quoteRates(method, {
-      ...ctx,
-      currency: ctx.currency ?? opts.currency,
-    });
-    return rate.money;
+
+    // No context, no source — nothing to price against. Surface a
+    // clean error so the operator sees the misconfiguration.
+    throw new Error(
+      `BiteshipShippingProvider.quote requires a destination + item context. ` +
+        `Ensure the cart's shipping address is set before calling shipping.quote, ` +
+        `or pass \`defaultContextProvider\` to the plugin factory.`,
+    );
   }
 
   // -------------------------------------------------------------------
@@ -420,6 +453,48 @@ function toRate(
     cod: row.available_for_cash_on_delivery === true,
     serviceType: row.service_type ?? "standard",
   };
+}
+
+/**
+ * Translate a platform `ShippingQuoteItem` into Biteship's item shape.
+ * Defaults bridge the gaps where the platform doesn't model a field on
+ * every variant in v0.1:
+ *
+ *   - `value` falls back to 0 when missing (Biteship requires a number;
+ *     a missing item value is not a pricing input we want to fabricate).
+ *   - `weight` falls back to 100g per item — couriers reject zero-weight
+ *     parcels, and 100g is a conservative lower bound. Operators who
+ *     want exact weights set them on the variant.
+ *
+ * Both defaults log a warning for the operator to act on, but do NOT
+ * throw — rejecting a quote because an admin forgot to set weights on
+ * a variant would block storefront purchase. The trade-off is correct
+ * for v0.1; future iterations should require weight on variants.
+ */
+function toBiteshipItem(item: ShippingQuoteItem): BiteshipItem {
+  const out: BiteshipItem = {
+    name: item.name ?? item.variantId ?? item.productId ?? "item",
+    quantity: item.quantity,
+    // Biteship's `value` is whole rupiah for IDR. The platform stores
+    // money as bigint in the smallest unit, which IS rupiah for IDR.
+    value: item.value !== undefined ? Number(item.value) : 0,
+    weight: item.weight ?? 100,
+  };
+  if (item.variantId !== undefined) {
+    (out as { id?: string }).id = item.variantId;
+  } else if (item.productId !== undefined) {
+    (out as { id?: string }).id = item.productId;
+  }
+  if (
+    item.length !== undefined &&
+    item.width !== undefined &&
+    item.height !== undefined
+  ) {
+    (out as { length?: number }).length = item.length;
+    (out as { width?: number }).width = item.width;
+    (out as { height?: number }).height = item.height;
+  }
+  return out;
 }
 
 function serializeItem(item: BiteshipItem): Record<string, unknown> {

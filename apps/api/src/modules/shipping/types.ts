@@ -175,11 +175,60 @@ export type ListShippingMethodsQuery = z.infer<
   typeof listShippingMethodsQuerySchema
 >;
 
+/**
+ * Optional buyer destination forwarded onto the provider's `quote` call.
+ * Plugin providers (Biteship, JNE direct) that need a real shipment to
+ * price consume these fields; the manual provider ignores them.
+ *
+ * The region ids are the same BPS-coded shape stored on the platform's
+ * `addresses` rows. The HTTP boundary parses them through the wire
+ * schemas; the service-internal type below is structural so internal
+ * callers (cart, checkout) can forward whatever they have without an
+ * extra Zod parse.
+ */
+export interface QuoteShippingDestination {
+  provinsiId?: string | null;
+  kotaKabupatenId?: string | null;
+  kecamatanId?: string | null;
+  kelurahanId?: string | null;
+  postalCode?: string | null;
+}
+
+/**
+ * Cart-item subset forwarded onto the provider's `quote` call. Mirrors
+ * what couriers actually need (identity, quantity, weight, dimensions).
+ * All fields beyond `quantity` are optional — providers that need richer
+ * data must throw a clear domain error when missing.
+ */
+export interface QuoteShippingItem {
+  productId?: string;
+  variantId?: string;
+  quantity: number;
+  weight?: number;
+  value?: bigint;
+  length?: number;
+  width?: number;
+  height?: number;
+  name?: string;
+}
+
 export const quoteShippingSchema = z.object({
   methodCode: codeSchema,
   currency: currencySchema,
 });
-export type QuoteShippingInput = z.infer<typeof quoteShippingSchema>;
+export type QuoteShippingHttpInput = z.infer<typeof quoteShippingSchema>;
+
+/**
+ * Service-layer input. Adds the optional `destination` and `items`
+ * forwarded to the underlying provider. The HTTP boundary today only
+ * accepts `methodCode + currency` (storefront preview); the cart and
+ * checkout call sites build the richer shape from the cart they already
+ * hold, so the service signature accepts both.
+ */
+export type QuoteShippingInput = QuoteShippingHttpInput & {
+  destination?: QuoteShippingDestination;
+  items?: readonly QuoteShippingItem[];
+};
 
 // ---------------------------------------------------------------------------
 // Fulfillment input schemas

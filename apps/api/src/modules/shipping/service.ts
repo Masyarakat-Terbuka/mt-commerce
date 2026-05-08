@@ -265,6 +265,16 @@ export class ShippingServiceImpl implements ShippingService {
     // methods route through the `kind`-keyed registry. Branching here (and
     // not inside the provider) keeps the manual provider free of plugin
     // concerns and keeps plugin providers free of any default rate logic.
+    //
+    // The destination + items context is forwarded verbatim to the
+    // provider. Manual providers ignore them (their flat rate doesn't
+    // depend on the parcel); plugin providers that need them throw a
+    // clear domain error when missing.
+    const ctx = {
+      currency: input.currency,
+      ...(input.destination ? { destination: input.destination } : {}),
+      ...(input.items ? { items: input.items } : {}),
+    };
     let amount: Money;
     if (method.providerKind === "plugin") {
       const pluginProvider = this.pluginProviders.get(method.code);
@@ -277,9 +287,7 @@ export class ShippingServiceImpl implements ShippingService {
           },
         );
       }
-      amount = await pluginProvider.quote(method, {
-        currency: input.currency,
-      });
+      amount = await pluginProvider.quote(method, ctx);
     } else {
       const provider = this.providers.get(method.providerKind);
       if (!provider) {
@@ -288,7 +296,7 @@ export class ShippingServiceImpl implements ShippingService {
           methodCode: input.methodCode,
         });
       }
-      amount = await provider.quote(method, { currency: input.currency });
+      amount = await provider.quote(method, ctx);
     }
     if (amount.currency !== input.currency) {
       throw new ValidationError(
