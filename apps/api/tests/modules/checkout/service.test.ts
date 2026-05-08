@@ -533,6 +533,9 @@ function makeFakeShippingService(opts: FakeShippingOptions = {}): ShippingServic
     async createFulfillment() {
       return fail();
     },
+    registerPluginProvider() {
+      // Plugin extension point — not exercised by the checkout fake.
+    },
   };
 }
 

@@ -31,8 +31,10 @@
  *     than silently succeed.
  */
 import { id } from "@mt-commerce/core/ulid";
+import type { NotificationChannel as PluginNotificationChannel } from "@mt-commerce/core/plugin";
 import { env } from "../../lib/env.js";
 import { childLogger } from "../../lib/logger.js";
+import { ConflictError } from "../../lib/errors.js";
 import { events as checkoutEvents } from "../checkout/events.js";
 import type { NotificationChannel } from "./channels/types.js";
 import { ConsoleEmailChannel } from "./channels/console.js";
@@ -95,6 +97,18 @@ export interface NotificationService {
    * via an internal flag).
    */
   subscribeToEvents(): void;
+
+  /**
+   * Register a plugin-supplied notification channel keyed by `channel.id`.
+   * Plugin channel ids are open strings (e.g. `"sms"`, `"push"`,
+   * `"whatsapp-cloud"`) and live in a separate sub-registry from the
+   * built-in `'email' | 'whatsapp'` ids; lookups in `send` consult both.
+   *
+   * Throws `ConflictError` when a channel with the same id is already
+   * registered (built-in or plugin). The plugin loader catches and surfaces
+   * this as a clean "duplicate channel" boot diagnostic.
+   */
+  registerChannel(channel: PluginNotificationChannel): void;
 }
 
 export interface NotificationServiceOptions {
@@ -110,11 +124,34 @@ export interface NotificationServiceOptions {
 export class NotificationServiceImpl implements NotificationService {
   private readonly repo: NotificationRepository;
   private readonly channels: Map<NotificationChannelId, NotificationChannel>;
+  /**
+   * Plugin-supplied channels keyed by their open-string `id`. Looked up
+   * after the built-in registry misses; this keeps plugin authors from
+   * accidentally shadowing the canonical email/whatsapp ids while still
+   * letting them introduce wholly new channel ids.
+   */
+  private readonly pluginChannels = new Map<string, PluginNotificationChannel>();
   private subscribed = false;
 
   constructor(options: NotificationServiceOptions = {}) {
     this.repo = options.repository ?? createNotificationRepository();
     this.channels = options.channels ?? buildDefaultChannels();
+  }
+
+  registerChannel(channel: PluginNotificationChannel): void {
+    if (this.channels.has(channel.id as NotificationChannelId)) {
+      throw new ConflictError(
+        "Built-in notification channel with this id already exists.",
+        { id: channel.id },
+      );
+    }
+    if (this.pluginChannels.has(channel.id)) {
+      throw new ConflictError(
+        "Plugin notification channel with this id is already registered.",
+        { id: channel.id },
+      );
+    }
+    this.pluginChannels.set(channel.id, channel);
   }
 
   async send(input: SendInput): Promise<NotificationResult> {
@@ -136,7 +173,13 @@ export class NotificationServiceImpl implements NotificationService {
     options: { rethrow: boolean },
   ): Promise<NotificationResult> {
     const channelId = input.channel ?? defaultChannelForKind(input.message.kind);
-    const channel = this.channels.get(channelId);
+    // Built-in registry first; fall through to plugin sub-registry. Both
+    // implementations satisfy the same `NotificationChannel` contract from
+    // the channel's perspective (the api `NotificationChannel` type has the
+    // same shape as `@mt-commerce/core`'s `NotificationChannel`), so the
+    // call site does not branch on which registry won.
+    const channel: NotificationChannel | PluginNotificationChannel | undefined =
+      this.channels.get(channelId) ?? this.pluginChannels.get(channelId);
     const rendered = render(input.message, input.locale);
 
     const auditId = id("notif");
