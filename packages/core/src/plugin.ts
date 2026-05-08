@@ -193,6 +193,12 @@ export interface ShippingProvider {
  *
  * Mirrors the api's `ChannelSendInput` shape so a plugin channel and a
  * built-in channel are interchangeable.
+ *
+ * `payload` and `locale` are forwarded for channels that need the
+ * structured data behind the rendered text — operator-approved template
+ * channels (WhatsApp Business, Twilio Verify) build their wire request
+ * from positional/named variables, not free-form body text. Email-shaped
+ * channels (smtp, console) MAY ignore them.
  */
 export interface NotificationChannelSendInput {
   /** Email address, phone number, push token — depends on the channel. */
@@ -206,6 +212,21 @@ export interface NotificationChannelSendInput {
   readonly subject?: string;
   readonly body: string;
   readonly htmlBody?: string;
+  /**
+   * The structured template payload that produced `body`/`htmlBody`. Set
+   * by the platform when the kind is one of the built-in templated kinds;
+   * `undefined` for ad-hoc sends. Plugin channels that drive
+   * operator-approved templates (WhatsApp, push) read from this directly
+   * rather than parsing the rendered body.
+   */
+  readonly payload?: Record<string, unknown>;
+  /**
+   * Locale the platform rendered against. Channels that resolve their own
+   * upstream template name per language (Meta WhatsApp Cloud requires a
+   * `language.code`) consult this; the rendered body is already in the
+   * matching locale.
+   */
+  readonly locale?: string;
 }
 
 /**
