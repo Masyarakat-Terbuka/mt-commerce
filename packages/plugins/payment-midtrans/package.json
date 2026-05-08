@@ -1,0 +1,29 @@
+{
+  "name": "@mt-commerce/plugin-payment-midtrans",
+  "private": false,
+  "version": "0.1.0",
+  "description": "Midtrans payment provider for mt-commerce. Snap-based integration covering QRIS, GoPay, ShopeePay, virtual accounts, credit card, and Indomaret/Alfamart cash payments.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@mt-commerce/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@mt-commerce/core": "workspace:*",
+    "@types/bun": "^1.2.0",
+    "eslint": "^9.39.4",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vitest": "^2.1.0"
+  }
+}
