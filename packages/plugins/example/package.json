@@ -1,0 +1,28 @@
+{
+  "name": "@mt-commerce/plugin-example",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Example mt-commerce plugin — registers a console notification channel and an order.placed event listener. Use as a template for new plugins.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@mt-commerce/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@mt-commerce/core": "workspace:*",
+    "@types/bun": "^1.2.0",
+    "eslint": "^9.39.4",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vitest": "^2.1.0"
+  }
+}
