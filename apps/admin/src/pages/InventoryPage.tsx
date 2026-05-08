@@ -1,36 +1,27 @@
 /**
  * Inventaris — admin inventory overview.
  *
- * Path chosen: B (mostly read-only with adjust-only mutation).
+ * The catalog API now exposes the full read surface for inventory:
+ *   - `GET /admin/v1/variants/{id}/inventory` per variant
+ *   - `GET /admin/v1/inventory/levels` paginated
+ *   - `GET /admin/v1/variants/{id}/inventory/audit` — audit history
+ * and the signed `POST .../inventory/adjust` mutation accepts a `reason`
+ * persisted to the audit log.
  *
- * The v0.1 catalog API exposes exactly one inventory route — the signed
- * `POST /admin/v1/variants/{id}/inventory/adjust` mutation (see
- * `apps/api/src/modules/catalog/routes/admin.ts:440`). There is no read
- * endpoint for inventory levels, no audit log persistence, and no `reason`
- * field accepted server-side. The audit-log integration is explicitly
- * outstanding (`apps/api/src/modules/catalog/service.ts:508` "TODO: wire to
- * audit_log when it lands") and the v0.1 checklist line "Implement inventory
- * adjustment endpoints with audit logging" stays open.
- *
- * What this page does today:
+ * What this page does:
  *   - Lists every variant by paginating `/admin/v1/products` and flattening
- *     each product's `variants[]`. The product list is the only listing
- *     surface that includes variant-level rows, so it is the right source
- *     until a dedicated `/admin/v1/inventory/levels` endpoint exists.
- *   - Shows "stock unknown" until an adjustment runs against a variant.
- *     After a successful adjust, the API's response carries the new
- *     `available`, which we cache in TanStack Query under a per-variant key
- *     so the cell updates without a fresh GET (which would 404 anyway).
- *   - Adjustment dialog accepts a signed `delta` plus an optional `reason`.
- *     The reason is collected for the operator's records but is NOT sent
- *     server-side — the API would 422 on an unknown property. When the
- *     audit-log endpoints land we'll start forwarding it (and start
- *     reading the audit history below the table).
- *
- * What this page deliberately does NOT do:
- *   - Add API-side endpoints. Out of scope for the admin task; tracked
- *     against the catalog stream of the v0.1 checklist.
- *   - Render an audit history. The data does not exist on the wire yet.
+ *     each product's `variants[]`. The product list remains the source of
+ *     truth for the row's title/SKU/price; the inventory list endpoint is
+ *     used per-row to read the live `available` count via TanStack Query
+ *     keyed by variant id.
+ *   - Each row prefetches its inventory level on mount (independent
+ *     `useQuery`); cells render stock immediately on the first paint after
+ *     the network resolves.
+ *   - The adjustment dialog accepts a signed `delta` plus an optional
+ *     `reason`. The reason is forwarded to the API and persisted to the
+ *     audit log.
+ *   - Each row has an "Audit history" affordance that opens a Sheet listing
+ *     the variant's audit_log entries (newest first), paginated.
  */
 import * as React from "react";
 import {
@@ -42,11 +33,16 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Edit02Icon,
-  InformationCircleIcon,
+  FileValidationIcon,
   WarehouseIcon,
 } from "@hugeicons/core-free-icons";
 import { format as formatMoney } from "@mt-commerce/core/money";
-import { api, ApiError, type InventoryLevel } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  type InventoryAuditEntry,
+  type InventoryLevel,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,11 +82,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { relativeTime } from "@/lib/format";
 import { useLocale, useTranslator } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n";
 
 const PAGE_SIZE = 20;
+const AUDIT_PAGE_SIZE = 20;
 const LOW_STOCK_THRESHOLD = 5;
 const INVENTORY_DELTA_LIMIT = 1_000_000;
 
@@ -122,12 +128,17 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 }
 
 /**
- * Per-variant cache key for the post-adjust `InventoryLevel` snapshot. We
- * do NOT prefetch — there is no GET endpoint to prefetch from. The cache is
- * populated on demand by the mutation's `onSuccess` callback.
+ * Per-variant cache key for the live `InventoryLevel`. The row's `useQuery`
+ * fetches against `inventory.byVariantId(...)`; the adjust mutation's
+ * `onSuccess` writes the response back here so the cell updates without
+ * a separate refetch.
  */
 function inventoryQueryKey(variantId: string) {
   return ["admin", "inventory", "level", variantId] as const;
+}
+
+function auditQueryKey(variantId: string, page: number) {
+  return ["admin", "inventory", "audit", variantId, page] as const;
 }
 
 export function InventoryPage() {
@@ -200,12 +211,23 @@ export function InventoryPage() {
   const [adjustOpenForVariantId, setAdjustOpenForVariantId] = React.useState<
     string | null
   >(null);
+  const [auditOpenForVariantId, setAuditOpenForVariantId] = React.useState<
+    string | null
+  >(null);
+
   const adjustingRow = React.useMemo(
     () =>
       adjustOpenForVariantId
         ? rows.find((row) => row.variantId === adjustOpenForVariantId) ?? null
         : null,
     [adjustOpenForVariantId, rows],
+  );
+  const auditingRow = React.useMemo(
+    () =>
+      auditOpenForVariantId
+        ? rows.find((row) => row.variantId === auditOpenForVariantId) ?? null
+        : null,
+    [auditOpenForVariantId, rows],
   );
 
   return (
@@ -220,11 +242,6 @@ export function InventoryPage() {
           </p>
         </div>
       </div>
-
-      <Alert>
-        <HugeiconsIcon icon={InformationCircleIcon} data-icon />
-        <AlertDescription>{t("inventory.no_endpoint_notice")}</AlertDescription>
-      </Alert>
 
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -271,7 +288,7 @@ export function InventoryPage() {
                 <TableHead className="w-40">
                   {t("inventory.columns.updated")}
                 </TableHead>
-                <TableHead className="w-32 text-right">
+                <TableHead className="w-48 text-right">
                   <span className="sr-only">
                     {t("inventory.columns.actions")}
                   </span>
@@ -298,7 +315,7 @@ export function InventoryPage() {
                       <Skeleton className="h-3.5 w-20" />
                     </TableCell>
                     <TableCell>
-                      <Skeleton className="ml-auto h-7 w-24" />
+                      <Skeleton className="ml-auto h-7 w-32" />
                     </TableCell>
                   </TableRow>
                 ))
@@ -309,6 +326,9 @@ export function InventoryPage() {
                     row={row}
                     locale={locale}
                     onAdjust={() => setAdjustOpenForVariantId(row.variantId)}
+                    onShowAudit={() =>
+                      setAuditOpenForVariantId(row.variantId)
+                    }
                   />
                 ))
               ) : (
@@ -381,14 +401,26 @@ export function InventoryPage() {
           if (!next) setAdjustOpenForVariantId(null);
         }}
         onAdjusted={(level) => {
-          // Cache the post-adjust snapshot for the row so the table cell
-          // updates immediately. There is no GET endpoint to invalidate
-          // against; the mutation response is the canonical state.
+          // Update the live cache so the row repaints immediately. Also
+          // invalidate the audit history for this variant so the Sheet (if
+          // open) shows the new entry on next render.
           queryClient.setQueryData<InventoryLevel>(
             inventoryQueryKey(level.variantId),
             level,
           );
+          void queryClient.invalidateQueries({
+            queryKey: ["admin", "inventory", "audit", level.variantId],
+          });
         }}
+      />
+
+      <AuditSheet
+        row={auditingRow}
+        open={auditingRow !== null}
+        onOpenChange={(next) => {
+          if (!next) setAuditOpenForVariantId(null);
+        }}
+        locale={locale}
       />
     </div>
   );
@@ -396,31 +428,36 @@ export function InventoryPage() {
 
 interface InventoryRowProps {
   row: VariantRow;
-  locale: "id" | "en";
+  locale: Locale;
   onAdjust: () => void;
+  onShowAudit: () => void;
 }
 
 /**
  * One table row. Splitting this out keeps `useQuery` per row scoped: each
- * row pulls its own cached `InventoryLevel` and re-renders independently
- * when the cache for its variantId is updated.
+ * row pulls its own live `InventoryLevel` and re-renders independently.
  */
-function InventoryRow({ row, locale, onAdjust }: InventoryRowProps) {
+function InventoryRow({
+  row,
+  locale,
+  onAdjust,
+  onShowAudit,
+}: InventoryRowProps) {
   const t = useTranslator();
-  // The query is *cache-only*. We never fetch — there is no GET endpoint —
-  // so `enabled: false` keeps the query in the "idle" state. The cache is
-  // populated by the adjust mutation's onSuccess. `useQuery` is the right
-  // primitive because we want the row to re-render when the cache changes.
-  const { data: level } = useQuery<InventoryLevel | undefined>({
+  const { data: level, isPending: isLevelPending } = useQuery<
+    InventoryLevel | null
+  >({
     queryKey: inventoryQueryKey(row.variantId),
-    queryFn: () => Promise.resolve(undefined),
-    enabled: false,
-    staleTime: Infinity,
+    queryFn: () => api.admin.inventory.byVariantId(row.variantId),
+    // The variant-level row state is unlikely to change between paints
+    // unless an adjust runs locally — the mutation's onSuccess writes to
+    // this same key, so a stale window is fine.
+    staleTime: 30_000,
   });
 
-  const stockKnown = level !== undefined;
+  const stockKnown = level !== undefined && level !== null;
   const isLowStock =
-    stockKnown && level !== undefined && level.available <= LOW_STOCK_THRESHOLD;
+    stockKnown && level !== null && level.available <= LOW_STOCK_THRESHOLD;
 
   return (
     <TableRow>
@@ -456,7 +493,9 @@ function InventoryRow({ row, locale, onAdjust }: InventoryRowProps) {
       </TableCell>
       <TableCell className="font-mono text-xs">{row.sku}</TableCell>
       <TableCell>
-        {stockKnown ? (
+        {isLevelPending ? (
+          <Skeleton className="h-4 w-12" />
+        ) : stockKnown ? (
           <div className="flex items-center gap-2">
             <span
               className="font-mono tabular-nums"
@@ -485,15 +524,26 @@ function InventoryRow({ row, locale, onAdjust }: InventoryRowProps) {
           : relativeTime(row.updatedAt, locale)}
       </TableCell>
       <TableCell className="text-right">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onAdjust}
-          aria-label={`${t("inventory.action.adjust")} — ${row.sku}`}
-        >
-          <HugeiconsIcon icon={Edit02Icon} data-icon />
-          <span>{t("inventory.action.adjust")}</span>
-        </Button>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShowAudit}
+            aria-label={`${t("inventory.action.audit")} — ${row.sku}`}
+          >
+            <HugeiconsIcon icon={FileValidationIcon} data-icon />
+            <span>{t("inventory.action.audit")}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onAdjust}
+            aria-label={`${t("inventory.action.adjust")} — ${row.sku}`}
+          >
+            <HugeiconsIcon icon={Edit02Icon} data-icon />
+            <span>{t("inventory.action.adjust")}</span>
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -511,10 +561,8 @@ interface AdjustDialogProps {
  * the destructive nature of negative deltas explicit — the action requires a
  * deliberate two-click flow per the a11y guidance for stock-changing ops.
  *
- * The `reason` field is captured for operator recordkeeping but is NOT sent
- * to the API: the v0.1 schema accepts only `{ delta }` and would 422 on an
- * unknown property. Once the audit-log endpoints land server-side, this is
- * the field that gets forwarded.
+ * The `reason` field is now persisted server-side: the API stores it on the
+ * audit_log row alongside the actor and the before/after counts.
  */
 function AdjustDialog({
   row,
@@ -530,9 +578,9 @@ function AdjustDialog({
   );
 
   const adjustMutation = useMutation({
-    mutationFn: async (delta: number) => {
+    mutationFn: async (input: { delta: number; reason?: string }) => {
       if (!row) throw new Error("No row selected.");
-      return api.admin.inventory.adjust(row.variantId, { delta });
+      return api.admin.inventory.adjust(row.variantId, input);
     },
     onSuccess: (level) => {
       onAdjusted(level);
@@ -586,12 +634,16 @@ function AdjustDialog({
       setValidationError(t("inventory.adjust.error.invalid"));
       return;
     }
-    adjustMutation.mutate(delta);
+    const trimmedReason = reason.trim();
+    adjustMutation.mutate({
+      delta,
+      ...(trimmedReason.length > 0 ? { reason: trimmedReason } : {}),
+    });
   }
 
   // Map server errors to user-facing messages. `conflict` is the "would go
-  // negative" path (see service.ts:551); validation_error covers the other
-  // rejection cases. Anything else surfaces the generic server-error string.
+  // negative" path; validation_error covers the other rejection cases.
+  // Anything else surfaces the generic server-error string.
   const serverError = adjustMutation.error;
   const serverErrorMessage = React.useMemo(() => {
     if (!serverError) return null;
@@ -668,6 +720,7 @@ function AdjustDialog({
               placeholder={t("inventory.adjust.reason_placeholder")}
               aria-describedby="inventory-reason-help"
               disabled={isSaving}
+              maxLength={500}
             />
             <p
               id="inventory-reason-help"
@@ -708,5 +761,210 @@ function AdjustDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+interface AuditSheetProps {
+  row: VariantRow | null;
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  locale: Locale;
+}
+
+/**
+ * Side sheet showing this variant's audit history. Pagination is local to
+ * the sheet — opening/closing resets the page, opening for a different
+ * variant resets the page. Each page is its own query key so paging back
+ * and forth uses the cache.
+ */
+function AuditSheet({ row, open, onOpenChange, locale }: AuditSheetProps) {
+  const t = useTranslator();
+  const [auditPage, setAuditPage] = React.useState(1);
+
+  // Reset paging on open / variant change. Same render-time pattern as the
+  // adjust dialog — no effect, observed in the same paint.
+  const variantId = row?.variantId ?? null;
+  const triggerKey = open ? `open:${variantId ?? "_"}` : "closed";
+  const [lastTriggerKey, setLastTriggerKey] = React.useState(triggerKey);
+  if (lastTriggerKey !== triggerKey) {
+    setLastTriggerKey(triggerKey);
+    if (open) setAuditPage(1);
+  }
+
+  const { data, isPending, isError, refetch } = useQuery({
+    queryKey: variantId ? auditQueryKey(variantId, auditPage) : ["__noop__"],
+    queryFn: () => {
+      if (!variantId) {
+        return Promise.resolve({
+          data: [] as InventoryAuditEntry[],
+          total: 0,
+          page: auditPage,
+          pageSize: AUDIT_PAGE_SIZE,
+        });
+      }
+      return api.admin.inventory.auditByVariantId(variantId, {
+        page: auditPage,
+        pageSize: AUDIT_PAGE_SIZE,
+      });
+    },
+    enabled: open && variantId !== null,
+    placeholderData: keepPreviousData,
+  });
+
+  const totalPages = data
+    ? Math.max(1, Math.ceil(data.total / data.pageSize))
+    : 1;
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="flex w-full flex-col gap-4 sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>{t("inventory.audit.title")}</SheetTitle>
+          <SheetDescription>
+            {t("inventory.audit.subhead")}
+            {row ? (
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {row.productTitle}
+                {row.variantTitle ? ` — ${row.variantTitle}` : ""} · {row.sku}
+              </span>
+            ) : null}
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-auto px-4">
+          {isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>{t("inventory.audit.error.title")}</AlertTitle>
+              <AlertDescription className="flex items-center justify-between gap-2">
+                <span>{t("inventory.audit.error.body")}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void refetch();
+                  }}
+                >
+                  {t("inventory.audit.action.retry")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : isPending && !data ? (
+            <div className="flex flex-col gap-3 py-2">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <Skeleton key={idx} className="h-16 w-full" />
+              ))}
+            </div>
+          ) : data && data.data.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>{t("inventory.audit.empty.title")}</EmptyTitle>
+                <EmptyDescription>
+                  {t("inventory.audit.empty.body")}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <ul className="flex flex-col gap-3 py-2">
+              {data?.data.map((entry) => (
+                <AuditEntryItem
+                  key={entry.id}
+                  entry={entry}
+                  locale={locale}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {data && data.data.length > 0 && totalPages > 1 ? (
+          <Pagination className="px-4">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  aria-disabled={auditPage <= 1}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (auditPage > 1) setAuditPage(auditPage - 1);
+                  }}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationLink href="#" isActive>
+                  {auditPage}
+                </PaginationLink>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  aria-disabled={auditPage >= totalPages}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (auditPage < totalPages) setAuditPage(auditPage + 1);
+                  }}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        ) : null}
+
+        <SheetFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t("inventory.audit.close")}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+interface AuditEntryItemProps {
+  entry: InventoryAuditEntry;
+  locale: Locale;
+}
+
+function AuditEntryItem({ entry, locale }: AuditEntryItemProps) {
+  const t = useTranslator();
+  const actorLabel =
+    entry.actorKind === "system"
+      ? t("inventory.audit.actor.system")
+      : entry.actorKind === "staff"
+        ? t("inventory.audit.actor.staff")
+        : t("inventory.audit.actor.customer");
+
+  const summary = React.useMemo(() => {
+    if (
+      entry.deltaApplied === null ||
+      entry.before === null ||
+      entry.after === null
+    ) {
+      // Unrecognized payload (forward-compat). Render the raw action only.
+      return entry.action;
+    }
+    const deltaSign = entry.deltaApplied > 0 ? "+" : "";
+    return t("inventory.audit.delta_summary")
+      .replace("{delta}", `${deltaSign}${entry.deltaApplied}`)
+      .replace("{before}", String(entry.before))
+      .replace("{after}", String(entry.after));
+  }, [entry, t]);
+
+  return (
+    <li className="rounded-md border p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium">{summary}</span>
+          <span className="text-xs text-muted-foreground">
+            {actorLabel}
+            {entry.actorId ? ` · ${entry.actorId}` : ""} ·{" "}
+            {relativeTime(entry.createdAt, locale)}
+          </span>
+        </div>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {entry.reason ?? (
+          <span className="italic">{t("inventory.audit.no_reason")}</span>
+        )}
+      </p>
+    </li>
   );
 }
