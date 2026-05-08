@@ -1,23 +1,37 @@
 ---
 /**
- * Footer — sectioned link groups, calm typography.
+ * Footer — sitemap-style, calm typography, with a newsletter capture column.
  *
- * The previous footer was a single inline middot-separated row. With the
- * static content pages landing (help/about/legal), we now have enough
- * destinations that a sectioned layout reads more clearly than another
- * inline pile. The original inline row pattern is preserved underneath
- * the section grid as the "secondary" line — the sections handle
- * navigation, the inline row keeps the calm bottom edge.
+ * Five columns on desktop (Shop / Help / About / Legal / Newsletter), three
+ * on tablet with the newsletter spanning the full row, and stacked
+ * collapsible <details> sections on mobile. The collapsibles are the Muji
+ * mobile pattern — five columns of links one-on-top-of-another would be a
+ * wall of text on a phone, but a sitemap also doesn't want to disappear
+ * behind a single "menu" toggle.
  *
- * Sections:
- *   - Help (Pengiriman / Pengembalian / Pembayaran / FAQ)
- *   - About (Tentang)
- *   - Legal (Privasi / Syarat)
+ * The Shop column lists `listCategories(locale)` (capped at six entries),
+ * so the footer becomes a real navigational surface that mirrors what the
+ * site actually sells. We fetch at build time alongside other Astro data —
+ * the API helper returns `[]` on failure, in which case the column quietly
+ * collapses to just "All products". No empty heading, no error text.
  *
- * No social icons, no newsletter, no "back to top". Same restraint as
- * before, just more navigational reach.
+ * Newsletter signup is the only React island here. It is a v0.1 STUB
+ * (no real endpoint yet) — see `islands/NewsletterSignup.tsx` for the
+ * full caveat.
+ *
+ * Below the columns sits the calm bottom edge: brand wordmark, copyright,
+ * locale toggle, and a small "Made in Indonesia" line. No emoji
+ * (project rule), no fabricated social handles — just the GitHub repo link
+ * which lives up in the About column where it belongs.
  */
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
+import { listCategories } from "@/lib/api";
+import NewsletterSignup from "@/islands/NewsletterSignup.tsx";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -30,52 +44,112 @@ const stripped = currentPath.replace(/^\/(en|id)(?=\/|$)/, "") || "/";
 const idHref = localePath("id", stripped);
 const enHref = localePath("en", stripped);
 
-// Sectioned link model. Defining the data once keeps the JSX flat and
-// makes adding a future section a one-line change.
-const sections = [
-  {
-    title: t("footer.col.help.title"),
-    links: [
-      { label: t("help.topics.shipping"), href: localePath(locale, "/help/shipping") },
-      { label: t("help.topics.returns"), href: localePath(locale, "/help/returns") },
-      { label: t("help.topics.payment"), href: localePath(locale, "/help/payment") },
-      { label: t("help.topics.faq"), href: localePath(locale, "/help/faq") },
-    ],
-  },
-  {
-    title: t("footer.col.about.title"),
-    links: [
-      { label: t("nav.about"), href: localePath(locale, "/about") },
-      { label: t("footer.col.community.github"), href: "https://github.com/masyarakat-terbuka/mt-commerce" },
-    ],
-  },
-  {
-    title: t("footer.col.legal.title"),
-    links: [
-      { label: t("nav.privacy"), href: localePath(locale, "/legal/privacy") },
-      { label: t("nav.terms"), href: localePath(locale, "/legal/terms") },
-    ],
-  },
-];
+// Build-time fetch. The helper returns `[]` on any failure (offline build,
+// API unreachable), which we surface as a quiet "All products"-only Shop
+// column rather than a broken section.
+const allCategories = await listCategories(locale);
+const categoryLinks = allCategories.slice(0, 6).map((c) => ({
+  label: c.name[locale],
+  href: localePath(locale, `/products?category=${encodeURIComponent(c.slug)}`),
+}));
+
+// Sitemap data. Defining the columns once keeps the desktop grid and the
+// mobile <details> stack rendering from a single source.
+const productsHref = localePath(locale, "/products");
+const shopColumn = {
+  heading: t("footer.shop.heading"),
+  links: [
+    { label: t("footer.shop.all_products"), href: productsHref },
+    ...categoryLinks,
+  ],
+};
+const helpColumn = {
+  heading: t("footer.help.heading"),
+  links: [
+    {
+      label: t("footer.help.shipping"),
+      href: localePath(locale, "/help/shipping"),
+    },
+    {
+      label: t("footer.help.returns"),
+      href: localePath(locale, "/help/returns"),
+    },
+    {
+      label: t("footer.help.payment"),
+      href: localePath(locale, "/help/payment"),
+    },
+    { label: t("footer.help.faq"), href: localePath(locale, "/help/faq") },
+  ],
+};
+const aboutColumn = {
+  heading: t("footer.about.heading"),
+  links: [
+    { label: t("footer.about.about"), href: localePath(locale, "/about") },
+    // /contact does not exist yet — point at /about anchor as a calm
+    // placeholder. Updates to a real /contact page in a follow-up.
+    { label: t("footer.about.contact"), href: localePath(locale, "/about") },
+    {
+      label: t("footer.col.community.github"),
+      href: "https://github.com/masyarakat-terbuka/mt-commerce",
+    },
+  ],
+};
+const legalColumn = {
+  heading: t("footer.legal.heading"),
+  links: [
+    {
+      label: t("footer.legal.privacy"),
+      href: localePath(locale, "/legal/privacy"),
+    },
+    {
+      label: t("footer.legal.terms"),
+      href: localePath(locale, "/legal/terms"),
+    },
+  ],
+};
+
+// Used by the desktop grid AND the mobile collapsibles. Keeps the two
+// renderings in lockstep — adding a column means one entry here.
+const linkColumns = [shopColumn, helpColumn, aboutColumn, legalColumn];
+
+// Translation strings handed to the React island. Pre-resolving on the
+// server keeps the island locale-agnostic and avoids shipping the
+// dictionary client-side.
+const newsletterLabels = {
+  heading: t("footer.newsletter.heading"),
+  description: t("footer.newsletter.description"),
+  emailLabel: t("footer.newsletter.email_label"),
+  emailPlaceholder: t("footer.newsletter.email_placeholder"),
+  submit: t("footer.newsletter.submit"),
+  success: t("footer.newsletter.success"),
+  errorInvalid: t("footer.newsletter.error_invalid"),
+};
+
+// Copyright line — t() returns a string template with `{year}`, replaced
+// at render time so the year stays current without re-translating.
+const copyrightLine = t("footer.copyright").replace("{year}", String(year));
 ---
 
-<footer class="mt-32 border-t border-line bg-cream">
-  <div class="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16">
-    {/*
-      Sectioned grid — three columns on desktop, stacks on mobile. Section
-      titles use the overline style so they read as quiet labels rather
-      than competing headings.
-    */}
-    <div class="grid grid-cols-1 gap-10 md:grid-cols-3 md:gap-12">
+<footer class="border-line bg-cream mt-32 border-t">
+  <div class="mx-auto max-w-[1280px] px-5 py-16 md:px-8 md:py-24">
+    {
+      /*
+      Desktop / tablet grid. 5 columns at md+ via the explicit `md:grid-cols-5`,
+      with the newsletter taking 2 columns at the medium breakpoint where
+      we have 3 link columns + a wider newsletter cell so the email input
+      doesn't crush. On large screens the newsletter takes a single column.
+    */
+    }
+    <div class="hidden gap-x-12 gap-y-12 md:grid md:grid-cols-3 lg:grid-cols-5">
       {
-        sections.map((section) => (
-          <div>
-            <h2 class="t-overline text-muted">{section.title}</h2>
-            <ul class="mt-4 flex flex-col gap-2 t-body">
-              {section.links.map((link) => (
+        linkColumns.map((column) => (
+          <nav aria-label={column.heading}>
+            <h2 class="t-overline text-muted">{column.heading}</h2>
+            <ul class="t-body mt-5 flex flex-col gap-3">
+              {column.links.map((link) => (
                 <li>
                   <a
-                    class="text-fg transition-colors duration-150 hover:text-accent"
+                    class="text-fg hover:text-accent transition-colors duration-150"
                     href={link.href}
                   >
                     {link.label}
@@ -83,40 +157,105 @@ const sections = [
                 </li>
               ))}
             </ul>
-          </div>
+          </nav>
         ))
       }
+      {
+        /*
+        Newsletter cell. Spans the full row at the md breakpoint (3 columns
+        wide so it sits below the link columns), single column at lg+.
+      */
+      }
+      <div class="md:col-span-3 lg:col-span-1">
+        <NewsletterSignup client:idle labels={newsletterLabels} />
+      </div>
     </div>
 
-    {/* Copyright + locale toggle. The grid above does the navigational work;
-        this row is the page's quiet bottom edge. Pulled apart from the grid
-        with a thin border-line so the two zones read as separate. */}
+    {
+      /*
+      Mobile: collapsible <details> per column. <summary> uses the same
+      t-overline label as the desktop heading so the visual rhythm matches.
+      A thin chevron via ::after avoids shipping an icon for one button.
+      Newsletter is NOT collapsed — it's the action we want a phone visitor
+      to actually do, so it stays expanded below the collapsibles.
+    */
+    }
+    <div class="flex flex-col md:hidden">
+      {
+        linkColumns.map((column) => (
+          <details class="border-line group border-b">
+            <summary class="t-overline text-muted flex cursor-pointer list-none items-center justify-between py-4 [&::-webkit-details-marker]:hidden">
+              {column.heading}
+              <span
+                aria-hidden="true"
+                class="text-faint transition-transform duration-150 group-open:rotate-45"
+              >
+                +
+              </span>
+            </summary>
+            <ul class="t-body flex flex-col gap-3 pt-1 pb-5">
+              {column.links.map((link) => (
+                <li>
+                  <a
+                    class="text-fg hover:text-accent transition-colors duration-150"
+                    href={link.href}
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ))
+      }
+      <div class="pt-8">
+        <NewsletterSignup client:idle labels={newsletterLabels} />
+      </div>
+    </div>
+
+    {
+      /*
+      Bottom edge: wordmark + copyright on the left, region + locale on the
+      right. Pulled apart from the grid with a thin border-line so the two
+      zones read as separate.
+    */
+    }
     <div
-      class="mt-12 flex flex-col items-start gap-3 border-t border-line pt-8 t-caption md:flex-row md:items-center md:justify-between"
+      class="border-line t-caption mt-16 flex flex-col items-start gap-4 border-t pt-8 md:flex-row md:items-center md:justify-between md:gap-6"
     >
-      <p class="text-faint">© {year} {t("footer.copyright")}</p>
-      <div class="flex items-center gap-1">
-        <a
-          href={idHref}
-          aria-current={locale === "id" ? "true" : undefined}
-          class:list={[
-            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
-            locale === "id" ? "text-fg" : "text-faint hover:text-fg",
-          ]}
-        >
-          id
-        </a>
-        <span class="text-faint" aria-hidden="true">·</span>
-        <a
-          href={enHref}
-          aria-current={locale === "en" ? "true" : undefined}
-          class:list={[
-            "px-1 lowercase tracking-[0.05em] transition-colors duration-150",
-            locale === "en" ? "text-fg" : "text-faint hover:text-fg",
-          ]}
-        >
-          en
-        </a>
+      <div
+        class="text-faint flex flex-col items-start gap-1 md:flex-row md:items-center md:gap-3"
+      >
+        <span class="text-fg tracking-tight lowercase">mt-commerce</span>
+        <span class="hidden md:inline" aria-hidden="true">·</span>
+        <span>{copyrightLine}</span>
+      </div>
+      <div class="text-faint flex items-center gap-4">
+        <span>{t("footer.region")}</span>
+        <span aria-hidden="true">·</span>
+        <div class="flex items-center gap-1">
+          <a
+            href={idHref}
+            aria-current={locale === "id" ? "true" : undefined}
+            class:list={[
+              "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
+              locale === "id" ? "text-fg" : "text-faint hover:text-fg",
+            ]}
+          >
+            id
+          </a>
+          <span class="text-faint" aria-hidden="true">·</span>
+          <a
+            href={enHref}
+            aria-current={locale === "en" ? "true" : undefined}
+            class:list={[
+              "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
+              locale === "en" ? "text-fg" : "text-faint hover:text-fg",
+            ]}
+          >
+            en
+          </a>
+        </div>
       </div>
     </div>
   </div>

@@ -273,7 +273,8 @@
   "account.profile.submitting": "Saving…",
   "account.profile.saved": "Changes saved.",
 
-  "footer.copyright": "mt-commerce. Open source.",
+  "footer.copyright": "© {year} mt-commerce. MIT license.",
+  "footer.region": "Made in Indonesia",
   "footer.about": "About",
   "footer.contact": "Contact",
   "footer.col.about.title": "About",
@@ -291,5 +292,26 @@
   "footer.col.legal.title": "Legal",
   "footer.col.legal.terms": "Terms of service",
   "footer.col.legal.privacy": "Privacy policy",
-  "footer.col.legal.license": "License"
+  "footer.col.legal.license": "License",
+
+  "footer.shop.heading": "Shop",
+  "footer.shop.all_products": "All products",
+  "footer.help.heading": "Help",
+  "footer.help.shipping": "Shipping",
+  "footer.help.returns": "Returns",
+  "footer.help.payment": "Payment",
+  "footer.help.faq": "FAQ",
+  "footer.about.heading": "About",
+  "footer.about.about": "About us",
+  "footer.about.contact": "Contact us",
+  "footer.legal.heading": "Legal",
+  "footer.legal.privacy": "Privacy policy",
+  "footer.legal.terms": "Terms of service",
+  "footer.newsletter.heading": "Newsletter",
+  "footer.newsletter.description": "Occasional notes on new arrivals and the makers behind them. No spam, unsubscribe anytime.",
+  "footer.newsletter.email_label": "Email address",
+  "footer.newsletter.email_placeholder": "you@email.com",
+  "footer.newsletter.submit": "Subscribe",
+  "footer.newsletter.success": "Thanks, you're on the list.",
+  "footer.newsletter.error_invalid": "That doesn't look like a valid email."
 }
