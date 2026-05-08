@@ -1,0 +1,156 @@
+---
+/**
+ * Collection landing — `/collections/<slug>`.
+ *
+ * Static-generated from the `COLLECTIONS` registry: one page per slug.
+ * The page is a calm typographic header (no photo for v0.1) followed
+ * by a `ProductGrid` island seeded with the collection's filter query
+ * via `listProducts`. Empty queries DO NOT 404 — the page renders the
+ * header plus a quiet empty-state line, since an empty collection is
+ * a content state, not a missing route.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ProductGrid from "@/islands/ProductGrid.tsx";
+import { listProducts, resolveApiUrl, toProductCardListing } from "@/lib/api";
+import { COLLECTIONS, getCollection, pageSizeFor } from "@/lib/collections";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
+
+/**
+ * Enumerate one static page per registry entry. New collections appear
+ * at build time without any further wiring.
+ */
+export async function getStaticPaths() {
+  return COLLECTIONS.map((c) => ({ params: { slug: c.slug } }));
+}
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+const intlLocale = locale === "id" ? "id-ID" : "en-US";
+
+const { slug } = Astro.params as { slug: string };
+const def = getCollection(slug);
+
+// `getStaticPaths` already filters slugs to the registry, so `def` is
+// always defined here. The defensive guard keeps TypeScript happy and
+// would surface as a 404 from Astro's static handler if a stale URL
+// ever pointed here.
+if (!def) {
+  return Astro.redirect(localePath(locale, "/collections"), 404);
+}
+
+const collectionTitle = t(def.titleKey);
+const collectionTagline = t(def.taglineKey);
+const pageTitle = `${collectionTitle} — mt-commerce`;
+const pageSize = pageSizeFor(def);
+
+const apiUrl = resolveApiUrl();
+const detailHrefBase = localePath(locale, "/products");
+
+// Build-time fetch — drives the SEO listing AND seeds the React grid
+// so first paint shows photographs, not skeletons. On API failure the
+// helper returns an empty result and the page renders the empty state
+// (instead of a 404).
+const result = await listProducts(locale, {
+  ...def.query,
+  page: 1,
+  pageSize,
+});
+const seoCards = toProductCardListing(result, locale);
+const initialGridData = seoCards.items.length > 0 ? seoCards : undefined;
+const isEmpty = result.items.length === 0;
+
+const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
+const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
+const collectionsUrl = new URL(
+  localePath(locale, "/collections"),
+  siteUrl,
+).toString();
+const collectionUrl = new URL(
+  localePath(locale, `/collections/${slug}`),
+  siteUrl,
+).toString();
+
+const jsonLd: object[] = [
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: t("breadcrumb.home"),
+        item: homeUrl,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: t("collections.breadcrumb"),
+        item: collectionsUrl,
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: collectionTitle,
+        item: collectionUrl,
+      },
+    ],
+  },
+];
+---
+
+<BaseLayout title={pageTitle} description={collectionTagline} jsonLd={jsonLd}>
+  <div
+    class="mx-auto max-w-[1280px] px-5 pt-16 pb-24 md:px-8 md:pt-20 md:pb-32"
+  >
+    {/* Editorial header — display title + generous tagline. No photo. */}
+    <header class="mb-12 md:mb-16">
+      <h1 class="t-display text-fg">{collectionTitle}</h1>
+      <p class="t-body text-muted mt-4 max-w-[56ch]">{collectionTagline}</p>
+    </header>
+
+    {/* Hairline divider — same rhythm as the home page strips. */}
+    <div class="border-line mb-10 border-t md:mb-14"></div>
+
+    {
+      isEmpty ? (
+        <div class="py-12">
+          <p class="t-body text-fg">{t("collections.empty.title")}</p>
+          <p class="t-body text-muted mt-2 max-w-[56ch]">
+            {t("collections.empty.body")}
+          </p>
+        </div>
+      ) : (
+        <>
+          <h2 class="sr-only">{collectionTitle}</h2>
+          <ProductGrid
+            client:load
+            apiUrl={apiUrl}
+            locale={intlLocale}
+            apiLocale={locale}
+            detailHrefBase={detailHrefBase}
+            emptyLabel={t("collections.empty.title")}
+            errorLabel={t("products.list.error")}
+            skeletonLabel={t("products.list.skeleton_aria")}
+            photoComingSoonLabel={t("products.card.photo_coming_soon")}
+            query={{
+              ...(def.query.category
+                ? { categorySlug: def.query.category }
+                : {}),
+              ...(def.query.search ? { search: def.query.search } : {}),
+              ...(def.query.sort ? { sort: def.query.sort } : {}),
+              page: 1,
+              pageSize,
+            }}
+            skeletonCount={Math.min(pageSize, 12)}
+            initialData={initialGridData}
+          />
+        </>
+      )
+    }
+  </div>
+</BaseLayout>

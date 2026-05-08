@@ -1,0 +1,105 @@
+---
+/**
+ * Collections index — `/collections`.
+ *
+ * A typographic landing that lists every entry in `COLLECTIONS`. No
+ * photography for v0.1 (PRODUCT.md rules out an editorial CMS); each
+ * row is title + tagline + "view collection" link, separated by
+ * hairline dividers in the same rhythm as the rest of the storefront.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { COLLECTIONS } from "@/lib/collections";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
+
+const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
+
+const indexTitle = t("collections.index.title");
+const indexTagline = t("collections.index.tagline");
+const seeAllLabel = t("collections.index.see_all");
+const pageTitle = `${indexTitle} — mt-commerce`;
+
+// Pre-resolve title/tagline/href for each entry on the server. Doing
+// this once here keeps the template clean and avoids re-running
+// `t(...)` and `localePath(...)` per render pass.
+const entries = COLLECTIONS.map((c) => ({
+  slug: c.slug,
+  title: t(c.titleKey),
+  tagline: t(c.taglineKey),
+  href: localePath(locale, `/collections/${c.slug}`),
+}));
+
+// `BreadcrumbList` JSON-LD: Beranda → Koleksi.
+const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
+const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
+const collectionsUrl = new URL(
+  localePath(locale, "/collections"),
+  siteUrl,
+).toString();
+
+const jsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: t("breadcrumb.home"),
+        item: homeUrl,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: indexTitle,
+        item: collectionsUrl,
+      },
+    ],
+  },
+];
+---
+
+<BaseLayout title={pageTitle} description={indexTagline} jsonLd={jsonLd}>
+  <div
+    class="mx-auto max-w-[1280px] px-5 pt-16 pb-24 md:px-8 md:pt-20 md:pb-32"
+  >
+    {/* Editorial header — display title + body tagline, generous gutter. */}
+    <header class="mb-12 md:mb-16">
+      <h1 class="t-display text-fg">{indexTitle}</h1>
+      <p class="t-body text-muted mt-4 max-w-[44ch]">{indexTagline}</p>
+    </header>
+
+    {
+      /* Hairline divider opens the list, in the same rhythm as the home page. */
+    }
+    <ul class="border-line border-t">
+      {
+        entries.map((entry) => (
+          <li class="border-line border-b">
+            <a
+              href={entry.href}
+              class="group flex flex-col gap-3 py-8 md:flex-row md:items-baseline md:justify-between md:gap-12 md:py-12"
+            >
+              <div class="md:flex-1">
+                <h2 class="t-h1 text-fg group-hover:text-accent transition-colors duration-150">
+                  {entry.title}
+                </h2>
+                <p class="t-body text-muted mt-2 max-w-[56ch]">
+                  {entry.tagline}
+                </p>
+              </div>
+              <span class="t-body text-muted group-hover:text-accent transition-colors duration-150 md:shrink-0">
+                {seeAllLabel}
+              </span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</BaseLayout>
