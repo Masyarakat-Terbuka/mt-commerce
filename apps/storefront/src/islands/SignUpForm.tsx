@@ -197,14 +197,9 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      noValidate
-      aria-busy={busy}
-      className="space-y-5"
-    >
+    <form onSubmit={onSubmit} noValidate aria-busy={busy} className="space-y-5">
       <div className="space-y-2">
-        <label htmlFor={nameId} className="block t-caption text-muted">
+        <label htmlFor={nameId} className="t-caption text-muted block">
           {labels.name}
         </label>
         <input
@@ -218,17 +213,21 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
           onChange={(e) => setName(e.target.value)}
           aria-invalid={errors.name !== null}
           aria-describedby={errors.name ? `${nameId}-error` : undefined}
-          className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+          className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
         />
         {errors.name && (
-          <p id={`${nameId}-error`} role="alert" className="t-caption text-danger">
+          <p
+            id={`${nameId}-error`}
+            role="alert"
+            className="t-caption text-danger"
+          >
             {errors.name}
           </p>
         )}
       </div>
 
       <div className="space-y-2">
-        <label htmlFor={emailId} className="block t-caption text-muted">
+        <label htmlFor={emailId} className="t-caption text-muted block">
           {labels.email}
         </label>
         <input
@@ -237,22 +236,32 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
           name="email"
           type="email"
           autoComplete="email"
+          // iOS auto-capitalises the first letter of plain inputs, which
+          // would then fail the email regex check. Explicit `none` plus
+          // `spellCheck=false` matches WIG ("disable spellcheck on
+          // emails, codes, usernames").
+          autoCapitalize="none"
+          spellCheck={false}
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           aria-invalid={errors.email !== null}
           aria-describedby={errors.email ? `${emailId}-error` : undefined}
-          className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+          className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
         />
         {errors.email && (
-          <p id={`${emailId}-error`} role="alert" className="t-caption text-danger">
+          <p
+            id={`${emailId}-error`}
+            role="alert"
+            className="t-caption text-danger"
+          >
             {errors.email}
           </p>
         )}
       </div>
 
       <div className="space-y-2">
-        <label htmlFor={phoneId} className="block t-caption text-muted">
+        <label htmlFor={phoneId} className="t-caption text-muted block">
           {labels.phone}
         </label>
         <input
@@ -268,10 +277,14 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
           aria-describedby={
             errors.phone ? `${phoneId}-error` : `${phoneId}-hint`
           }
-          className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+          className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
         />
         {errors.phone ? (
-          <p id={`${phoneId}-error`} role="alert" className="t-caption text-danger">
+          <p
+            id={`${phoneId}-error`}
+            role="alert"
+            className="t-caption text-danger"
+          >
             {errors.phone}
           </p>
         ) : (
@@ -282,7 +295,7 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
       </div>
 
       <div className="space-y-2">
-        <label htmlFor={passwordId} className="block t-caption text-muted">
+        <label htmlFor={passwordId} className="t-caption text-muted block">
           {labels.password}
         </label>
         <input
@@ -299,7 +312,7 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
           aria-describedby={
             errors.password ? `${passwordId}-error` : `${passwordId}-hint`
           }
-          className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+          className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
         />
         {errors.password ? (
           <p

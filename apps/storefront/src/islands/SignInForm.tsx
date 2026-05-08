@@ -136,14 +136,9 @@ export default function SignInForm({ nextHref, labels }: SignInFormProps) {
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      noValidate
-      aria-busy={busy}
-      className="space-y-5"
-    >
+    <form onSubmit={onSubmit} noValidate aria-busy={busy} className="space-y-5">
       <div className="space-y-2">
-        <label htmlFor={emailId} className="block t-caption text-muted">
+        <label htmlFor={emailId} className="t-caption text-muted block">
           {labels.email}
         </label>
         <input
@@ -152,12 +147,18 @@ export default function SignInForm({ nextHref, labels }: SignInFormProps) {
           name="email"
           type="email"
           autoComplete="email"
+          // iOS auto-capitalises the first letter of plain inputs, which
+          // then fails the email regex check. Explicit `none` together
+          // with `spellCheck=false` matches WIG ("disable spellcheck on
+          // emails, codes, usernames").
+          autoCapitalize="none"
+          spellCheck={false}
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           aria-invalid={emailError !== null}
           aria-describedby={emailError ? `${emailId}-error` : undefined}
-          className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+          className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
         />
         {emailError && (
           <p
@@ -171,7 +172,7 @@ export default function SignInForm({ nextHref, labels }: SignInFormProps) {
       </div>
 
       <div className="space-y-2">
-        <label htmlFor={passwordId} className="block t-caption text-muted">
+        <label htmlFor={passwordId} className="t-caption text-muted block">
           {labels.password}
         </label>
         <input
@@ -185,7 +186,7 @@ export default function SignInForm({ nextHref, labels }: SignInFormProps) {
           onChange={(e) => setPassword(e.target.value)}
           aria-invalid={passwordError !== null}
           aria-describedby={passwordError ? `${passwordId}-error` : undefined}
-          className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+          className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
         />
         {passwordError && (
           <p
