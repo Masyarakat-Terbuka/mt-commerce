@@ -63,6 +63,12 @@ function buildRepo(): {
       staff.set(input.authUserId, row);
       return row;
     },
+    async listStaff() {
+      return [...staff.values()].map((s) => ({
+        ...s,
+        email: users.get(s.authUserId)?.email ?? null,
+      }));
+    },
     async hasAnyStaff() {
       return staff.size > 0;
     },
@@ -255,6 +261,12 @@ describe("API key verify/revoke race", () => {
       },
       async upsertStaffProfile() {
         throw new Error("not used");
+      },
+      async listStaff() {
+        return [...staff.values()].map((s) => ({
+          ...s,
+          email: users.get(s.authUserId)?.email ?? null,
+        }));
       },
       async hasAnyStaff() {
         return staff.size > 0;

@@ -34,6 +34,15 @@ import {
   type StaffProfile,
 } from "./types.js";
 
+/**
+ * A staff profile augmented with the linked auth account's email. The /staf
+ * admin UI needs both pieces in one row; the service does the join so the
+ * route handler stays a thin pass-through.
+ */
+export interface StaffProfileWithEmail extends StaffProfile {
+  email: string | null;
+}
+
 export interface AuthService {
   // Staff
   /**
@@ -41,6 +50,11 @@ export interface AuthService {
    * staff. Used by the role middleware.
    */
   getStaffProfile(authUserId: string): Promise<StaffProfile | null>;
+  /**
+   * List every staff profile alongside the linked auth user's email. Used
+   * by the owner-only `/staf` admin UI to render the team roster.
+   */
+  listStaff(): Promise<StaffProfileWithEmail[]>;
   /**
    * Assign or update a staff role. The first call (when no staff exist) must
    * be `owner` — this is enforced here, NOT in the route, so seed scripts
@@ -99,6 +113,14 @@ export class AuthServiceImpl implements AuthService {
   async getStaffProfile(authUserId: string): Promise<StaffProfile | null> {
     const row = await this.repo.getStaffProfile(authUserId);
     return row ? toStaffProfile(row) : null;
+  }
+
+  async listStaff(): Promise<StaffProfileWithEmail[]> {
+    const rows = await this.repo.listStaff();
+    return rows.map((row) => ({
+      ...toStaffProfile(row),
+      email: row.email ?? null,
+    }));
   }
 
   async assignRole(input: {

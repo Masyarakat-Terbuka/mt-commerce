@@ -29,6 +29,7 @@ import {
   Search01Icon,
   WarehouseIcon,
   FolderTreeIcon,
+  UserGroup03Icon,
 } from "@hugeicons/core-free-icons";
 import {
   Sidebar,
@@ -60,11 +61,19 @@ import { SearchCommand } from "@/components/SearchCommand";
 import { useTranslator } from "@/lib/i18n";
 import { useSession } from "@/lib/auth";
 import { initialsFromName } from "@/lib/format";
+import type { Role } from "@/lib/api";
 
 interface NavItem {
   to: string;
   labelKey: string;
   icon: typeof Home01Icon;
+  /**
+   * Restrict the entry to a subset of roles. Items without `roles` are
+   * available to every staff role. The /staf entry is owner-only because
+   * the "Staf" tab inside is owner-gated; sessions and API keys, which
+   * non-owners may still want to see, remain reachable by direct URL.
+   */
+  roles?: readonly Role[];
 }
 
 const NAV_ITEMS: readonly NavItem[] = [
@@ -75,6 +84,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { to: "/pesanan", labelKey: "nav.pesanan", icon: ShoppingBag01Icon },
   { to: "/pelanggan", labelKey: "nav.pelanggan", icon: UserMultiple02Icon },
   { to: "/pengaturan", labelKey: "nav.pengaturan", icon: Settings02Icon },
+  { to: "/staf", labelKey: "nav.staf", icon: UserGroup03Icon, roles: ["owner"] },
 ] as const;
 
 function isActivePath(currentPath: string, target: string): boolean {
@@ -91,6 +101,12 @@ export function AppShell() {
   const displayName = me?.displayName ?? "";
   const email = me?.user.email ?? "";
   const initials = displayName ? initialsFromName(displayName) : "?";
+  const role: Role | null = me?.role ?? null;
+  // Filter the nav by role at render time. We keep the master list a static
+  // constant so it stays easy to scan; the per-render filter reads cheap.
+  const visibleNav = NAV_ITEMS.filter(
+    (item) => !item.roles || (role !== null && item.roles.includes(role)),
+  );
 
   return (
     <SidebarProvider>
@@ -116,7 +132,7 @@ export function AppShell() {
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                {NAV_ITEMS.map((item) => {
+                {visibleNav.map((item) => {
                   const active = isActivePath(pathname, item.to);
                   return (
                     <SidebarMenuItem key={item.to}>

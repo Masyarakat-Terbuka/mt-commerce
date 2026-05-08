@@ -47,6 +47,17 @@ function makeService(opts: {
       };
       return profile;
     },
+    async listStaff() {
+      if (opts.staff) {
+        return [
+          {
+            ...opts.staff,
+            email: opts.user?.email ?? null,
+          },
+        ];
+      }
+      return [];
+    },
     async disableUser() {
       return;
     },
@@ -172,6 +183,95 @@ describe("admin /admin/v1/auth", () => {
     };
     expect(body.user.id).toBe("usr_owner");
     expect(body.staff?.role).toBe("owner");
+  });
+
+  it("returns the staff roster for an authenticated owner via GET /staff", async () => {
+    const user: AuthUser = {
+      id: "usr_owner",
+      email: "owner@example.com",
+      emailVerified: true,
+      name: "Owner",
+      image: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const staff: StaffProfile = {
+      authUserId: user.id,
+      role: "owner",
+      displayName: "Owner",
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const apiKey: ApiKey = {
+      id: "apik_owner",
+      userId: user.id,
+      name: "test",
+      scopes: ["catalog:read"],
+      lastUsedAt: null,
+      createdAt: NOW,
+      revokedAt: null,
+    };
+    const service = makeService({
+      user,
+      staff,
+      validBearer: { bearer: "apik_owner.SECRET", user, apiKey },
+    });
+    const app = buildAdminApp(service);
+    const res = await app.request("/admin/v1/auth/staff", {
+      headers: { authorization: "Bearer apik_owner.SECRET" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{
+        authUserId: string;
+        role: Role;
+        email: string | null;
+        displayName: string;
+      }>;
+    };
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]!.role).toBe("owner");
+    expect(body.data[0]!.email).toBe("owner@example.com");
+  });
+
+  it("rejects GET /staff for a non-owner staff with 403", async () => {
+    const user: AuthUser = {
+      id: "usr_admin",
+      email: "admin@example.com",
+      emailVerified: true,
+      name: "Admin",
+      image: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const staff: StaffProfile = {
+      authUserId: user.id,
+      role: "admin",
+      displayName: "Admin",
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const apiKey: ApiKey = {
+      id: "apik_admin",
+      userId: user.id,
+      name: "test",
+      scopes: ["catalog:read"],
+      lastUsedAt: null,
+      createdAt: NOW,
+      revokedAt: null,
+    };
+    const service = makeService({
+      user,
+      staff,
+      validBearer: { bearer: "apik_admin.SECRET", user, apiKey },
+    });
+    const app = buildAdminApp(service);
+    const res = await app.request("/admin/v1/auth/staff", {
+      headers: { authorization: "Bearer apik_admin.SECRET" },
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("forbidden");
   });
 
   it("rejects POST /staff for a non-owner staff with 403", async () => {

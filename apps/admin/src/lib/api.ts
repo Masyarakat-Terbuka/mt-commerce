@@ -22,10 +22,15 @@ export type {
   AdminListOrdersQuery,
   AdminListProductsQuery,
   AdminUpdateCustomerInput,
+  ApiKey,
+  ApiKeyScope,
+  ApiKeyWithSecret,
   AuthMe,
+  AuthSession,
   CancelFulfillmentInput,
   CancelOrderAdminInput,
   Category,
+  CreateApiKeyInput,
   Customer,
   CustomerAddress,
   CustomerWithAddresses,
@@ -46,12 +51,15 @@ export type {
   ProductSort,
   ProductStatus,
   Role,
+  StaffListRow,
   StoreSettings,
   TaxRate,
   TransitionOrderInput,
   UpdateStoreSettingsInput,
+  UpsertStaffInput,
   Variant,
 } from "@mt-commerce/sdk";
+export { API_KEY_SCOPES } from "@mt-commerce/sdk";
 
 const DEFAULT_API_URL = "http://localhost:8000";
 

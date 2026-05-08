@@ -72,6 +72,12 @@ function createFakeRepo(store: FakeStore): AuthRepository {
       store.staff.set(input.authUserId, row);
       return row;
     },
+    async listStaff() {
+      return [...store.staff.values()].map((s) => ({
+        ...s,
+        email: store.users.get(s.authUserId)?.email ?? null,
+      }));
+    },
     async hasAnyStaff() {
       return store.staff.size > 0;
     },

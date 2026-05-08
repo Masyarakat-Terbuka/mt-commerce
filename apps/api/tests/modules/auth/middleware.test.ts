@@ -51,6 +51,9 @@ function makeService(fix: ServiceFixture): AuthService {
     async assignRole() {
       throw new Error("not used");
     },
+    async listStaff() {
+      return [];
+    },
     async disableUser() {
       throw new Error("not used");
     },

@@ -42,6 +42,7 @@ import {
 import { OrderDetailPage } from "@/pages/OrderDetailPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SignOutPage } from "@/pages/SignOutPage";
+import { StaffPage } from "@/pages/StaffPage";
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -264,6 +265,21 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+/**
+ * `/staf` — staff & roles, sessions, and API keys. Owner-only content
+ * (the staff roster + invite) is gated *inside the page component* via
+ * the cached `useSession` role rather than at the route boundary, because
+ * the same page also surfaces caller-scoped sessions that any signed-in
+ * staff role should be able to see. Putting the role check inside lets
+ * a non-owner land here harmlessly via the sidebar in case of a stale
+ * cached role, instead of getting a redirect.
+ */
+const staffRoute = createRoute({
+  getParentRoute: () => gatedRoute,
+  path: "/staf",
+  component: StaffPage,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   signOutRoute,
@@ -279,6 +295,7 @@ const routeTree = rootRoute.addChildren([
     customersRoute,
     customerDetailRoute,
     settingsRoute,
+    staffRoute,
   ]),
 ]);
 
