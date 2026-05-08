@@ -35,8 +35,11 @@ import { ApiError, isApiErrorEnvelope } from "./errors.js";
 import type {
   AddCartItemInput,
   AdjustInventoryInput,
+  AdminCreateCustomerInput,
+  AdminListCustomersQuery,
   AdminListOrdersQuery,
   AdminListProductsQuery,
+  AdminUpdateCustomerInput,
   AuthMe,
   AuthSession,
   CancelCheckoutInput,
@@ -56,6 +59,7 @@ import type {
   CreateProductInput,
   CreateVariantInput,
   CustomerAddress,
+  CustomerWithAddresses,
   District,
   InventoryLevel,
   ListKecamatanQuery,
@@ -104,6 +108,7 @@ import type {
   WireCompleteCheckoutResult,
   WireCustomer,
   WireCustomerAddress,
+  WireCustomerWithAddresses,
   WireDistrict,
   WireInventoryLevel,
   WireListEnvelope,
@@ -299,6 +304,15 @@ function toCustomerAddress(w: WireCustomerAddress): CustomerAddress {
     createdAt: new Date(w.createdAt),
     updatedAt: new Date(w.updatedAt),
     deletedAt: w.deletedAt ? new Date(w.deletedAt) : null,
+  };
+}
+
+function toCustomerWithAddresses(
+  w: WireCustomerWithAddresses,
+): CustomerWithAddresses {
+  return {
+    ...toCustomer(w),
+    addresses: w.addresses.map(toCustomerAddress),
   };
 }
 
@@ -1020,6 +1034,57 @@ export interface AdminCategoriesApi {
   delete(id: string, options?: RequestOptions): Promise<void>;
 }
 
+export interface AdminCustomersApi {
+  /** GET /admin/v1/customers — paginated, soft-deleted excluded server-side. */
+  list(
+    query?: AdminListCustomersQuery,
+    options?: RequestOptions,
+  ): Promise<Paginated<Customer>>;
+  /**
+   * GET /admin/v1/customers/{id} — returns the customer alongside their
+   * embedded addresses. We expose a single method (rather than a separate
+   * `byIdWithAddresses`) because the API itself returns the union shape and
+   * splitting it client-side would force a second round-trip.
+   */
+  byId(id: string, options?: RequestOptions): Promise<CustomerWithAddresses>;
+  /** POST /admin/v1/customers — create a customer record. */
+  create(
+    input: AdminCreateCustomerInput,
+    options?: RequestOptions,
+  ): Promise<Customer>;
+  /** PATCH /admin/v1/customers/{id} — partial update; at least one field. */
+  update(
+    id: string,
+    patch: AdminUpdateCustomerInput,
+    options?: RequestOptions,
+  ): Promise<Customer>;
+  /** DELETE /admin/v1/customers/{id} — soft-delete (sets deletedAt). */
+  delete(id: string, options?: RequestOptions): Promise<void>;
+  /** GET /admin/v1/customers/{id}/addresses — convenience for the detail view. */
+  listAddresses(
+    id: string,
+    options?: RequestOptions,
+  ): Promise<CustomerAddress[]>;
+  /** POST /admin/v1/customers/{id}/addresses — staff-side address creation. */
+  createAddress(
+    customerId: string,
+    input: CreateAddressInput,
+    options?: RequestOptions,
+  ): Promise<CustomerAddress>;
+  /**
+   * PATCH /admin/v1/addresses/{addressId} — note the address-rooted path:
+   * the API resolves the owning customer from the row itself rather than
+   * trusting a request-supplied owner id.
+   */
+  updateAddress(
+    addressId: string,
+    patch: UpdateAddressInput,
+    options?: RequestOptions,
+  ): Promise<CustomerAddress>;
+  /** DELETE /admin/v1/addresses/{addressId} — soft-delete the address row. */
+  deleteAddress(addressId: string, options?: RequestOptions): Promise<void>;
+}
+
 export interface AdminOrdersApi {
   list(
     query?: AdminListOrdersQuery,
@@ -1068,6 +1133,7 @@ export interface AdminApi {
   auth: AdminAuthApi;
   products: AdminProductsApi;
   categories: AdminCategoriesApi;
+  customers: AdminCustomersApi;
   orders: AdminOrdersApi;
   inventory: AdminInventoryApi;
 }
@@ -1834,6 +1900,151 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         await request<unknown>(
           adminCtx,
           `/admin/v1/categories/${encodeURIComponent(id)}`,
+          { ...(requestOptions ?? {}), method: "DELETE" },
+        );
+      },
+    },
+    customers: {
+      // Admin customer surface — straightforward CRUD over `/customers` and
+      // `/addresses`. The detail endpoint embeds addresses in the same
+      // response (the API does the join) so the editor screen does not need
+      // a second round-trip to render its layout.
+      async list(query, requestOptions) {
+        const qs = buildQuery({
+          email: query?.email,
+          search: query?.search,
+          page: query?.page,
+          pageSize: query?.pageSize,
+        });
+        const wire = await request<WirePaginated<WireCustomer>>(
+          adminCtx,
+          `/admin/v1/customers${qs}`,
+          requestOptions,
+        );
+        return {
+          data: wire.data.map(toCustomer),
+          total: wire.total,
+          page: wire.page,
+          pageSize: wire.pageSize,
+        };
+      },
+      async byId(id, requestOptions) {
+        const wire = await request<WireCustomerWithAddresses>(
+          adminCtx,
+          `/admin/v1/customers/${encodeURIComponent(id)}`,
+          requestOptions,
+        );
+        return toCustomerWithAddresses(wire);
+      },
+      async create(input, requestOptions) {
+        const wire = await request<WireCustomer>(
+          adminCtx,
+          "/admin/v1/customers",
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({
+              email: input.email,
+              displayName: input.displayName,
+              phone: input.phone,
+              taxIdentifier: input.taxIdentifier,
+              companyName: input.companyName,
+              authUserId: input.authUserId,
+            }),
+          },
+        );
+        return toCustomer(wire);
+      },
+      async update(id, patch, requestOptions) {
+        const wire = await request<WireCustomer>(
+          adminCtx,
+          `/admin/v1/customers/${encodeURIComponent(id)}`,
+          {
+            ...(requestOptions ?? {}),
+            method: "PATCH",
+            body: omitUndefined({
+              email: patch.email,
+              displayName: patch.displayName,
+              phone: patch.phone,
+              taxIdentifier: patch.taxIdentifier,
+              companyName: patch.companyName,
+              authUserId: patch.authUserId,
+            }),
+          },
+        );
+        return toCustomer(wire);
+      },
+      async delete(id, requestOptions) {
+        await request<unknown>(
+          adminCtx,
+          `/admin/v1/customers/${encodeURIComponent(id)}`,
+          { ...(requestOptions ?? {}), method: "DELETE" },
+        );
+      },
+      async listAddresses(id, requestOptions) {
+        const wire = await request<WireListEnvelope<WireCustomerAddress>>(
+          adminCtx,
+          `/admin/v1/customers/${encodeURIComponent(id)}/addresses`,
+          requestOptions,
+        );
+        return wire.data.map(toCustomerAddress);
+      },
+      async createAddress(customerId, input, requestOptions) {
+        const wire = await request<WireCustomerAddress>(
+          adminCtx,
+          `/admin/v1/customers/${encodeURIComponent(customerId)}/addresses`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({
+              kind: input.kind,
+              isDefaultShipping: input.isDefaultShipping,
+              isDefaultBilling: input.isDefaultBilling,
+              recipientName: input.recipientName,
+              phone: input.phone,
+              addressLine1: input.addressLine1,
+              addressLine2: input.addressLine2,
+              provinsiId: input.provinsiId,
+              kotaKabupatenId: input.kotaKabupatenId,
+              kecamatanId: input.kecamatanId,
+              kelurahanId: input.kelurahanId,
+              postalCode: input.postalCode,
+              notes: input.notes,
+            }),
+          },
+        );
+        return toCustomerAddress(wire);
+      },
+      async updateAddress(addressId, patch, requestOptions) {
+        const wire = await request<WireCustomerAddress>(
+          adminCtx,
+          `/admin/v1/addresses/${encodeURIComponent(addressId)}`,
+          {
+            ...(requestOptions ?? {}),
+            method: "PATCH",
+            body: omitUndefined({
+              kind: patch.kind,
+              isDefaultShipping: patch.isDefaultShipping,
+              isDefaultBilling: patch.isDefaultBilling,
+              recipientName: patch.recipientName,
+              phone: patch.phone,
+              addressLine1: patch.addressLine1,
+              addressLine2: patch.addressLine2,
+              provinsiId: patch.provinsiId,
+              kotaKabupatenId: patch.kotaKabupatenId,
+              kecamatanId: patch.kecamatanId,
+              kelurahanId: patch.kelurahanId,
+              postalCode: patch.postalCode,
+              notes: patch.notes,
+            }),
+          },
+        );
+        return toCustomerAddress(wire);
+      },
+      async deleteAddress(addressId, requestOptions) {
+        await request<unknown>(
+          adminCtx,
+          `/admin/v1/addresses/${encodeURIComponent(addressId)}`,
           { ...(requestOptions ?? {}), method: "DELETE" },
         );
       },

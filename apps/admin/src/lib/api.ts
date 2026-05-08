@@ -15,10 +15,18 @@ import { createClient } from "@mt-commerce/sdk";
 export { ApiError } from "@mt-commerce/sdk";
 export type {
   AdjustInventoryInput,
+  AdminCreateCustomerInput,
+  AdminListCustomersQuery,
   AdminListProductsQuery,
+  AdminUpdateCustomerInput,
   AuthMe,
   Category,
+  Customer,
+  CustomerAddress,
+  CustomerWithAddresses,
   InventoryLevel,
+  Order,
+  OrderStatus,
   Paginated,
   Product,
   ProductSort,

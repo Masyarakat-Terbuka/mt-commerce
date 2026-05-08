@@ -29,6 +29,8 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { ProductsPage } from "@/pages/ProductsPage";
 import { ProductEditorPage } from "@/pages/ProductEditorPage";
 import { InventoryPage } from "@/pages/InventoryPage";
+import { CustomersPage } from "@/pages/CustomersPage";
+import { CustomerDetailPage } from "@/pages/CustomerDetailPage";
 import { ComingSoonPage } from "@/pages/ComingSoonPage";
 import { SignOutPage } from "@/pages/SignOutPage";
 
@@ -145,10 +147,41 @@ const ordersRoute = createRoute({
   component: ComingSoonPage,
 });
 
+/**
+ * Customer list. The route validates its search shape so `useSearch` on the
+ * page can read `page` / `q` without defensive parsing — TanStack Router
+ * coerces the URL strings to the right types here.
+ */
+interface CustomersSearch {
+  page?: number;
+  q?: string;
+}
+
 const customersRoute = createRoute({
   getParentRoute: () => gatedRoute,
   path: "/pelanggan",
-  component: ComingSoonPage,
+  component: CustomersPage,
+  validateSearch: (raw: Record<string, unknown>): CustomersSearch => {
+    const out: CustomersSearch = {};
+    const rawPage = raw["page"];
+    if (typeof rawPage === "number" && Number.isInteger(rawPage) && rawPage > 0) {
+      out.page = rawPage;
+    } else if (typeof rawPage === "string") {
+      const parsed = Number.parseInt(rawPage, 10);
+      if (Number.isInteger(parsed) && parsed > 0) out.page = parsed;
+    }
+    const rawQ = raw["q"];
+    if (typeof rawQ === "string" && rawQ.length > 0) {
+      out.q = rawQ;
+    }
+    return out;
+  },
+});
+
+const customerDetailRoute = createRoute({
+  getParentRoute: () => gatedRoute,
+  path: "/pelanggan/$id",
+  component: CustomerDetailPage,
 });
 
 const settingsRoute = createRoute({
@@ -168,6 +201,7 @@ const routeTree = rootRoute.addChildren([
     inventoryRoute,
     ordersRoute,
     customersRoute,
+    customerDetailRoute,
     settingsRoute,
   ]),
 ]);
