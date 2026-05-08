@@ -341,6 +341,12 @@ export class NotificationServiceImpl implements NotificationService {
         subject: rendered.subject,
         body: rendered.body,
         htmlBody: rendered.htmlBody,
+        // Forward the structured payload + locale so plugin channels
+        // that drive operator-approved templates (WhatsApp, push) can
+        // build their wire request without parsing the rendered text.
+        // Email-shaped channels ignore both fields.
+        payload: input.message.payload as unknown as Record<string, unknown>,
+        ...(input.locale ? { locale: input.locale } : {}),
       });
       const updated = await this.repo.markStatus(auditId, "sent", null);
       return { notification: toNotification(updated ?? initial) };

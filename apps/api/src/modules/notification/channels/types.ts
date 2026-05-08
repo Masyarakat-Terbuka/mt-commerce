@@ -30,6 +30,22 @@ export interface ChannelSendInput {
   body: string;
   /** Optional HTML body. Email channels prefer this when present. */
   htmlBody?: string;
+  /**
+   * Structured template payload that produced `body` / `htmlBody`. Set
+   * for the templated kinds the service knows how to render; `undefined`
+   * for ad-hoc sends. Channels that drive operator-approved templates
+   * upstream (WhatsApp Business, push) build their wire request from
+   * this rather than parsing rendered text. Email-shaped channels
+   * (smtp, console) ignore it.
+   */
+  payload?: Record<string, unknown>;
+  /**
+   * Locale the platform rendered against. Channels that resolve a
+   * per-language upstream template (Meta WhatsApp Cloud's
+   * `language.code`) consult this. The body is already in the matching
+   * locale.
+   */
+  locale?: string;
 }
 
 export interface NotificationChannel {
