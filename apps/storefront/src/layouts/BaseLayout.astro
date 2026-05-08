@@ -4,6 +4,7 @@ import { ClientRouter } from "astro:transitions";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import CartDrawer from "@/islands/CartDrawer.tsx";
+import PromoBanner from "@/islands/PromoBanner.tsx";
 import {
   createTranslator,
   resolveLocale,
@@ -205,6 +206,23 @@ const jsonLdPayloads = jsonLd
     >
       {t("nav.skip_to_content")}
     </a>
+    {
+      /*
+      Promo banner — thin band ABOVE the sticky header. Mounted as a React
+      island so the localStorage-backed dismiss can run before paint without
+      a flash. `client:load` is intentional: `client:idle` would defer past
+      LCP and the banner would visibly shift in afterwards. The banner sits
+      in normal flow (no sticky), so when dismissed, the header reflows to
+      the very top of the viewport and the rest of the page rises with it.
+      Strings are passed in as props so the island stays locale-agnostic.
+    */
+    }
+    <PromoBanner
+      client:load
+      text={t("promo_banner.text")}
+      dismissLabel={t("promo_banner.dismiss")}
+      regionLabel={t("promo_banner.region_label")}
+    />
     <Header />
     {
       /*

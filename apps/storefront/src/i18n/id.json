@@ -4,12 +4,17 @@
   "nav.about": "Tentang",
   "nav.cart": "Keranjang",
   "nav.search": "Cari",
+  "nav.search_placeholder": "cari produk…",
   "nav.account": "Akun",
   "nav.menu": "Menu",
   "nav.skip_to_content": "Lewati ke konten utama",
   "nav.help": "Bantuan",
   "nav.privacy": "Kebijakan privasi",
   "nav.terms": "Syarat layanan",
+
+  "promo_banner.text": "Pengiriman gratis untuk pesanan di atas Rp 250.000",
+  "promo_banner.dismiss": "Tutup banner",
+  "promo_banner.region_label": "Promosi",
 
   "help.index.title": "Bantuan",
   "help.index.subhead": "Panduan singkat tentang pengiriman, pembayaran, pengembalian, dan platform mt-commerce.",
