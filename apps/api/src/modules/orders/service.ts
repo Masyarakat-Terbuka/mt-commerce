@@ -362,6 +362,10 @@ export class OrderServiceImpl implements OrderService {
       ...(query.status ? { status: query.status } : {}),
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.email ? { email: query.email } : {}),
+      // The Zod transform on `orderNumber` already trims + upper-cases
+      // and folds empty/whitespace to `undefined`, so a truthy check is
+      // enough to decide whether the filter is in play.
+      ...(query.orderNumber ? { orderNumber: query.orderNumber } : {}),
       ...(query.createdFrom ? { createdFrom: query.createdFrom } : {}),
       ...(query.createdTo ? { createdTo: query.createdTo } : {}),
       page,

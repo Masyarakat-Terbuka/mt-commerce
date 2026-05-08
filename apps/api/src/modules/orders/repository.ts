@@ -50,6 +50,12 @@ export interface OrderListFilters {
   status?: OrderStatus;
   customerId?: string;
   email?: string;
+  /**
+   * Exact customer-facing order number (e.g. `ORD-2026-000123`). The
+   * service layer normalises (trim + upper-case) before this reaches the
+   * repository so the WHERE clause can stay an `eq(...)`.
+   */
+  orderNumber?: string;
   createdFrom?: Date;
   createdTo?: Date;
   page: number;
@@ -212,6 +218,8 @@ export function createOrdersRepository(db: Db = defaultDb): OrdersRepository {
       if (filters.customerId)
         conditions.push(eq(orders.customerId, filters.customerId));
       if (filters.email) conditions.push(eq(orders.email, filters.email));
+      if (filters.orderNumber)
+        conditions.push(eq(orders.orderNumber, filters.orderNumber));
       if (filters.createdFrom)
         conditions.push(gte(orders.createdAt, filters.createdFrom));
       if (filters.createdTo)

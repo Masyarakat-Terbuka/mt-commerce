@@ -112,7 +112,7 @@ Emitted events:
 
 | Method | Path                              | Purpose                                            |
 | ------ | --------------------------------- | -------------------------------------------------- |
-| GET    | `/orders`                         | List + filter (status, customer, email, date)      |
+| GET    | `/orders`                         | List + filter (status, customer, email, orderNumber, date) |
 | GET    | `/orders/:id`                     | Detail with full status history                    |
 | GET    | `/orders/:id/events`              | Audit-trail events                                 |
 | POST   | `/orders/:id/transition`          | `{ toStatus, details? }` — staff actor captured    |

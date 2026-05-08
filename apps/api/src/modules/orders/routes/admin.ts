@@ -63,7 +63,7 @@ export function buildOrdersAdminRoutes(
       tags: [TAG],
       summary: "List orders",
       description:
-        "Paginated list. Filter by status, customerId, email, and a creation date range.",
+        "Paginated list. Filter by status, customerId, email, an exact orderNumber (e.g. `ORD-2026-000123`), and a creation date range.",
       request: { query: listOrdersQuerySchema },
       responses: {
         200: {

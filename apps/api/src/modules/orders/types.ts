@@ -162,15 +162,30 @@ export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 
 /**
- * Admin list query. Filter by status, customer, email, and a creation
- * date range. `from`/`to` are RFC 3339 timestamps the route layer parses
- * into `Date` instances.
+ * Admin list query. Filter by status, customer, email, an exact
+ * customer-facing order number, and a creation date range. `from`/`to`
+ * are RFC 3339 timestamps the route layer parses into `Date` instances.
+ *
+ * `orderNumber` is matched exactly. The format is fixed at
+ * `ORD-YYYY-NNNNNN` (allocated server-side, see service.ts:formatOrderNumber)
+ * so we trim, upper-case, and treat empty/whitespace as absent. Operators
+ * almost always paste the full handle from a notification or email — a
+ * substring match would just create false positives across years.
  */
 export const listOrdersQuerySchema = z
   .object({
     status: orderStatusSchema.optional(),
     customerId: z.string().min(1).max(100).optional(),
     email: z.string().email().max(255).optional(),
+    orderNumber: z
+      .string()
+      .max(64)
+      .optional()
+      .transform((value) => {
+        if (value === undefined) return undefined;
+        const trimmed = value.trim().toUpperCase();
+        return trimmed.length === 0 ? undefined : trimmed;
+      }),
     createdFrom: z.coerce.date().optional(),
     createdTo: z.coerce.date().optional(),
     page: z.coerce.number().int().min(1).default(1),
