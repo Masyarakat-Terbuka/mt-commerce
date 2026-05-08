@@ -15,6 +15,7 @@
  *   - GET    /admin/v1/auth/me                — the staff profile of the caller
  *   - GET    /admin/v1/auth/sessions          — list active sessions
  *   - DELETE /admin/v1/auth/sessions/:id      — revoke a session
+ *   - GET    /admin/v1/auth/staff             — list staff profiles (owner-only)
  *   - POST   /admin/v1/auth/staff             — create/update a staff profile (owner-only)
  *   - GET    /admin/v1/auth/api-keys          — list the caller's API keys
  *   - POST   /admin/v1/auth/api-keys          — issue a new API key
@@ -49,6 +50,7 @@ import {
   ApiKeyListEnvelope,
   MeAdminResponse,
   SessionListEnvelope,
+  StaffListEnvelope,
   StaffProfileFull,
 } from "./openapi-schemas.js";
 
@@ -185,6 +187,41 @@ export function buildAuthAdminRoutes(
   // ---------------------------------------------------------------
   // Staff management (owner-only via the path-scoped use() above)
   // ---------------------------------------------------------------
+  router.openapi(
+    createRoute({
+      method: "get",
+      path: "/staff",
+      tags: [TAG],
+      summary: "List staff profiles (owner-only)",
+      description:
+        "Returns every staff_profile row joined with the linked auth user's email. Used by the operator-facing staff & roles screen. Owner-only because the list reveals every operator's email and role.",
+      responses: {
+        200: {
+          content: { "application/json": { schema: StaffListEnvelope } },
+          description: "Staff profiles.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Owner role required."),
+      },
+    }),
+    async (c) => {
+      const rows = await service.listStaff();
+      return c.json(
+        {
+          data: rows.map((row) => ({
+            authUserId: row.authUserId,
+            role: row.role,
+            displayName: row.displayName,
+            email: row.email,
+            createdAt: row.createdAt.toISOString(),
+            updatedAt: row.updatedAt.toISOString(),
+          })),
+        },
+        200,
+      );
+    },
+  );
+
   router.openapi(
     createRoute({
       method: "post",

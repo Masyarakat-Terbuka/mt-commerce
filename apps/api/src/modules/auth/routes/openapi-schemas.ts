@@ -39,6 +39,28 @@ export const StaffProfileFull = z
   })
   .openapi("StaffProfileFull");
 
+/**
+ * Staff list row — augments the `StaffProfileFull` shape with the linked
+ * auth user's email so the admin UI can render the operator's contact
+ * without a second round-trip. `email` is nullable to cover the rare case
+ * where the underlying auth user has been hard-deleted while the profile
+ * row still exists.
+ */
+export const StaffListRow = z
+  .object({
+    authUserId: z.string(),
+    role: z.enum(["owner", "admin", "staff", "viewer"]),
+    displayName: z.string(),
+    email: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("StaffListRow");
+
+export const StaffListEnvelope = z
+  .object({ data: z.array(StaffListRow) })
+  .openapi("StaffList");
+
 export const MeAdminResponse = z
   .object({
     user: AuthUserPublic,

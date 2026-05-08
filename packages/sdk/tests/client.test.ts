@@ -1449,3 +1449,250 @@ describe("createClient — admin.inventory", () => {
     expect(entry.createdAt).toBeInstanceOf(Date);
   });
 });
+
+// ----------------------------------------------------------------------------
+// admin.auth — staff roster, sessions, and API-key surface.
+//
+// We keep these tests close to the API contract: the SDK's job is to
+// (1) hit the right URL with the right method and credentials, and
+// (2) round-trip wire timestamps to `Date` and unknown enum values to
+// the typed union. Both invariants matter for the /staf admin UI which
+// renders sortable timestamps and a fixed set of role/scope chips.
+// ----------------------------------------------------------------------------
+
+describe("createClient — admin.auth.staff", () => {
+  it("lists staff with role + email and converts timestamps to Date", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [
+          {
+            authUserId: "usr_owner",
+            role: "owner",
+            displayName: "Owner",
+            email: "owner@example.com",
+            createdAt: "2026-04-01T08:00:00.000Z",
+            updatedAt: "2026-04-01T08:00:00.000Z",
+          },
+          {
+            authUserId: "usr_staff",
+            role: "staff",
+            displayName: "Staff Member",
+            email: null,
+            createdAt: "2026-04-02T08:00:00.000Z",
+            updatedAt: "2026-04-02T08:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const rows = await client.admin.auth.staff.list();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("http://localhost:8000/admin/v1/auth/staff");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    expect((calls[0]!.init?.method ?? "GET")).toBe("GET");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.authUserId).toBe("usr_owner");
+    expect(rows[0]!.role).toBe("owner");
+    expect(rows[0]!.email).toBe("owner@example.com");
+    expect(rows[0]!.createdAt).toBeInstanceOf(Date);
+    expect(rows[1]!.email).toBeNull();
+  });
+
+  it("upserts a staff profile and posts the authUserId + role + displayName", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 201,
+      body: {
+        authUserId: "usr_new",
+        role: "admin",
+        displayName: "New Admin",
+        createdAt: "2026-05-08T12:00:00.000Z",
+        updatedAt: "2026-05-08T12:00:00.000Z",
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const row = await client.admin.auth.staff.upsert({
+      authUserId: "usr_new",
+      role: "admin",
+      displayName: "New Admin",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("http://localhost:8000/admin/v1/auth/staff");
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({
+      authUserId: "usr_new",
+      role: "admin",
+      displayName: "New Admin",
+    });
+    // The POST response shape lacks `email` (the API returns the bare
+    // staff_profile, not the joined list row); the SDK coalesces it to
+    // null so the returned shape is uniform with `list()`.
+    expect(row.email).toBeNull();
+    expect(row.role).toBe("admin");
+  });
+
+  it("surfaces 403 from a non-owner caller as ApiError", async () => {
+    const { fetch } = mockFetch({
+      status: 403,
+      body: {
+        error: {
+          code: "forbidden",
+          message: "Your role does not have access to this action.",
+        },
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await expect(client.admin.auth.staff.list()).rejects.toMatchObject({
+      name: "ApiError",
+      code: "forbidden",
+      status: 403,
+    });
+  });
+});
+
+describe("createClient — admin.auth.sessions", () => {
+  it("lists active sessions and converts timestamps to Date", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: "sess_a",
+            expiresAt: "2026-06-01T08:00:00.000Z",
+            ipAddress: "127.0.0.1",
+            userAgent: "vitest",
+            createdAt: "2026-05-01T08:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const sessions = await client.admin.auth.sessions.list();
+
+    expect(calls[0]!.url).toBe("http://localhost:8000/admin/v1/auth/sessions");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.expiresAt).toBeInstanceOf(Date);
+    expect(sessions[0]!.createdAt).toBeInstanceOf(Date);
+    expect(sessions[0]!.ipAddress).toBe("127.0.0.1");
+  });
+
+  it("revokes a session via DELETE", async () => {
+    // Mirror the admin.products.delete test: the runtime `Response`
+    // constructor refuses a 204 + body in some environments, so we use 200
+    // with an empty object body. The behavior under test is the URL,
+    // method, and that the SDK does not throw on a body-less success.
+    const { fetch, calls } = mockFetch({ status: 200, body: {} });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.admin.auth.sessions.revoke("sess_a");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(
+      "http://localhost:8000/admin/v1/auth/sessions/sess_a",
+    );
+    expect(calls[0]!.init?.method).toBe("DELETE");
+    expect(calls[0]!.init?.credentials).toBe("include");
+  });
+});
+
+describe("createClient — admin.auth.apiKeys", () => {
+  it("lists keys and decodes timestamps + scope union", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 200,
+      body: {
+        data: [
+          {
+            id: "apik_one",
+            name: "Webhook receiver",
+            scopes: ["webhooks:receive"],
+            lastUsedAt: "2026-05-07T09:00:00.000Z",
+            createdAt: "2026-04-01T08:00:00.000Z",
+            revokedAt: null,
+          },
+          {
+            id: "apik_two",
+            name: "Catalog reader",
+            // Includes an unknown scope to assert filtering.
+            scopes: ["catalog:read", "future:scope"],
+            lastUsedAt: null,
+            createdAt: "2026-04-02T08:00:00.000Z",
+            revokedAt: "2026-04-15T08:00:00.000Z",
+          },
+        ],
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const keys = await client.admin.auth.apiKeys.list();
+
+    expect(calls[0]!.url).toBe("http://localhost:8000/admin/v1/auth/api-keys");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    expect(keys).toHaveLength(2);
+    expect(keys[0]!.scopes).toEqual(["webhooks:receive"]);
+    expect(keys[0]!.lastUsedAt).toBeInstanceOf(Date);
+    expect(keys[0]!.revokedAt).toBeNull();
+    // Unknown scope is filtered out so the SDK's typed union is sound.
+    expect(keys[1]!.scopes).toEqual(["catalog:read"]);
+    expect(keys[1]!.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it("creates a key, sends label as `name`, and returns the secret once", async () => {
+    const { fetch, calls } = mockFetch({
+      status: 201,
+      body: {
+        id: "apik_new",
+        name: "Webhook receiver",
+        scopes: ["webhooks:receive"],
+        plaintext: "apik_new.SECRET-VALUE",
+        createdAt: "2026-05-08T12:00:00.000Z",
+      },
+    });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    const created = await client.admin.auth.apiKeys.create({
+      label: "Webhook receiver",
+      scopes: ["webhooks:receive"],
+      // expiresAt is reserved for a future API; the SDK must NOT forward it.
+      expiresAt: new Date("2026-12-31T00:00:00.000Z"),
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("http://localhost:8000/admin/v1/auth/api-keys");
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect(calls[0]!.init?.credentials).toBe("include");
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body).toEqual({
+      name: "Webhook receiver",
+      scopes: ["webhooks:receive"],
+    });
+    expect("expiresAt" in body).toBe(false);
+
+    expect(created.id).toBe("apik_new");
+    expect(created.secret).toBe("apik_new.SECRET-VALUE");
+    expect(created.scopes).toEqual(["webhooks:receive"]);
+    expect(created.createdAt).toBeInstanceOf(Date);
+    expect(created.lastUsedAt).toBeNull();
+    expect(created.revokedAt).toBeNull();
+  });
+
+  it("revokes a key via DELETE", async () => {
+    const { fetch, calls } = mockFetch({ status: 200, body: {} });
+    const client = createClient({ baseUrl: "http://localhost:8000", fetch });
+
+    await client.admin.auth.apiKeys.revoke("apik_one");
+
+    expect(calls[0]!.url).toBe(
+      "http://localhost:8000/admin/v1/auth/api-keys/apik_one",
+    );
+    expect(calls[0]!.init?.method).toBe("DELETE");
+    expect(calls[0]!.init?.credentials).toBe("include");
+  });
+});

@@ -44,8 +44,12 @@ import type {
   AdminListProductsQuery,
   AdminListTaxRatesQuery,
   AdminUpdateCustomerInput,
+  ApiKey,
+  ApiKeyScope,
+  ApiKeyWithSecret,
   AuthMe,
   AuthSession,
+  CreateApiKeyInput,
   CancelCheckoutInput,
   CancelFulfillmentInput,
   CancelOrderAdminInput,
@@ -104,6 +108,8 @@ import type {
   UpdateStoreSettingsInput,
   Province,
   RequestOptions,
+  StaffListRow,
+  UpsertStaffInput,
   SetCheckoutAddressesInput,
   SetCheckoutShippingInput,
   ShippingMethod,
@@ -117,8 +123,11 @@ import type {
   UpdateProductInput,
   UpdateVariantInput,
   Variant,
+  WireApiKey,
+  WireApiKeyCreated,
   WireAuthMe,
   WireAuthSession,
+  WireStaffListRow,
   WireCart,
   WireCartItem,
   WireCartTotals,
@@ -217,6 +226,51 @@ function toProduct(w: WireProduct): Product {
     createdAt: new Date(w.createdAt),
     updatedAt: new Date(w.updatedAt),
     deletedAt: w.deletedAt ? new Date(w.deletedAt) : null,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Admin auth — staff and API-key wire→domain conversions. Keep them with the
+// other small mappers so the pattern is consistent (timestamps to `Date`,
+// unknown enum values filtered out at the boundary).
+// ----------------------------------------------------------------------------
+
+const KNOWN_API_KEY_SCOPES = new Set<string>([
+  "catalog:read",
+  "catalog:write",
+  "webhooks:receive",
+]);
+
+/**
+ * Filter wire-side scope strings to the typed union the SDK exposes. An
+ * older API that has gained a scope the SDK does not yet know about would
+ * otherwise smuggle the unknown string into the domain shape; filtering
+ * keeps the type sound. The complementary case (scope removed from the
+ * SDK but still on a stored row) is the same shape — drop the unknown.
+ */
+function filterApiKeyScopes(scopes: string[]): ApiKeyScope[] {
+  return scopes.filter((s): s is ApiKeyScope => KNOWN_API_KEY_SCOPES.has(s));
+}
+
+function toStaffListRow(w: WireStaffListRow): StaffListRow {
+  return {
+    authUserId: w.authUserId,
+    role: w.role,
+    displayName: w.displayName,
+    email: w.email,
+    createdAt: new Date(w.createdAt),
+    updatedAt: new Date(w.updatedAt),
+  };
+}
+
+function toApiKey(w: WireApiKey): ApiKey {
+  return {
+    id: w.id,
+    name: w.name,
+    scopes: filterApiKeyScopes(w.scopes),
+    lastUsedAt: w.lastUsedAt ? new Date(w.lastUsedAt) : null,
+    createdAt: new Date(w.createdAt),
+    revokedAt: w.revokedAt ? new Date(w.revokedAt) : null,
   };
 }
 
@@ -1218,11 +1272,52 @@ export interface AdminAuthSessionsApi {
   revoke(sessionId: string, options?: RequestOptions): Promise<void>;
 }
 
+/**
+ * Owner-only staff roster + assignment surface. List + upsert mirror the
+ * `/admin/v1/auth/staff` endpoints; both 403 if the caller is not an owner.
+ */
+export interface AdminAuthStaffApi {
+  /** GET /admin/v1/auth/staff — every staff_profile row joined with the user's email. */
+  list(options?: RequestOptions): Promise<StaffListRow[]>;
+  /**
+   * POST /admin/v1/auth/staff — create or update a staff_profile. Returns
+   * the persisted row. The API enforces the first-staff-must-be-owner and
+   * last-owner-protection invariants; both render through the standard
+   * error envelope.
+   */
+  upsert(
+    input: UpsertStaffInput,
+    options?: RequestOptions,
+  ): Promise<StaffListRow>;
+}
+
+/**
+ * Owner/admin-only API-key management. The plaintext secret is returned
+ * exactly once on `create`; subsequent `list` results never carry it.
+ */
+export interface AdminAuthApiKeysApi {
+  /** GET /admin/v1/auth/api-keys — caller's API keys, newest first. */
+  list(options?: RequestOptions): Promise<ApiKey[]>;
+  /**
+   * POST /admin/v1/auth/api-keys — issue a new key. The `secret` field on
+   * the response is the bearer string (`<id>.<secret>`); store it
+   * immediately, the server never returns it again.
+   */
+  create(
+    input: CreateApiKeyInput,
+    options?: RequestOptions,
+  ): Promise<ApiKeyWithSecret>;
+  /** DELETE /admin/v1/auth/api-keys/:id — soft-revoke. */
+  revoke(id: string, options?: RequestOptions): Promise<void>;
+}
+
 export interface AdminAuthApi {
   me(options?: RequestOptions): Promise<AuthMe>;
   signIn(input: SignInInput, options?: RequestOptions): Promise<AuthMe>;
   signOut(options?: RequestOptions): Promise<void>;
   sessions: AdminAuthSessionsApi;
+  staff: AdminAuthStaffApi;
+  apiKeys: AdminAuthApiKeysApi;
 }
 
 export interface AdminProductsApi {
@@ -2154,6 +2249,78 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           await request<unknown>(
             adminCtx,
             `/admin/v1/auth/sessions/${encodeURIComponent(sessionId)}`,
+            { ...(requestOptions ?? {}), method: "DELETE" },
+          );
+        },
+      },
+      staff: {
+        async list(requestOptions) {
+          const wire = await request<WireListEnvelope<WireStaffListRow>>(
+            adminCtx,
+            "/admin/v1/auth/staff",
+            requestOptions,
+          );
+          return wire.data.map(toStaffListRow);
+        },
+        async upsert(input, requestOptions) {
+          // The API returns the bare staff profile without the joined
+          // `email`. We coalesce to `null` on the domain side so the
+          // returned row matches the `StaffListRow` shape callers
+          // already render — they can refetch the list to pick up the
+          // freshly-joined email if they need it for that row.
+          const wire = await request<WireStaffListRow>(
+            adminCtx,
+            "/admin/v1/auth/staff",
+            {
+              ...(requestOptions ?? {}),
+              method: "POST",
+              body: {
+                authUserId: input.authUserId,
+                role: input.role,
+                displayName: input.displayName,
+              },
+            },
+          );
+          return toStaffListRow({ ...wire, email: wire.email ?? null });
+        },
+      },
+      apiKeys: {
+        async list(requestOptions) {
+          const wire = await request<WireListEnvelope<WireApiKey>>(
+            adminCtx,
+            "/admin/v1/auth/api-keys",
+            requestOptions,
+          );
+          return wire.data.map(toApiKey);
+        },
+        async create(input, requestOptions) {
+          // Forward only the API-supported fields. `expiresAt` is reserved
+          // on the SDK input shape but the v0.1 API does not accept it; the
+          // body is omitted to keep the request faithful to the documented
+          // contract.
+          const wire = await request<WireApiKeyCreated>(
+            adminCtx,
+            "/admin/v1/auth/api-keys",
+            {
+              ...(requestOptions ?? {}),
+              method: "POST",
+              body: { name: input.label, scopes: input.scopes },
+            },
+          );
+          return {
+            id: wire.id,
+            name: wire.name,
+            scopes: filterApiKeyScopes(wire.scopes),
+            secret: wire.plaintext,
+            lastUsedAt: null,
+            createdAt: new Date(wire.createdAt),
+            revokedAt: null,
+          };
+        },
+        async revoke(id, requestOptions) {
+          await request<unknown>(
+            adminCtx,
+            `/admin/v1/auth/api-keys/${encodeURIComponent(id)}`,
             { ...(requestOptions ?? {}), method: "DELETE" },
           );
         },

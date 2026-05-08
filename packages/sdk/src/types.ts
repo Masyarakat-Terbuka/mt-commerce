@@ -1140,6 +1140,128 @@ export interface SignInInput {
 }
 
 // ----------------------------------------------------------------------------
+// Staff roster — mirror `apps/api/src/modules/auth/routes/openapi-schemas.ts`
+// (`StaffListRow`). The wire shape carries ISO timestamps; the SDK converts
+// to `Date` instances on the domain side.
+// ----------------------------------------------------------------------------
+
+export interface WireStaffListRow {
+  authUserId: string;
+  role: Role;
+  displayName: string;
+  /**
+   * The auth user's email. Nullable because the staff_profile row is the
+   * authoritative ledger of access; an auth user that has been hard-deleted
+   * still leaves the staff row visible so an owner can clean it up.
+   */
+  email: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffListRow {
+  authUserId: string;
+  role: Role;
+  displayName: string;
+  email: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Input for `client.admin.auth.upsertStaff`. The API wraps
+ * `POST /admin/v1/auth/staff` and accepts the linked auth user's id; the
+ * UI-friendly variant accepts the email and resolves the id server-side
+ * once that flow ships. For v0.1 the SDK stays faithful to the API and
+ * forwards `authUserId` verbatim — the admin UI passes the id it already
+ * has from the staff list, and the "invite by email" flow is a follow-up.
+ */
+export interface UpsertStaffInput {
+  authUserId: string;
+  role: Role;
+  displayName: string;
+}
+
+// ----------------------------------------------------------------------------
+// API keys — mirror `ApiKeyWire` and `ApiKeyCreated` in
+// `apps/api/src/modules/auth/routes/openapi-schemas.ts`. The plaintext
+// `secret` ONLY appears on the create response; subsequent reads never
+// expose it (the database stores an Argon2id hash).
+// ----------------------------------------------------------------------------
+
+export type ApiKeyScope = "catalog:read" | "catalog:write" | "webhooks:receive";
+
+/**
+ * The documented set of API-key scopes. Mirrors `SCOPES` in
+ * `apps/api/src/modules/auth/types.ts`. Exposed as a `readonly` constant
+ * so the admin UI can iterate it for the multi-select without duplicating
+ * the membership.
+ */
+export const API_KEY_SCOPES: readonly ApiKeyScope[] = [
+  "catalog:read",
+  "catalog:write",
+  "webhooks:receive",
+] as const;
+
+export interface WireApiKey {
+  id: string;
+  name: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface ApiKey {
+  id: string;
+  /** Operator-supplied label. */
+  name: string;
+  scopes: ApiKeyScope[];
+  lastUsedAt: Date | null;
+  createdAt: Date;
+  revokedAt: Date | null;
+}
+
+/**
+ * Wire shape for a freshly-issued key. `plaintext` is the bearer string
+ * (`<id>.<secret>`) the operator must store immediately — it is returned
+ * exactly once and never persisted.
+ */
+export interface WireApiKeyCreated {
+  id: string;
+  name: string;
+  scopes: string[];
+  plaintext: string;
+  createdAt: string;
+}
+
+/**
+ * Domain shape for a freshly-issued API key. The `secret` field carries the
+ * single-use plaintext string. The field name diverges from the wire
+ * (`plaintext`) deliberately: callers think of it as "the secret to copy
+ * into a credential manager", and the rename signals that the value is
+ * sensitive in a way the rest of the type is not.
+ */
+export interface ApiKeyWithSecret extends ApiKey {
+  secret: string;
+}
+
+export interface CreateApiKeyInput {
+  /** Human-readable label, e.g. "Webhook receiver". 1–200 chars. */
+  label: string;
+  /** Non-empty, unique subset of `API_KEY_SCOPES`. */
+  scopes: ApiKeyScope[];
+  /**
+   * Reserved for future use. The v0.1 API accepts no expiry on creation
+   * (revocation is the only lifecycle exit); the field is declared on the
+   * SDK input shape so callers that pre-build an expiry-aware UI can pass
+   * it without a type error. The current client drops the value before
+   * sending the request.
+   */
+  expiresAt?: Date | null;
+}
+
+// ----------------------------------------------------------------------------
 // Admin products list
 // ----------------------------------------------------------------------------
 

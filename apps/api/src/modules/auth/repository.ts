@@ -48,6 +48,13 @@ export interface AuthRepository {
   deleteSessionsForUser(userId: string): Promise<void>;
   getStaffProfile(authUserId: string): Promise<StaffProfileRow | null>;
   upsertStaffProfile(input: NewStaffProfileRow): Promise<StaffProfileRow>;
+  /**
+   * List every staff_profile row joined with the matching auth_user email.
+   * The join is left-anchored on the staff row so a profile whose underlying
+   * auth user has been hard-deleted still surfaces (with a null email) —
+   * the operator can then promote a replacement and clean up.
+   */
+  listStaff(): Promise<Array<StaffProfileRow & { email: string | null }>>;
   hasAnyStaff(): Promise<boolean>;
   /** Take an advisory lock on the staff_profiles namespace for the
    *  current transaction. See implementation comment for details. */
@@ -137,7 +144,35 @@ export function createAuthRepository(db: Db = defaultDb): AuthRepository {
       return row;
     },
 
-    async hasAnyStaff(): Promise<boolean> {
+    async listStaff(): Promise<Array<StaffProfileRow & { email: string | null }>> {
+    // Join staff_profiles with auth_users so the admin UI can render the
+    // operator's email next to their role and display name. The join uses
+    // a left join so a staff row pointing at a deleted auth user still
+    // surfaces (with a null email) — that is recoverable through the
+    // existing assignRole flow rather than a silent disappearance.
+    const rows = await db
+      .select({
+        authUserId: staffProfiles.authUserId,
+        role: staffProfiles.role,
+        displayName: staffProfiles.displayName,
+        createdAt: staffProfiles.createdAt,
+        updatedAt: staffProfiles.updatedAt,
+        email: authUsers.email,
+      })
+      .from(staffProfiles)
+      .leftJoin(authUsers, eq(authUsers.id, staffProfiles.authUserId))
+      .orderBy(desc(staffProfiles.createdAt));
+    return rows.map((r) => ({
+      authUserId: r.authUserId,
+      role: r.role,
+      displayName: r.displayName,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      email: r.email ?? null,
+    }));
+  },
+
+  async hasAnyStaff(): Promise<boolean> {
       const [row] = await db
         .select({ exists: sql<number>`1` })
         .from(staffProfiles)
