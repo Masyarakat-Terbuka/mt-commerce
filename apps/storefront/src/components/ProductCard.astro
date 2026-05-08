@@ -25,7 +25,13 @@
  * View Transitions support fall through to a normal page swap.
  */
 import Price from "./Price.astro";
-import { resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import QuickAddButton from "@/islands/QuickAddButton";
+import {
+  resolveLocale,
+  localePath,
+  createTranslator,
+  type Locale,
+} from "@/lib/i18n";
 import type { StoreProduct } from "@/lib/api";
 
 export interface Props {
@@ -39,6 +45,7 @@ export interface Props {
 
 const { product, loading = "lazy" } = Astro.props;
 const locale: Locale = resolveLocale(Astro.currentLocale);
+const t = createTranslator(locale);
 const title = product.title[locale];
 const alt = product.imageAlt[locale];
 
@@ -46,6 +53,13 @@ const alt = product.imageAlt[locale];
 // product-level compare-at; per-variant is what's available today.
 const firstVariant = product.variants[0];
 const compareAt = firstVariant?.compareAt;
+
+// Quick-add only renders for single-variant products. Zero-variant
+// products (an admin edge case where the SKU is unconfigured) and
+// multi-variant products keep their plain-link card behavior — see
+// `QuickAddButton` for the rationale.
+const variantCount = product.variants.length;
+const quickAddVariantId = variantCount === 1 ? firstVariant!.id : null;
 
 /**
  * Build a `srcset` for the card image. Demo product images come from
@@ -94,7 +108,7 @@ const cardImg = product.hasImage ? unsplashSrcset(product.imageUrl) : null;
 ---
 
 <a href={localePath(locale, `/products/${product.slug}`)} class="group block">
-  <div class="bg-cream aspect-square w-full overflow-hidden">
+  <div class="bg-cream relative aspect-square w-full overflow-hidden">
     {
       cardImg ? (
         <img
@@ -113,6 +127,24 @@ const cardImg = product.hasImage ? unsplashSrcset(product.imageUrl) : null;
         </div>
       )
     }
+    {
+      /*
+        Quick-add overlay. Hydrates only when the card scrolls into
+        view (`client:visible`) so a 12-card grid does not pay 12
+        hydration costs upfront. The island returns null for
+        multi-variant and zero-variant products, so the SSR markup
+        is identical regardless and there is no layout shift after
+        hydration.
+      */
+    }
+    <QuickAddButton
+      client:visible
+      variantId={quickAddVariantId}
+      variantCount={variantCount}
+      label={t("quick_add.label")}
+      successLabel={t("quick_add.success")}
+      errorLabel={t("quick_add.error")}
+    />
   </div>
   <div class="mt-4 space-y-1">
     {
