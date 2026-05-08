@@ -1,0 +1,62 @@
+---
+title: Plugin
+description: Bagaimana mt-commerce diperluas — paket npm yang mendaftarkan provider, kanal, dan pendengar event saat boot.
+---
+
+Plugin adalah cara mt-commerce menerima ekstensi tanpa garpu kode
+(fork). Setiap plugin adalah paket npm yang ekspor default-nya pabrik
+mengembalikan manifes `Plugin` dari `definePlugin`. Saat API boot,
+loader menjalankan `setup(ctx)` setiap plugin, dan plugin
+mendaftarkan kontribusinya melalui `PluginContext`.
+
+## Empat titik perluasan
+
+| Registry                         | Untuk                                |
+| -------------------------------- | ------------------------------------ |
+| `registerPaymentProvider`        | Provider pembayaran (Midtrans, dll.) |
+| `registerShippingProvider`       | Provider pengiriman (Biteship, dll.) |
+| `registerNotificationChannel`    | Kanal kirim (WhatsApp, SMS, push)    |
+| `on(event, listener)`            | Pendengar event domain               |
+
+## Konfigurasi operator
+
+Operator menyalakan plugin di `mt-commerce.config.ts` di akar
+repositori:
+
+```ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import midtransPlugin from "@mt-commerce/plugin-payment-midtrans";
+
+export default defineConfig({
+  plugins: [
+    midtransPlugin({
+      serverKey: process.env.MIDTRANS_SERVER_KEY ?? "",
+      clientKey: process.env.MIDTRANS_CLIENT_KEY ?? "",
+      mode: "sandbox",
+    }),
+  ],
+});
+```
+
+Tidak ada `mt-commerce.config.ts`? Tidak ada plugin yang dimuat. API
+tetap boot dan API publik tetap berfungsi penuh tanpa plugin.
+
+## Mode kegagalan
+
+Kegagalan `setup` plugin secara default ditangani **lenient** — log
+eror dan lanjut. Operator yang memperlakukan plugin sebagai beban
+muatan kritis dapat menyetel `MT_COMMERCE_STRICT_PLUGINS=true` agar
+kegagalan plugin menggagalkan boot.
+
+## Tidak dapat dilakukan plugin
+
+- Tidak ada sandbox: plugin berjalan dengan hak yang sama dengan
+  proses API. Operator hanya memasang plugin yang mereka percaya.
+- Tidak ada hot-reload: pemutakhiran perlu reinstall dan restart.
+- Tidak boleh mengimpor modul API langsung. Hanya
+  `@mt-commerce/core/plugin` (dan sisa `@mt-commerce/core`) yang
+  menjadi permukaan publik.
+
+Untuk panduan langkah demi langkah membangun plugin, lihat
+[panduan penulis plugin](/plugins/author-guide/) dan
+[ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md).

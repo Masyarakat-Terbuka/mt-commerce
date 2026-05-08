@@ -1,0 +1,46 @@
+---
+title: Produk
+description: Bagaimana mt-commerce memodelkan produk, varian, kategori, dan stok.
+---
+
+Produk adalah inti katalog. Satu produk mewakili sebuah barang yang
+dijual — misalnya "Kemeja Linen" — sementara **varian** mewakili pilihan
+nyata yang bisa dibeli (ukuran M warna putih, ukuran L warna hitam, dan
+seterusnya). Stok dilacak per varian, bukan per produk.
+
+## Tabel utama
+
+- `products` — judul, deskripsi, status terbit, slug, gambar utama.
+- `product_variants` — SKU, harga, opsi (ukuran, warna, dll.), barcode.
+- `categories` — pohon kategori yang dapat ditugaskan banyak ke banyak.
+- `inventory_levels` — stok per varian, per lokasi gudang.
+
+Detail field dan endpoint admin/storefront tersedia di
+[modul katalog](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/api/src/modules/catalog/README.md).
+
+## Harga
+
+Harga disimpan sebagai bilangan bulat dengan unit terkecil mata uang
+(rupiah, sen). Tidak ada tipe `float`. Lihat
+[ADR-0007 (uang sebagai integer)](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0007-money-as-integers.md)
+untuk alasannya. Tipe `Money` dari `@mt-commerce/core` membungkus jumlah
+dan kode mata uang sehingga aritmatika lintas-mata-uang gagal di
+kompilasi, bukan diam-diam menghitung salah di produksi.
+
+Skema mendukung lebih dari satu daftar harga per produk — fitur B2B di
+masa depan akan memakainya. v0.1 hanya memakai satu harga publik.
+
+## Konten dwibahasa
+
+Judul dan deskripsi produk dapat memiliki terjemahan per bahasa
+(`id`, `en`). Storefront memilih terjemahan sesuai locale aktif dengan
+fallback ke `id`. Lihat
+[ADR-0010 (terjemahan konten produk)](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0010-product-content-translations.md).
+
+## Stok
+
+Penyesuaian stok ditulis melalui endpoint `/admin/v1/inventory` dan
+direkam di tabel `audit_log`. Penurunan stok pada checkout terjadi di
+dalam transaksi yang sama dengan pembuatan order, sehingga oversell
+karena race condition tidak mungkin pada lapisan basis data — tidak
+mengandalkan disiplin aplikasi semata.

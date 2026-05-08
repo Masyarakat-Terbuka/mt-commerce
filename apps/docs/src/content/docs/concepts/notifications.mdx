@@ -1,0 +1,60 @@
+---
+title: Notifikasi
+description: Bagaimana email, WhatsApp, dan kanal lain dipasang ke event domain mt-commerce.
+---
+
+Notifikasi mt-commerce digerakkan oleh event. Saat sebuah pesanan
+ditempatkan, pembayaran ditangkap, atau pengiriman dikirim, modul
+notifikasi memilih kanal yang dikonfigurasi untuk jenis tersebut dan
+memanggil setiap kanal sekali.
+
+## Antarmuka kanal
+
+```ts
+ctx.registerNotificationChannel({
+  id: "sms",
+  async send({ recipient, kind, body }) {
+    /* kirim melalui jaringan; lempar saat gagal transport */
+  },
+});
+```
+
+Kanal bawaan: `email` (SMTP, dengan fallback konsol untuk
+pengembangan), dan `whatsapp` (stub yang melempar; gantikan dengan
+[plugin WhatsApp](/plugins/notification-whatsapp/) di produksi).
+
+ID `email` dan `whatsapp` dipesan; plugin pihak ketiga harus memilih
+ID baru (`sms`, `push`, `whatsapp-cloud`).
+
+## Kind dan template
+
+Modul notifikasi mengetahui tiga jenis pesan untuk v0.1:
+
+| Kind                  | Dipicu oleh                          |
+| --------------------- | ------------------------------------ |
+| `order_confirmation`  | `order.placed`                       |
+| `payment_received`    | `order.paid`                         |
+| `shipping_update`     | `fulfillment.shipped`/`.delivered`   |
+
+Setiap kanal memetakan kind ke template-nya sendiri. Plugin WhatsApp
+memetakan ke template Meta yang sudah disetujui; adapter SMTP
+me-render template MJML lokal.
+
+## Idempotensi dan audit
+
+Modul memberikan jaminan **kirim sekali per `(event_id, kind, channel)`**.
+Indeks unik parsial pada `notification_audit` mencegah duplikasi bahkan
+jika pendengar event berjalan dua kali (yang dapat terjadi setelah
+restart). Audit row ditulis sebelum panggilan kanal:
+
+- Lemparan dari `send` → status `failed` plus pesan kesalahan.
+- Kembali normal → status `sent`.
+
+Lihat
+[ADR-0014 (notification listeners)](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0014-notification-listeners.md).
+
+## Mengapa terpisah per kanal
+
+Email dan WhatsApp dikirim **mandiri** dari pendengar yang sama.
+Kegagalan WhatsApp tidak menghentikan email, dan sebaliknya. Ini
+membuat notifikasi tetap bermanfaat saat satu kanal sedang sakit.

@@ -1,0 +1,39 @@
+---
+title: Pengantar admin
+description: Apa yang dilakukan admin mt-commerce, dan bagaimana panduan ini disusun.
+---
+
+Admin mt-commerce adalah tempat Anda menjalankan toko sehari-hari:
+menambah produk, melihat pesanan, mencatat stok, dan mengatur staf.
+Panduan ini ditulis untuk pemilik toko dan tim mereka — bukan untuk
+pengembang.
+
+Setiap halaman pendek dan berfokus pada satu pekerjaan. Bila Anda baru
+memulai, urutan yang disarankan:
+
+1. **[Produk](/admin/produk/)** — masukkan barang yang Anda jual.
+2. **[Inventaris](/admin/inventaris/)** — pastikan stok awal benar.
+3. **[Pengaturan](/admin/pengaturan/)** — alamat toko, mata uang, dan
+   pajak.
+4. **[Staf](/admin/staf/)** — tambahkan rekan tim dengan peran sesuai.
+5. **[Pesanan](/admin/pesanan/)** dan **[pelanggan](/admin/pelanggan/)**
+   — kembali ke sini setiap hari saat toko sudah mulai berjalan.
+
+## Masuk
+
+Buka URL admin Anda (di pengembangan: `http://localhost:5173`).
+Masukkan email dan kata sandi pemilik atau staf yang sudah dibuat.
+Sesi berlaku tujuh hari sebelum perlu masuk ulang.
+
+## Bila ada yang macet
+
+- Tombol tidak merespons → muat ulang halaman.
+- Pesan "tidak diizinkan" → peran Anda tidak punya akses ke aksi itu;
+  mintakan kepada pemilik (lihat [Staf](/admin/staf/)).
+- Data tidak muncul → cek koneksi internet dan status server toko di
+  panel deploy Anda.
+
+Bila masalah berlanjut, hubungi developer atau agensi yang men-deploy
+toko Anda. Bila Anda men-deploy sendiri, bagian
+[penyebaran](/deployment/getting-started/) di sisi pengembang
+dokumentasi ini berisi langkah-langkah pemulihan.

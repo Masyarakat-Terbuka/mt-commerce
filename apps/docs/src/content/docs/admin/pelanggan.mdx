@@ -1,0 +1,47 @@
+---
+title: Mengelola pelanggan
+description: Mencari pelanggan, melihat riwayat pesanan, dan mengelola alamat.
+---
+
+Halaman **Pelanggan** menampilkan semua orang yang pernah membuat akun
+atau bertransaksi sebagai tamu di toko Anda. Anda memakai halaman ini
+untuk mendukung pelanggan — menjawab pertanyaan, mencari pesanan, atau
+memperbarui alamat — bukan untuk pemasaran.
+
+## Mencari
+
+Kotak pencarian di atas mencocokkan nama, email, dan nomor telepon
+pelanggan. Pencarian berjalan langsung tanpa perlu menekan Enter.
+
+## Detail pelanggan
+
+Klik baris untuk membuka profil. Yang Anda lihat:
+
+- Identitas: nama, email, telepon (bila ada).
+- Daftar alamat tersimpan, lengkap dengan struktur Indonesia
+  (provinsi, kabupaten/kota, kecamatan, kelurahan, kode pos).
+- Riwayat pesanan terbaru, dengan tautan ke setiap pesanan.
+- Catatan internal — tempat Anda mencatat informasi yang berguna untuk
+  tim (misalnya "lebih suka dihubungi via WhatsApp", "pelanggan
+  korporat — mintakan invoice"). Pelanggan tidak melihat ini.
+
+## Pelanggan tamu
+
+Pembeli yang checkout tanpa membuat akun tetap muncul sebagai
+pelanggan, tetapi tidak dapat masuk ke akun. Email dan alamat mereka
+tetap tersimpan di pesanan yang bersangkutan, dan bila kemudian mereka
+mendaftarkan akun dengan email yang sama, pesanan-pesanan lama otomatis
+terkait ke akun baru.
+
+## Privasi
+
+Hanya peran `owner` dan `admin` yang dapat melihat email dan telepon
+penuh. Peran `staff` melihat versi yang dimasker (misalnya
+`an•••@example.com`) untuk mengurangi risiko ekspor data tidak sengaja.
+Semua pembacaan profil pelanggan dicatat di audit log.
+
+## Penghapusan
+
+Permintaan penghapusan data pelanggan ditangani melalui pengaturan
+toko, bukan tombol di halaman ini. Lihat
+[Pengaturan](/admin/pengaturan/).

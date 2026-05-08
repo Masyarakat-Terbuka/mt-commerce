@@ -1,0 +1,53 @@
+---
+title: Staf dan peran
+description: Mengundang rekan tim, menetapkan peran, dan membatalkan akses.
+---
+
+Halaman **Staf** mengontrol siapa yang dapat masuk ke admin dan apa
+yang dapat mereka kerjakan. Akses pelanggan ke storefront dikelola
+terpisah — staf di sini hanya berarti tim toko Anda.
+
+## Peran
+
+| Peran     | Yang bisa dilakukan                                                  |
+| --------- | -------------------------------------------------------------------- |
+| Pemilik   | Semua. Termasuk mengatur tim dan pengaturan akun toko.               |
+| Admin     | Semua kecuali tim dan pengaturan akun.                               |
+| Staf      | Mengelola produk, pesanan, dan pelanggan. Tidak bisa kunci API.       |
+| Peninjau  | Hanya melihat. Tidak bisa mengubah apa pun.                          |
+
+Toko hanya boleh punya satu atau lebih pemilik. Pemilik pertama
+diatur saat instalasi — lihat
+[panduan deploy](/deployment/getting-started/).
+
+## Mengundang rekan tim
+
+1. Klik **Undang staf**.
+2. Masukkan email dan nama mereka.
+3. Pilih peran sesuai tabel di atas.
+4. Kirim. Mereka menerima email yang berisi tautan untuk membuat kata
+   sandi.
+
+Bila email tidak sampai dalam beberapa menit, periksa folder spam dan
+pastikan SMTP toko sudah terkonfigurasi. Anda juga dapat menyalin
+tautan undangan secara langsung dari halaman staf.
+
+## Mengubah peran
+
+Buka baris staf, pilih peran baru, dan simpan. Perubahan berlaku pada
+permintaan berikutnya (mereka tidak perlu masuk ulang).
+
+## Mencabut akses
+
+Klik **Nonaktifkan** pada baris staf. Mereka tidak dapat masuk lagi,
+tetapi pesanan dan catatan yang pernah mereka buat tetap utuh dengan
+nama mereka untuk keperluan audit.
+
+## Kunci API
+
+Kunci API berbeda dari pengguna staf — dipakai oleh layanan luar
+(misalnya skrip impor produk, integrasi marketplace). Hanya pemilik
+dan admin yang dapat membuat kunci API. Setiap kunci punya cakupan
+spesifik (misalnya `catalog:read`). Lihat
+[autentikasi](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/api/authentication.md)
+untuk teknisnya.
