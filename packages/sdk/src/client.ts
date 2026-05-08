@@ -2055,6 +2055,7 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           status: query?.status,
           customerId: query?.customerId,
           email: query?.email,
+          orderNumber: query?.orderNumber,
           createdFrom:
             query?.createdFrom instanceof Date
               ? query.createdFrom.toISOString()
@@ -2090,37 +2091,38 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         return toOrder(wire);
       },
       async byNumber(orderNumber, opts) {
-        // The admin API does not yet expose a `/orders/by-number/...`
-        // shortcut — the number is unique, so we walk the list (newest
-        // first) and surface a 404 ApiError when no page contains the
-        // requested order. A dedicated endpoint can be added later
-        // without changing this signature.
+        // The admin list endpoint accepts `?orderNumber=` for an exact
+        // match, so the lookup is a single request that asks for at
+        // most one row. A 404 ApiError surfaces when nothing matches —
+        // callers can `try/catch` on `ApiError.status === 404` to
+        // distinguish "no such order" from a transport failure.
         //
-        // Page size is 100 (the API's `MAX_PAGE_SIZE`) so the typical
-        // recent-order lookup costs exactly one round trip; older orders
-        // walk forward in 100-row chunks. We cap the walk at a generous
-        // upper bound so a typo cannot turn into an unbounded scan.
-        const { locale, ...requestOptions } = opts ?? {};
-        const PAGE_SIZE = 100;
-        const MAX_PAGES = 50;
-        const localeValue = resolveLocale(adminCtx, locale);
-        for (let page = 1; page <= MAX_PAGES; page++) {
-          const qs = buildQuery({
-            locale: localeValue,
-            page,
-            pageSize: PAGE_SIZE,
+        // The server folds empty / whitespace `orderNumber` to "no
+        // filter" and would happily return the newest order, which is
+        // never what the caller wanted — refuse here so the bug stays
+        // local instead of surfacing as a wrong-row response.
+        const trimmed = orderNumber.trim();
+        if (trimmed.length === 0) {
+          throw new ApiError({
+            code: "validation_error",
+            message: "byNumber requires a non-empty order number.",
+            status: 400,
           });
-          const wire = await request<WirePaginated<WireOrder>>(
-            adminCtx,
-            `/admin/v1/orders${qs}`,
-            requestOptions,
-          );
-          const match = wire.data.find((o) => o.orderNumber === orderNumber);
-          if (match) return toOrder(match);
-          // Stop when we've consumed the full result set.
-          if (wire.data.length < PAGE_SIZE) break;
-          if (page * PAGE_SIZE >= wire.total) break;
         }
+        const { locale, ...requestOptions } = opts ?? {};
+        const qs = buildQuery({
+          orderNumber: trimmed,
+          page: 1,
+          pageSize: 1,
+          locale: resolveLocale(adminCtx, locale),
+        });
+        const wire = await request<WirePaginated<WireOrder>>(
+          adminCtx,
+          `/admin/v1/orders${qs}`,
+          requestOptions,
+        );
+        const match = wire.data[0];
+        if (match) return toOrder(match);
         throw new ApiError({
           code: "not_found",
           message: `Order ${orderNumber} was not found.`,
