@@ -360,6 +360,54 @@ export interface CustomerAddress {
 }
 
 // ----------------------------------------------------------------------------
+// Admin customer surface — wire and domain shapes for the embedded
+// "customer + addresses" detail response, plus the admin-side write inputs.
+// Mirrors `apps/api/src/modules/customer/routes/admin.ts`. Reads use the
+// `Customer` / `CustomerAddress` shapes already declared above; only the
+// detail envelope and admin-write inputs are new.
+// ----------------------------------------------------------------------------
+
+export interface WireCustomerWithAddresses extends WireCustomer {
+  addresses: WireCustomerAddress[];
+}
+
+export interface CustomerWithAddresses extends Customer {
+  addresses: CustomerAddress[];
+}
+
+export interface AdminListCustomersQuery {
+  /** Exact-match email filter. Mutually compatible with `search`. */
+  email?: string;
+  /** Free-text search over name / email / phone. */
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AdminCreateCustomerInput {
+  email: string;
+  displayName?: string | null;
+  phone?: string | null;
+  taxIdentifier?: string | null;
+  companyName?: string | null;
+  /**
+   * Optional auth-user link. The admin API accepts this so a freshly
+   * provisioned auth identity can be attached at creation time; most admin
+   * flows omit it.
+   */
+  authUserId?: string | null;
+}
+
+export interface AdminUpdateCustomerInput {
+  email?: string;
+  displayName?: string | null;
+  phone?: string | null;
+  taxIdentifier?: string | null;
+  companyName?: string | null;
+  authUserId?: string | null;
+}
+
+// ----------------------------------------------------------------------------
 // Shipping wire and domain shapes — mirror
 // `apps/api/src/modules/shipping/routes/wire.ts`. The storefront only needs
 // the listing endpoint (and a quote helper for advanced flows); the broader
