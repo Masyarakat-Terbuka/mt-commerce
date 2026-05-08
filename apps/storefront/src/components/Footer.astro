@@ -55,10 +55,17 @@ const categoryLinks = allCategories.slice(0, 6).map((c) => ({
 
 // Sitemap data. Defining the columns once keeps the desktop grid and the
 // mobile <details> stack rendering from a single source.
+//
+// "Koleksi" sits at the top of the Shop column above "All products" and
+// the category list — it surfaces curated landing pages without needing
+// a sixth footer column. PRODUCT.md rules out a CMS for v0.1, so the
+// link points at the hardcoded registry's index, not a navigation tree.
 const productsHref = localePath(locale, "/products");
+const collectionsHref = localePath(locale, "/collections");
 const shopColumn = {
   heading: t("footer.shop.heading"),
   links: [
+    { label: t("collections.index.title"), href: collectionsHref },
     { label: t("footer.shop.all_products"), href: productsHref },
     ...categoryLinks,
   ],
