@@ -218,14 +218,14 @@ export function InventoryPage() {
   const adjustingRow = React.useMemo(
     () =>
       adjustOpenForVariantId
-        ? rows.find((row) => row.variantId === adjustOpenForVariantId) ?? null
+        ? (rows.find((row) => row.variantId === adjustOpenForVariantId) ?? null)
         : null,
     [adjustOpenForVariantId, rows],
   );
   const auditingRow = React.useMemo(
     () =>
       auditOpenForVariantId
-        ? rows.find((row) => row.variantId === auditOpenForVariantId) ?? null
+        ? (rows.find((row) => row.variantId === auditOpenForVariantId) ?? null)
         : null,
     [auditOpenForVariantId, rows],
   );
@@ -266,7 +266,7 @@ export function InventoryPage() {
                 void refetch();
               }}
             >
-              {t("common.loading")}
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -326,9 +326,7 @@ export function InventoryPage() {
                     row={row}
                     locale={locale}
                     onAdjust={() => setAdjustOpenForVariantId(row.variantId)}
-                    onShowAudit={() =>
-                      setAuditOpenForVariantId(row.variantId)
-                    }
+                    onShowAudit={() => setAuditOpenForVariantId(row.variantId)}
                   />
                 ))
               ) : (
@@ -444,16 +442,15 @@ function InventoryRow({
   onShowAudit,
 }: InventoryRowProps) {
   const t = useTranslator();
-  const { data: level, isPending: isLevelPending } = useQuery<
-    InventoryLevel | null
-  >({
-    queryKey: inventoryQueryKey(row.variantId),
-    queryFn: () => api.admin.inventory.byVariantId(row.variantId),
-    // The variant-level row state is unlikely to change between paints
-    // unless an adjust runs locally — the mutation's onSuccess writes to
-    // this same key, so a stale window is fine.
-    staleTime: 30_000,
-  });
+  const { data: level, isPending: isLevelPending } =
+    useQuery<InventoryLevel | null>({
+      queryKey: inventoryQueryKey(row.variantId),
+      queryFn: () => api.admin.inventory.byVariantId(row.variantId),
+      // The variant-level row state is unlikely to change between paints
+      // unless an adjust runs locally — the mutation's onSuccess writes to
+      // this same key, so a stale window is fine.
+      staleTime: 30_000,
+    });
 
   const stockKnown = level !== undefined && level !== null;
   const isLowStock =
@@ -481,7 +478,9 @@ function InventoryRow({
       <TableCell>
         <div className="flex flex-col gap-0.5">
           <span className="text-sm">
-            {row.variantTitle ?? <span className="text-muted-foreground">—</span>}
+            {row.variantTitle ?? (
+              <span className="text-muted-foreground">—</span>
+            )}
           </span>
           <span className="text-xs text-muted-foreground">
             {formatMoney(
@@ -866,11 +865,7 @@ function AuditSheet({ row, open, onOpenChange, locale }: AuditSheetProps) {
           ) : (
             <ul className="flex flex-col gap-3 py-2">
               {data?.data.map((entry) => (
-                <AuditEntryItem
-                  key={entry.id}
-                  entry={entry}
-                  locale={locale}
-                />
+                <AuditEntryItem key={entry.id} entry={entry} locale={locale} />
               ))}
             </ul>
           )}
