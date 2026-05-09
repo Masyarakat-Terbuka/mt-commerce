@@ -55,6 +55,23 @@ export default defineConfig({
           link: "/architecture",
         },
         {
+          label: "Pengembangan",
+          translations: { en: "Development" },
+          collapsed: true,
+          items: [
+            {
+              label: "Mulai bagi pengembang",
+              translations: { en: "Getting started" },
+              link: "/development/getting-started",
+            },
+            {
+              label: "Alur migrasi",
+              translations: { en: "Migration workflow" },
+              link: "/development/migrations",
+            },
+          ],
+        },
+        {
           label: "Konsep",
           translations: { en: "Concepts" },
           collapsed: true,

@@ -1,0 +1,162 @@
+---
+title: Migration workflow
+description: How to change the mt-commerce database schema — migration files, the journal, the forward-only policy, and idempotency rules.
+---
+
+mt-commerce uses [Drizzle ORM](https://orm.drizzle.team/) for the
+type-safe schema and
+[drizzle-kit](https://orm.drizzle.team/kit-docs/overview) for
+migration generation. The migrations themselves are plain SQL files,
+committed to the repo and applied by the Drizzle runner at API boot
+or via the CI script.
+
+## Layout
+
+```
+apps/api/
+  src/db/
+    schema/                    # one file per table + an index.ts barrel
+      products.ts
+      orders.ts
+      ...
+    migrate.ts                 # the runner: bun run db:migrate
+  drizzle/
+    migrations/
+      0000_init.sql
+      0001_<topic>.sql
+      ...
+      meta/
+        _journal.json          # ordered list of tracked migrations
+```
+
+`schema/` holds the Drizzle definitions TypeScript uses for
+type-checking queries. `drizzle/migrations/` holds the static
+artifacts that run against the database — a commit to `schema/`
+does not automatically change the database; you have to generate (or
+hand-write) a migration.
+
+## Authoring a new migration
+
+Two paths, picked by the shape of the change.
+
+### Path 1: drizzle-kit generate
+
+For ordinary column / table / enum changes Drizzle can read off a
+schema diff:
+
+```bash
+# 1. Edit a file under apps/api/src/db/schema/ to describe the new state.
+# 2. Generate the diff SQL:
+bun --filter '@mt-commerce/api' db:generate
+```
+
+drizzle-kit writes a new numbered `.sql` file under
+`drizzle/migrations/` and appends an entry to `meta/_journal.json`.
+Review the generated SQL — the generator is good but it is not a
+substitute for review.
+
+### Path 2: hand-written SQL
+
+For things Drizzle cannot express: generated columns
+(`GENERATED ALWAYS AS ... STORED`), GIN/GiST indexes, partial
+indexes, custom functions or triggers, data backfills, or
+`pg_extension` requirements.
+
+1. Create `apps/api/drizzle/migrations/NNNN_short_description.sql` —
+   `NNNN` is the next sequential number, zero-padded to four digits.
+2. Append an entry to `apps/api/drizzle/migrations/meta/_journal.json`
+   with `idx`, `version: "7"`, `when` (epoch ms — use the build
+   timestamp or just bump by 86_400_000 from the last entry if it
+   does not matter), a `tag` matching the filename (without the
+   `.sql` extension), and `breakpoints: true`.
+3. Separate statements with `--> statement-breakpoint` so the runner
+   wraps each into its own transaction when needed.
+
+Migration 0017 (the `search_vector` generated column and its GIN
+index) is the canonical example for this path.
+
+## Idempotency
+
+Migrations must be safe to re-run against a database that already
+has them. The patterns used in the repo:
+
+```sql
+-- For objects that take IF NOT EXISTS:
+CREATE TABLE IF NOT EXISTS "..." (...);
+CREATE INDEX IF NOT EXISTS "..." ON ... ;
+ALTER TABLE "..." ADD COLUMN IF NOT EXISTS "..." ...;
+
+-- For ones that don't (e.g. CREATE TYPE):
+DO $$ BEGIN
+ CREATE TYPE "public"."x_status" AS ENUM('a', 'b');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+```
+
+Every existing migration can be run twice without breaking. The
+Drizzle runner reads the journal and skips what already ran, but the
+defense-in-depth helps when a developer cleans things up by hand.
+
+## Forward-only
+
+There are no `down` migrations. A bug in a migration is fixed by the
+next migration, not by rolling back. The reasoning:
+
+- Operators deploying mt-commerce will not be hand-writing rollback
+  SQL; rolling forward is the supported path.
+- Production databases do not get back rows a `down` migration was
+  supposed to restore. "Roll back, then roll forward" frequently
+  loses data.
+- The audit log and commit-message-as-evidence-of-truth break when
+  migrations can be unwound.
+
+If a migration proves wrong after merge, write the next migration to
+fix the state, and document what changed in its commit message.
+
+## Running migrations
+
+Locally:
+
+```bash
+bun --filter '@mt-commerce/api' db:migrate
+```
+
+In production: the API Docker image runs migrations automatically at
+its entrypoint (`bun run db:migrate && bun run start`). Because the
+files are forward-only and idempotent, this is safe on every deploy.
+
+In CI: add `bun --filter '@mt-commerce/api' db:migrate` as an
+explicit step if you deploy via a path other than the compose flow.
+
+## Audit logging
+
+Domain state changes (not schema changes) are logged to `audit_log`
+via `recordAudit` at the service layer, not by migrations. Migrations
+touch the schema; the runtime touches the data. If you do need to
+backfill data as part of a migration, keep the scope tight and
+deterministic — every data mutation in a migration is one more thing
+that can diverge between environments.
+
+## Testing migrations
+
+Vitest unit tests use an in-memory repository and do not touch
+Postgres. To validate a migration against a real database:
+
+1. `bun run reset` (drops the Docker volumes).
+2. `bun run setup` (runs migrations on an empty DB).
+3. Exercise the operation the migration is meant to support — usually
+   the relevant service test or a manual HTTP route invocation.
+
+`bun run reset` is safe to run any time locally; there is no other
+data on a development machine.
+
+## Quick rules
+
+- New file with the next sequential, zero-padded four-digit number.
+- A matching entry in `meta/_journal.json`.
+- Idempotent: safe to re-run.
+- Forward-only: no `down` migrations.
+- Statement breakpoints separate independent statements.
+- No data mutations unless strictly necessary — and when it is, keep
+  them deterministic.

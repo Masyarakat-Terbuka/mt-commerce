@@ -1,0 +1,162 @@
+---
+title: Alur migrasi
+description: Cara mengubah skema database mt-commerce — file migrasi, jurnal, kebijakan forward-only, dan aturan idempotensi.
+---
+
+mt-commerce memakai [Drizzle ORM](https://orm.drizzle.team/) untuk
+skema-tipe-aman dan [drizzle-kit](https://orm.drizzle.team/kit-docs/overview)
+untuk pembangkitan migrasi. Migrasi sendiri adalah file SQL biasa
+yang di-commit ke repo dan dijalankan oleh runner Drizzle saat boot
+API atau lewat skrip CI.
+
+## Tata letak
+
+```
+apps/api/
+  src/db/
+    schema/                    # satu file per tabel + index.ts barrel
+      products.ts
+      orders.ts
+      ...
+    migrate.ts                 # runner: bun run db:migrate
+  drizzle/
+    migrations/
+      0000_init.sql
+      0001_<topic>.sql
+      ...
+      meta/
+        _journal.json          # daftar terurut migrasi yang ditrack drizzle-kit
+```
+
+`schema/` adalah definisi Drizzle yang TypeScript pakai untuk type-checking
+query. `drizzle/migrations/` adalah artifact statis yang dijalankan
+terhadap database — apa yang Anda commit ke `schema/` tidak otomatis
+mengubah database; Anda harus membangkitkan (atau menulis) migrasi.
+
+## Membuat migrasi baru
+
+Dua jalur, dipilih sesuai bentuk perubahan.
+
+### Jalur 1: drizzle-kit generate
+
+Untuk perubahan kolom/tabel/enum biasa yang Drizzle dapat baca dari
+diff skema:
+
+```bash
+# 1. Edit file di apps/api/src/db/schema/ untuk mendeskripsikan keadaan baru.
+# 2. Bangkitkan SQL diff:
+bun --filter '@mt-commerce/api' db:generate
+```
+
+drizzle-kit menulis file `.sql` baru ber-nomor di
+`drizzle/migrations/` dan menambahkan entri ke `meta/_journal.json`.
+Periksa SQL yang dihasilkan — generator-nya bagus, tetapi bukan
+substitusi review.
+
+### Jalur 2: SQL yang ditulis tangan
+
+Untuk hal yang tidak dapat Drizzle ekspresikan: kolom yang dihasilkan
+(`GENERATED ALWAYS AS ... STORED`), index GIN/GiST, partial index,
+fungsi atau trigger custom, backfill data, atau `pg_extension`
+yang dibutuhkan.
+
+1. Buat `apps/api/drizzle/migrations/NNNN_short_description.sql` —
+   `NNNN` adalah nomor berikutnya yang berurutan, di-pad zero ke
+   empat digit.
+2. Tambahkan entri ke `apps/api/drizzle/migrations/meta/_journal.json`
+   dengan `idx`, `version: "7"`, `when` (epoch ms — pakai timestamp
+   build-an Anda atau kelipatan +86400000 dari entri sebelumnya
+   bila tidak penting), `tag` yang cocok dengan nama file (tanpa
+   ekstensi `.sql`), dan `breakpoints: true`.
+3. Pisahkan pernyataan dengan `--> statement-breakpoint` agar runner
+   menerjemahkannya ke transaksi-per-pernyataan saat diperlukan.
+
+Migrasi 0017 (kolom `search_vector` dan index GIN-nya) adalah contoh
+canonical untuk pola ini.
+
+## Idempotensi
+
+Migrasi harus aman dijalankan terhadap database yang sudah memilikinya.
+Pola yang dipakai di repo:
+
+```sql
+-- Untuk objek yang dapat di-IF NOT EXISTS:
+CREATE TABLE IF NOT EXISTS "..." (...);
+CREATE INDEX IF NOT EXISTS "..." ON ... ;
+ALTER TABLE "..." ADD COLUMN IF NOT EXISTS "..." ...;
+
+-- Untuk yang tidak (mis. CREATE TYPE):
+DO $$ BEGIN
+ CREATE TYPE "public"."x_status" AS ENUM('a', 'b');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+```
+
+Setiap migrasi yang ada bisa dijalankan dua kali tanpa rusak. Runner
+Drizzle membaca jurnal dan melewati apa yang sudah dijalankan, tetapi
+defense in depth membantu saat developer membersihkan secara manual.
+
+## Forward-only
+
+Tidak ada migrasi `down`. Bug di migrasi diperbaiki oleh migrasi
+berikutnya, bukan dengan rollback. Alasannya:
+
+- Operator yang men-deploy mt-commerce tidak akan menulis SQL rollback
+  manual; di-deploy maju adalah jalur yang dipakai.
+- Database produksi tidak mengembalikan baris yang sudah dihapus
+  dengan migrasi `down` yang dimaksudkan. "Memutar balik" lalu
+  "memutar maju" sering kali kehilangan data.
+- Audit log dan event berbasis-pesan-commit kehilangan kebenaran
+  secara historis bila migrasi dapat ditarik kembali.
+
+Bila migrasi terbukti salah setelah merge, tulis migrasi berikutnya
+yang memperbaiki keadaan, dan dokumentasikan apa yang berubah di
+pesan commit-nya.
+
+## Menjalankan migrasi
+
+Lokal:
+
+```bash
+bun --filter '@mt-commerce/api' db:migrate
+```
+
+Produksi: container API Docker menjalankan migrasi otomatis di entry
+point-nya (`bun run db:migrate && bun run start`). Karena file-file
+forward-only dan idempotent, ini aman dijalankan tiap deploy.
+
+CI/CD: tambahkan `bun --filter '@mt-commerce/api' db:migrate` sebagai
+langkah eksplisit bila Anda men-deploy lewat alur selain compose.
+
+## Audit log
+
+Perubahan keadaan domain (bukan perubahan skema) di-log ke
+`audit_log` lewat `recordAudit` di service layer, bukan oleh migrasi.
+Migrasi menyentuh skema; runtime menyentuh data. Bila Anda butuh
+backfill data sebagai bagian migrasi, jaga ruang lingkup-nya kecil
+dan deterministik — setiap data-mutation di migrasi adalah satu hal
+yang bisa berdivergensi antar lingkungan.
+
+## Menguji migrasi
+
+Vitest unit-test memakai repository in-memory dan tidak menyentuh
+Postgres. Untuk memvalidasi migrasi lawan database nyata:
+
+1. `bun run reset` (menghapus volume Docker).
+2. `bun run setup` (menjalankan migrasi pada DB kosong).
+3. Lakukan operasi yang Anda harapkan migrasi mendukungnya — biasanya
+   service test yang terpisah atau invokasi route HTTP manual.
+
+`bun run reset` aman dijalankan kapan saja di lokal; di mesin
+pengembangan tidak ada data lain.
+
+## Aturan singkat
+
+- File baru ber-nomor yang berurutan, di-pad ke empat digit.
+- Entri yang cocok di `meta/_journal.json`.
+- Idempotent: aman untuk dijalankan ulang.
+- Forward-only: tidak ada migrasi `down`.
+- Statement breakpoints memisahkan pernyataan independen.
+- Tidak ada data-mutation kecuali sangat perlu, dan saat itu, tetap
+  deterministik.

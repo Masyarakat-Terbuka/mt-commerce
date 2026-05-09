@@ -1,0 +1,159 @@
+---
+title: Mulai bagi pengembang
+description: Memasang lingkungan pengembangan mt-commerce, struktur workspace, perintah harian, dan konvensi yang ditegakkan oleh hook.
+---
+
+Halaman ini ditujukan untuk kontributor — orang yang akan menyentuh
+kode. Bila Anda hanya ingin mencoba platform di laptop, panduan
+[mulai cepat](/quickstart) lebih ringkas.
+
+## Prasyarat
+
+- [Bun](https://bun.sh/) 1.3.7 atau lebih baru. Cek dengan
+  `bun --version`. Versi yang dipakai repo terikat di `.bun-version`.
+- [Docker Desktop](https://www.docker.com/) dengan plugin Compose.
+  Postgres dan Redis berjalan sebagai container saat pengembangan
+  lokal.
+- Git.
+
+`bun install` mengatur sisanya — tidak perlu Node atau npm terpisah.
+
+## Setup pertama kali
+
+Skrip yang melakukan semuanya:
+
+```bash
+git clone https://github.com/masyarakat-terbuka/mt-commerce.git
+cd mt-commerce
+bun run setup
+```
+
+`bun run setup` bersifat idempotent. Yang dilakukan, dalam urutan:
+
+1. Memastikan `bun` dan `docker` tersedia.
+2. Menyalin `apps/{api,admin,storefront}/.env.example` ke `.env` bila
+   belum ada (file Anda yang ada tidak ditimpa).
+3. `bun install` untuk seluruh workspace.
+4. `docker compose up -d --wait` agar Postgres dan Redis sehat.
+5. Menjalankan migrasi database.
+6. Seed wilayah Indonesia dan katalog demo.
+
+Bila Anda ingin mengulang dari nol — termasuk menghapus volume
+database — gunakan `bun run reset`.
+
+## Menjalankan stack
+
+```bash
+bun run dev
+```
+
+Perintah ini menjalankan API, admin, dan storefront secara paralel
+lewat Bun workspace filter.
+
+| Aplikasi    | URL                       | Port |
+| ----------- | ------------------------- | ---- |
+| API         | http://localhost:8000     | 8000 |
+| Storefront  | http://localhost:4321     | 4321 |
+| Admin       | http://localhost:5173     | 5173 |
+
+Untuk login admin pertama kali, lihat bagian "Provisioning owner
+pertama" di [Autentikasi](/api-reference/authentication).
+
+## Tata letak workspace
+
+mt-commerce adalah monorepo Bun. Bagian utamanya:
+
+```
+apps/
+  api/         # Hono pada Bun — modul commerce di belakang HTTP
+  admin/       # Vite + React SPA
+  storefront/  # Astro 5 + pulau React
+  docs/        # situs Starlight ini
+packages/
+  core/        # tipe lintas-modul ringan + permukaan plugin
+  sdk/         # klien fetch ber-tipe untuk API
+  plugins/     # paket plugin (example, midtrans, biteship, whatsapp)
+  eslint-config/
+  prettier-config/
+docs/
+  adr/         # Architecture Decision Records
+scripts/       # setup, reset, hook commit-msg
+```
+
+Detail lebih lengkap ada di
+[ARSITEKTUR](/architecture).
+
+## Perintah harian
+
+Setiap perintah di tabel ini berjalan di seluruh workspace lewat
+filter `bun --filter '*'`. Tambahkan `--filter @mt-commerce/<paket>`
+untuk membatasi ke satu paket.
+
+| Perintah              | Tujuan                                    |
+| --------------------- | ----------------------------------------- |
+| `bun run dev`         | Hidupkan API + admin + storefront         |
+| `bun run build`       | Build seluruh workspace                   |
+| `bun run typecheck`   | TypeScript di seluruh paket               |
+| `bun run lint`        | ESLint                                    |
+| `bun run format`      | Prettier (write)                          |
+| `bun run format:check`| Prettier (check, untuk CI)                |
+
+Test berjalan per-paket:
+
+```bash
+bun --filter '@mt-commerce/api' test
+bun --filter '@mt-commerce/storefront' test
+bun --filter '@mt-commerce/plugin-payment-midtrans' test
+```
+
+## Konvensi
+
+Hook git menegakkan konvensi penting otomatis. Anda jarang perlu
+memikirkannya.
+
+- **Pesan commit** mengikuti
+  [Conventional Commits](https://www.conventionalcommits.org/). Hook
+  `commit-msg` (di `scripts/check-commit-msg.sh`) memvalidasi
+  bentuk `<type>(<scope>)?: <subject>` dengan whitelist scope yang
+  menyebut workspace dan domain.
+- **lint-staged + prettier + eslint** berjalan di hook `pre-commit`
+  untuk file yang ter-stage. File akan diformat dan auto-fixed; bila
+  ada error yang tersisa, commit ditolak dengan pesan jelas.
+
+Lihat [`CONTRIBUTING.md`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/CONTRIBUTING.md)
+di repo untuk pedoman PR yang lebih luas.
+
+## Database
+
+Skema tinggal di `apps/api/src/db/schema/` (satu file per tabel).
+Migrasi adalah SQL biasa di `apps/api/drizzle/migrations/`,
+forward-only, dijalankan oleh runner Drizzle. Lihat
+[Alur migrasi](/development/migrations) untuk perinciannya.
+
+## Plugin
+
+Untuk membangun plugin (provider pembayaran, provider pengiriman,
+kanal notifikasi, atau pendengar event), lihat
+[Panduan penulis plugin](/plugins/author-guide). Paket
+`@mt-commerce/plugin-example` di repo adalah template terkecil yang
+masih bekerja.
+
+## Bila ada yang macet
+
+- `bun run reset` — hapus volume Docker, jalankan ulang setup. Aman
+  selama belum ada data lain yang Anda pedulikan di database lokal.
+- Port bentrok? Periksa apakah proses lain sudah mendengarkan 8000,
+  4321, atau 5173. Skrip `dev` tidak akan diam-diam pindah port.
+- Database sehat tapi error 500 dari API? Cek bahwa `db:migrate`
+  sudah dijalankan setelah pembaruan terakhir Anda dari `main`.
+- Sertifikat hook gagal di Bun yang baru di-update? Hapus
+  `.git/hooks/pre-commit` dan jalankan `bun install` ulang —
+  `simple-git-hooks` akan memasangnya lagi.
+
+## ADR
+
+Keputusan arsitektural dicatat di `docs/adr/` di repo. Setiap ADR
+ber-numbered (mis. `0010-product-content-translations.md`) dan
+mendokumentasikan satu keputusan dengan konteks, opsi, dan
+konsekuensi. ADR baru ditambahkan saat sebuah keputusan akan
+mempengaruhi orang lain di luar penulisnya.
