@@ -7,7 +7,12 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { format as formatMoney } from "@mt-commerce/core/money";
-import { CartProvider, useCart } from "./CartProvider.js";
+import {
+  CART_CHANGED_EVENT_NAME,
+  CartProvider,
+  useCart,
+  type CartChangedDetail,
+} from "./CartProvider.js";
 import {
   getProductInfo,
   PRODUCT_INFO_CHANGED_EVENT,
@@ -76,6 +81,31 @@ function CartPageInner(props: CartPageProps) {
     return () => window.removeEventListener(PRODUCT_INFO_CHANGED_EVENT, onInfo);
   }, []);
 
+  // Mirrors CartDrawer: the most recently added variant id, used to flash
+  // a brief tint on the matching line so the eye finds it. Scroll-into-view
+  // and focus shift are intentionally omitted — the page is reached by
+  // navigation (user lands at the top), and yanking the viewport down would
+  // disorient more than help. The drawer doesn't scroll either.
+  const [highlightedVariantId, setHighlightedVariantId] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    function onChange(e: Event) {
+      const detail = (e as CustomEvent<CartChangedDetail>).detail;
+      if (!detail || detail.delta <= 0 || !detail.variantId) return;
+      setHighlightedVariantId(detail.variantId);
+    }
+    window.addEventListener(CART_CHANGED_EVENT_NAME, onChange);
+    return () => window.removeEventListener(CART_CHANGED_EVENT_NAME, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!highlightedVariantId) return;
+    const t = window.setTimeout(() => setHighlightedVariantId(null), 1500);
+    return () => window.clearTimeout(t);
+  }, [highlightedVariantId]);
+
   const items = cart?.items ?? [];
   const isEmpty = items.length === 0;
 
@@ -128,10 +158,19 @@ function CartPageInner(props: CartPageProps) {
               const info = itemInfo.get(item.variantId) ?? null;
               const lineTitle = info?.title ?? productFallbackLabel;
               const lineAlt = info?.imageAlt ?? lineTitle;
+              const isHighlighted = item.variantId === highlightedVariantId;
               return (
                 <li
                   key={item.id}
-                  className="flex items-start gap-5 py-6 first:pt-0"
+                  // Highlight matches CartDrawer: a calm cream-deepened tint
+                  // with a small horizontal bleed so the row reads as lifted.
+                  // Animating only `background-color` keeps to the brand's
+                  // "no transition: all" rule.
+                  className={
+                    isHighlighted
+                      ? "bg-line/50 -mx-3 flex items-start gap-5 rounded-sm px-3 py-6 transition-colors duration-300 first:pt-6"
+                      : "flex items-start gap-5 py-6 transition-colors duration-300 first:pt-0"
+                  }
                 >
                   {info?.imageUrl ? (
                     <img
