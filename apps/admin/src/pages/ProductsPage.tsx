@@ -234,7 +234,7 @@ export function ProductsPage() {
                 void refetch();
               }}
             >
-              {t("common.loading")}
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -259,9 +259,7 @@ export function ProductsPage() {
                   {t("products.col.updated")}
                 </TableHead>
                 <TableHead className="w-20 text-right">
-                  <span className="sr-only">
-                    {t("products.col.actions")}
-                  </span>
+                  <span className="sr-only">{t("products.col.actions")}</span>
                 </TableHead>
               </TableRow>
             </TableHeader>

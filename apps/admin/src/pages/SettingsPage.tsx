@@ -20,11 +20,7 @@
  * field via `details.path`. A successful save emits a sonner toast.
  */
 import * as React from "react";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Card,
@@ -195,7 +191,8 @@ function patchString(
   // We assign through an `unknown` cast because the union of nullable
   // string keys on `UpdateStoreSettingsInput` is wider than what
   // `keyof` can narrow at the call site.
-  (patch as Record<string, string | null>)[key] = next.length === 0 ? null : next;
+  (patch as Record<string, string | null>)[key] =
+    next.length === 0 ? null : next;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +217,10 @@ function validate(form: FormState, t: (k: string) => string): FieldErrors {
     errors.storeName = t("settings.error.required");
   }
 
-  if (form.shippingOriginPhone.length > 0 && !PHONE_REGEX.test(form.shippingOriginPhone)) {
+  if (
+    form.shippingOriginPhone.length > 0 &&
+    !PHONE_REGEX.test(form.shippingOriginPhone)
+  ) {
     errors.shippingOriginPhone = t("settings.error.phone");
   }
   if (
@@ -238,7 +238,11 @@ function validate(form: FormState, t: (k: string) => string): FieldErrors {
   const hasKota = form.shippingOriginKotaKabupatenId.length > 0;
   const hasKec = form.shippingOriginKecamatanId.length > 0;
   const hasKel = form.shippingOriginKelurahanId.length > 0;
-  if ((hasKota && !hasProvinsi) || (hasKec && !hasKota) || (hasKel && !hasKec)) {
+  if (
+    (hasKota && !hasProvinsi) ||
+    (hasKec && !hasKota) ||
+    (hasKel && !hasKec)
+  ) {
     errors.regionChain = t("settings.error.region_chain");
   }
 
@@ -250,7 +254,12 @@ function validate(form: FormState, t: (k: string) => string): FieldErrors {
 // ---------------------------------------------------------------------------
 
 const SETTINGS_QUERY_KEY = ["admin", "settings"] as const;
-const TAX_RATES_QUERY_KEY = ["admin", "tax", "rates", { activeOnly: true }] as const;
+const TAX_RATES_QUERY_KEY = [
+  "admin",
+  "tax",
+  "rates",
+  { activeOnly: true },
+] as const;
 
 export function SettingsPage() {
   const t = useTranslator();
@@ -355,7 +364,7 @@ export function SettingsPage() {
               size="sm"
               onClick={() => void settingsQuery.refetch()}
             >
-              {t("common.loading")}
+              {t("common.retry")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -370,7 +379,9 @@ export function SettingsPage() {
           <h1 className="text-xl font-semibold tracking-tight">
             {t("settings.title")}
           </h1>
-          <p className="text-sm text-muted-foreground">{t("settings.subtitle")}</p>
+          <p className="text-sm text-muted-foreground">
+            {t("settings.subtitle")}
+          </p>
         </header>
         <Skeleton className="h-72 w-full" />
         <Skeleton className="h-72 w-full" />
@@ -410,7 +421,9 @@ export function SettingsPage() {
         <h1 className="text-xl font-semibold tracking-tight">
           {t("settings.title")}
         </h1>
-        <p className="text-sm text-muted-foreground">{t("settings.subtitle")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t("settings.subtitle")}
+        </p>
       </header>
 
       <StoreSection form={form} errors={errors} onChange={setForm} />
@@ -472,7 +485,9 @@ function StoreSection({ form, errors, onChange }: SectionProps) {
     <Card>
       <CardHeader>
         <CardTitle>{t("settings.section.store.title")}</CardTitle>
-        <CardDescription>{t("settings.section.store.description")}</CardDescription>
+        <CardDescription>
+          {t("settings.section.store.description")}
+        </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-1.5">
@@ -509,7 +524,9 @@ function StoreSection({ form, errors, onChange }: SectionProps) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="defaultLocale">{t("settings.field.defaultLocale")}</Label>
+          <Label htmlFor="defaultLocale">
+            {t("settings.field.defaultLocale")}
+          </Label>
           <Select
             value={form.defaultLocale}
             onValueChange={(v) =>
@@ -531,18 +548,31 @@ function StoreSection({ form, errors, onChange }: SectionProps) {
 }
 
 interface TaxSectionProps extends SectionProps {
-  rates: ReadonlyArray<{ id: string; code: string; name: string; rateBasisPoints: number }> | null;
+  rates: ReadonlyArray<{
+    id: string;
+    code: string;
+    name: string;
+    rateBasisPoints: number;
+  }> | null;
   loading: boolean;
   loadError: boolean;
 }
 
-function TaxSection({ form, rates, loading, loadError, onChange }: TaxSectionProps) {
+function TaxSection({
+  form,
+  rates,
+  loading,
+  loadError,
+  onChange,
+}: TaxSectionProps) {
   const t = useTranslator();
   return (
     <Card>
       <CardHeader>
         <CardTitle>{t("settings.section.tax.title")}</CardTitle>
-        <CardDescription>{t("settings.section.tax.description")}</CardDescription>
+        <CardDescription>
+          {t("settings.section.tax.description")}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-1.5">
@@ -902,7 +932,10 @@ function ToggleRow(props: ToggleRowProps) {
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="flex flex-col gap-0.5">
-        <Label htmlFor={props.id} className="cursor-pointer text-sm font-medium">
+        <Label
+          htmlFor={props.id}
+          className="cursor-pointer text-sm font-medium"
+        >
           {props.label}
         </Label>
         <p className="text-xs text-muted-foreground">{props.description}</p>
@@ -930,7 +963,9 @@ interface ServerIssue {
  * envelope nests these but we pull them out without trusting the shape
  * (callers may receive a non-validation 4xx with a different layout).
  */
-function readIssues(details: Record<string, unknown> | undefined): ServerIssue[] {
+function readIssues(
+  details: Record<string, unknown> | undefined,
+): ServerIssue[] {
   if (!details) return [];
   const raw = (details as { issues?: unknown }).issues;
   if (!Array.isArray(raw)) return [];
