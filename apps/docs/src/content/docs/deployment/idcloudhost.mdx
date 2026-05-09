@@ -1,0 +1,26 @@
+---
+title: Men-deploy ke IDCloudHost
+description: Catatan khusus penyedia untuk menjalankan mt-commerce di infrastruktur IDCloudHost.
+---
+
+[Panduan Hetzner](/deployment/getting-started) berlaku sepenuhnya.
+Halaman ini hanya mencatat perbedaan khusus penyedia yang patut
+dicermati.
+
+- **Compute**: VM IDCloudHost. Pilih paket dengan minimal 2 vCPU / 4 GB
+  RAM dan Ubuntu 22.04 LTS sebagai image OS.
+- **Region**: pilih datacenter Indonesia yang paling dekat dengan
+  basis pelanggan Anda (Jakarta atau Surabaya).
+- **Firewall**: dikonfigurasi di panel IDCloudHost. Buka 22/tcp,
+  80/tcp, 443/tcp, dan 443/udp. Aturan `ufw` di dalam VM dari panduan
+  Hetzner dapat ditumpuk di atasnya.
+- **Object storage** (untuk backup off-site): IDCloudHost menyediakan
+  storage S3-compatible. Konfigurasikan rclone dengan tipe remote `s3`
+  dan endpoint yang ada di dashboard IDCloudHost Anda. Lihat
+  [Cadangan & pemulihan](/deployment/backup-restore).
+
+> **TODO**: verifikasi penamaan UI firewall dan endpoint rclone yang
+> tepat untuk object storage IDCloudHost, lalu perbarui halaman ini.
+
+Selebihnya (record DNS, pemasangan Docker, `docker compose up -d --build`,
+seeding, provisioning owner) identik dengan panduan Hetzner.

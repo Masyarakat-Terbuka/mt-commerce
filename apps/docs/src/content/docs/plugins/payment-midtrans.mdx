@@ -1,0 +1,58 @@
+---
+title: "Pembayaran: Midtrans"
+description: Plugin provider pembayaran Midtrans (Snap + Core API) untuk mt-commerce.
+---
+
+`@mt-commerce/plugin-payment-midtrans` mendaftarkan `PaymentProvider`
+dengan code `midtrans` ke loader plugin mt-commerce. Plugin ini
+memakai Midtrans Snap (checkout terhosting) untuk alur pembeli dan
+Midtrans Core API untuk refund.
+
+## Apa yang dilakukan plugin
+
+- Pada `initiate`, meminta token transaksi Snap dan mengembalikan URL
+  redirect Snap yang dipakai storefront untuk mengarahkan pembeli.
+- Pada `refund`, mengirim POST ke endpoint Midtrans Core API
+  `/v2/{paymentId}/refund`, memakai idempotency key platform sebagai
+  `refund_key` Midtrans agar retry menjadi no-op di sisi Midtrans.
+- Pada pengiriman webhook, memverifikasi field `signature_key` sesuai
+  formula yang didokumentasikan Midtrans
+  (`SHA512(order_id + status_code + gross_amount + serverKey)`)
+  sebelum platform mem-parse atau mempercayai field apa pun dari body.
+- `capture` adalah no-op terstruktur — Snap auto-capture untuk kanal
+  yang aktif secara default.
+
+## Kanal yang aktif default
+
+QRIS, GoPay, ShopeePay, virtual account BCA / BNI / BRI / Permata,
+Mandiri Bill, kartu kredit (3DS), Indomaret, Alfamart. DANA mengalir
+lewat QRIS; OVO sudah dihapus dari Snap oleh Midtrans. Operator dapat
+meng-override set per transaksi via `metadata.enabledPayments`.
+
+## Konfigurasi
+
+```ts
+// mt-commerce.config.ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import midtrans from "@mt-commerce/plugin-payment-midtrans";
+
+export default defineConfig({
+  plugins: [
+    midtrans({
+      mode: process.env.NODE_ENV === "production" ? "production" : "sandbox",
+      serverKey: process.env.MIDTRANS_SERVER_KEY!,
+      clientKey: process.env.MIDTRANS_CLIENT_KEY!,
+    }),
+  ],
+});
+```
+
+Daftar di [dashboard.midtrans.com](https://dashboard.midtrans.com/register),
+lalu ambil kunci sandbox dari **Settings → Access Keys** untuk
+pengembangan.
+
+## Referensi
+
+- [README plugin lengkap](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/payment-midtrans/README.md) — variabel lingkungan, alur refund, sandbox vs production, troubleshooting.
+- [Panduan penulis plugin](/plugins/author-guide) — untuk membangun
+  plugin provider pembayaran Anda sendiri.

@@ -57,7 +57,7 @@ that affect users, operators, or contributors should add a line here.
 - Roles enum (`owner`, `admin`, `staff`, `viewer`) and `requireAuth` / `requireRole` middlewares.
 - API keys with scopes for external services, with rate-limit enforcement.
 - Tests covering middleware, services, API keys, rate limiting, and auth routes.
-- Authentication overview at `docs/api/authentication.md`.
+- Authentication overview at `apps/docs/src/content/docs/api-reference/authentication.mdx`.
 
 #### Catalog (`modules/catalog`)
 

@@ -1,7 +1,10 @@
-# Deploying to IDCloudHost
+---
+title: Deploying to IDCloudHost
+description: Provider-specific notes for running mt-commerce on IDCloudHost infrastructure.
+---
 
-The [Hetzner guide](./getting-started.md) applies in full. This page only
-records provider-specific differences worth noting.
+The [Hetzner guide](/deployment/getting-started) applies in full. This page
+only records provider-specific differences worth noting.
 
 - **Compute**: IDCloudHost VM. Pick a plan with at least 2 vCPU / 4 GB RAM
   and Ubuntu 22.04 LTS as the OS image.
@@ -13,7 +16,7 @@ records provider-specific differences worth noting.
 - **Object storage** (for off-site backups): IDCloudHost offers
   S3-compatible storage. Configure rclone with the `s3` remote type and the
   endpoint listed in your IDCloudHost dashboard. See
-  [`backup-restore.md`](./backup-restore.md).
+  [Backup and restore](/deployment/backup-restore).
 
 > **TODO**: verify the firewall UI naming and the exact rclone endpoint for
 > IDCloudHost object storage, then update this page.

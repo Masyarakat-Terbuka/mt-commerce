@@ -1,0 +1,242 @@
+---
+title: Autentikasi
+description: Sesi, password, API key, dan role. Referensi lengkap untuk memasang platform ke deployment.
+---
+
+mt-commerce memakai [Better Auth](https://better-auth.com) untuk
+autentikasi berbasis password dan cookie sesi HTTP-only, ditambah
+lapisan kecil di atasnya untuk role staf dan API key.
+
+Dokumen ini ditujukan untuk operator yang memasang platform ke sebuah
+deployment. Untuk gambaran modul yang menghadap pengembang, lihat
+[`apps/api/src/modules/auth/README.md`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/api/src/modules/auth/README.md).
+
+---
+
+## Konsep
+
+Ada dua audiens:
+
+- **Staf** — pemilik toko dan tim mereka yang memakai admin app.
+- **Pelanggan** — pembeli yang memakai storefront.
+
+Keduanya autentikasi terhadap tabel identitas yang sama
+(`auth_users`), tetapi staf juga punya baris di `staff_profiles` yang
+membawa role (`owner | admin | staff | viewer`). User tanpa baris
+`staff_profiles` tidak dapat menjangkau route `/admin/v1/...` —
+sekalipun cookie-nya valid.
+
+Service eksternal (webhook provider pembayaran, worker sinkronisasi
+marketplace) memakai **API key** alih-alih cookie. Key membawa scope
+eksplisit (`catalog:read`, `catalog:write`, `webhooks:receive`).
+
+---
+
+## Sesi
+
+Saat user signin dengan email dan password, Better Auth menerbitkan
+cookie sesi:
+
+| Properti      | Nilai                                                         |
+| ------------- | ------------------------------------------------------------- |
+| Name          | `mt_session` (dapat dikonfigurasi via `SESSION_COOKIE_NAME`)  |
+| HttpOnly      | selalu                                                        |
+| Secure        | true di production, dapat dikonfigurasi via `SESSION_COOKIE_SECURE` |
+| SameSite      | `Lax`                                                         |
+| Path          | `/`                                                           |
+| Expires       | 7 hari sejak diterbitkan                                      |
+| Refreshed     | setiap 24 jam aktivitas                                       |
+
+Baris sesi di `auth_sessions` adalah sumber kebenaran — tidak ada
+cache di memori. Memanggil `DELETE /admin/v1/auth/sessions/:id`
+mencabut sesi langsung pada request berikutnya.
+
+### Endpoint (disediakan Better Auth)
+
+Dipasang di `/api/auth/*`:
+
+| Method | Path                                  | Tujuan                  |
+| ------ | ------------------------------------- | ----------------------- |
+| POST   | `/api/auth/sign-up/email`             | Daftar                  |
+| POST   | `/api/auth/sign-in/email`             | Sign in                 |
+| POST   | `/api/auth/sign-out`                  | Sign out                |
+| POST   | `/api/auth/forget-password`           | Memulai reset password  |
+| POST   | `/api/auth/reset-password`            | Menyelesaikan reset password |
+| POST   | `/api/auth/verify-email`              | Memverifikasi email     |
+| GET    | `/api/auth/get-session`               | Membaca sesi saat ini   |
+
+Lihat [dokumen API Better Auth](https://better-auth.com/docs) untuk
+bentuk request dan response.
+
+---
+
+## Password
+
+Di-hash dengan **Argon2id** (algoritma yang direkomendasikan OWASP
+untuk deployment baru). Default Better Auth berlaku:
+
+- Memori: 64 MiB
+- Iterasi: 2
+- Paralelisme: 1
+- Varian: Argon2id
+
+Aturan password minimum di batas API: 12 karakter, mencakup minimal
+satu huruf dan satu digit. Password lengkap di-hash; kami tidak
+menyimpan apa pun lainnya.
+
+---
+
+## Verifikasi email
+
+`sendOnSignUp` Better Auth diaktifkan. Di pengembangan, URL verifikasi
+dicatat ke konsol dengan modul `auth`:
+
+```
+[dev] email verification link
+{ userId: '...', email: '...', url: 'http://localhost:8000/api/auth/verify-email?token=...' }
+```
+
+Adapter email yang sungguhan tinggal di modul notification
+(follow-up). Untuk mewajibkan verifikasi email sebelum sign-in, set
+`requireEmailVerification` ke `true` di
+`apps/api/src/modules/auth/better-auth.ts` lalu rebuild.
+
+---
+
+## Provisioning owner pertama
+
+mt-commerce menegakkan di kode: user staf PERTAMA harus memiliki role
+`owner`. Pemeriksaannya ada di `AuthService.assignRole` agar skrip
+seed tidak diam-diam membuat staf pertama non-owner dan mengunci
+platform.
+
+User auth harus sudah ada sebelum dapat dipromosikan (baris
+`staff_profiles` menunjuk ke `auth_users.id`), jadi provisioning
+adalah alur dua langkah.
+
+Pertama, daftarkan user:
+
+```bash
+curl -X POST http://localhost:8000/api/auth/sign-up/email \
+  -H "content-type: application/json" \
+  -d '{"email":"owner@example.com","password":"...","name":"Owner"}'
+```
+
+Lalu promosikan menjadi owner memakai CLI:
+
+```bash
+bun --filter '@mt-commerce/api' provision-owner owner@example.com
+```
+
+CLI bersifat idempotent — menjalankannya dua kali pada user yang sama
+adalah no-op. Bila target user sudah punya role staf non-owner, CLI
+meminta konfirmasi sebelum mempromosikan; berikan `--yes` (atau `-y`)
+untuk melewati prompt di konteks non-interaktif.
+
+Setelah promosi, sign in dengan kredensial yang sama. Staf berikutnya
+dapat dibuat lewat `POST /admin/v1/auth/staff` selagi terautentikasi
+sebagai owner.
+
+---
+
+## API key
+
+API key ditujukan untuk service eksternal. Mereka autentikasi lewat
+header `Authorization` alih-alih cookie:
+
+```
+Authorization: Bearer apik_01HZX....SECRETPART
+```
+
+Format-nya `<id>.<secret>`. Kedua bagian ber-bentuk ULID. Id-nya
+dicatat di audit trail; bagian secret tidak pernah dicatat atau
+disimpan — database hanya menyimpan hash Argon2id.
+
+### Siklus hidup
+
+1. Owner atau admin mengirim POST `/admin/v1/auth/api-keys` dengan
+   nama dan array scope:
+   ```json
+   { "name": "Midtrans webhook receiver", "scopes": ["webhooks:receive"] }
+   ```
+2. Response menyertakan `plaintext` SEKALI:
+   ```json
+   {
+     "id": "apik_01HZX...",
+     "name": "Midtrans webhook receiver",
+     "scopes": ["webhooks:receive"],
+     "plaintext": "apik_01HZX....SECRETPART",
+     "createdAt": "2026-05-07T..."
+   }
+   ```
+3. Simpan plaintext-nya di tempat aman (secret manager). Ia tidak
+   bisa diambil lagi.
+4. Cabut kapan pun dengan `DELETE /admin/v1/auth/api-keys/:id`.
+   Baris-nya soft-delete (men-set `revoked_at`) sehingga penggunaan
+   historis dapat diaudit.
+
+### Scope
+
+Route yang dimaksudkan untuk dipanggil API key mendeklarasikan scope.
+Set awal v0.1:
+
+| Scope               | Penggunaan                                  |
+| ------------------- | ------------------------------------------- |
+| `catalog:read`      | Akses baca-saja ke endpoint catalog         |
+| `catalog:write`     | Mutasi product, varian, inventaris          |
+| `webhooks:receive`  | Webhook receiver inbound                    |
+
+Menambah scope hanya satu baris perubahan di
+`apps/api/src/modules/auth/types.ts`.
+
+---
+
+## Role
+
+| Role     | Kemampuan                                                       |
+| -------- | --------------------------------------------------------------- |
+| `owner`  | Akses penuh, termasuk pengaturan tim dan akun                   |
+| `admin`  | Akses penuh kecuali pengaturan tim dan akun                     |
+| `staff`  | Mengelola product, order, pelanggan (tanpa pengelolaan API key) |
+| `viewer` | Akses baca-saja                                                 |
+
+Route admin catalog (`/admin/v1/products`, dst.) digerbang ke `owner`,
+`admin`, `staff`. Menambahkan `viewer` ke route baca-saja adalah
+follow-up begitu sub-router baca-saja terpisah dipasang.
+
+---
+
+## Lingkungan
+
+| Variabel                | Wajib                       | Catatan                                                  |
+| ----------------------- | --------------------------- | -------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`    | ya (≥ 32 karakter)          | Penandatanganan cookie + enkripsi token verifikasi       |
+| `BETTER_AUTH_URL`       | opsional di dev, ya di prod | Base URL untuk callback dan verifikasi origin            |
+| `SESSION_COOKIE_NAME`   | opsional                    | Default `mt_session`                                     |
+| `SESSION_COOKIE_SECURE` | opsional                    | Default true bila `NODE_ENV=production`                  |
+
+Buat rahasia dengan:
+
+```bash
+openssl rand -base64 32
+```
+
+Memutar rahasia membatalkan SEMUA sesi dan token verifikasi yang ada.
+Rencanakan rotasi sesuai itu — lihat
+[Firewall & SSL](/deployment/firewall-ssl) untuk prosedurnya.
+
+---
+
+## Mode kegagalan
+
+| Status | Code                | Kapan                                              |
+| ------ | ------------------- | -------------------------------------------------- |
+| 401    | `unauthorized`      | Tidak ada sesi, sesi kedaluwarsa, atau API key salah |
+| 403    | `forbidden`         | Sudah autentikasi, tetapi role/scope tidak masuk set |
+| 400    | `validation_error`  | Body atau query gagal validasi Zod                 |
+
+Semua response memakai envelope standar:
+
+```json
+{ "error": { "code": "...", "message": "...", "details": {} } }
+```

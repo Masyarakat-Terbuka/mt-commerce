@@ -1,0 +1,58 @@
+---
+title: "Payment: Midtrans"
+description: Midtrans (Snap + Core API) payment provider plugin for mt-commerce.
+---
+
+`@mt-commerce/plugin-payment-midtrans` registers a `PaymentProvider`
+with code `midtrans` against the mt-commerce plugin loader. It uses
+Midtrans Snap (hosted checkout) for the buyer flow and the Midtrans
+Core API for refunds.
+
+## What the plugin does
+
+- On `initiate`, requests a Snap transaction token and returns the
+  Snap redirect URL the storefront sends the buyer to.
+- On `refund`, posts to the Midtrans Core API
+  `/v2/{paymentId}/refund` endpoint, using the platform's idempotency
+  key as Midtrans's `refund_key` so retries are no-ops on Midtrans's
+  side.
+- On webhook delivery, verifies the `signature_key` field per the
+  Midtrans documented formula
+  (`SHA512(order_id + status_code + gross_amount + serverKey)`) before
+  the platform parses or trusts any field of the body.
+- `capture` is a structured no-op — Snap auto-captures for the channels
+  enabled by default.
+
+## Channels enabled by default
+
+QRIS, GoPay, ShopeePay, BCA / BNI / BRI / Permata virtual accounts,
+Mandiri Bill, credit card (3DS), Indomaret, Alfamart. DANA flows through
+QRIS; OVO has been removed from Snap by Midtrans. Operators can
+override the set per transaction via `metadata.enabledPayments`.
+
+## Configuration
+
+```ts
+// mt-commerce.config.ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import midtrans from "@mt-commerce/plugin-payment-midtrans";
+
+export default defineConfig({
+  plugins: [
+    midtrans({
+      mode: process.env.NODE_ENV === "production" ? "production" : "sandbox",
+      serverKey: process.env.MIDTRANS_SERVER_KEY!,
+      clientKey: process.env.MIDTRANS_CLIENT_KEY!,
+    }),
+  ],
+});
+```
+
+Sign up at [dashboard.midtrans.com](https://dashboard.midtrans.com/register),
+then grab the sandbox keys from **Settings → Access Keys** for development.
+
+## Reference
+
+- [Full plugin README](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/payment-midtrans/README.md) — environment variables, refund flow, sandbox vs production, troubleshooting.
+- [Plugin author guide](/plugins/author-guide) — for building your own
+  payment provider plugin.

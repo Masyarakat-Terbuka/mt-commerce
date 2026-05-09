@@ -22,19 +22,19 @@ checkout) for the buyer flow and the Midtrans Core API for refunds.
 
 ## Payment methods enabled by default
 
-| Channel       | Snap code     | Notes                                  |
-| ------------- | ------------- | -------------------------------------- |
-| QRIS          | `qris`        | Universal QR. Works for any e-wallet.  |
-| GoPay         | `gopay`       |                                        |
-| ShopeePay     | `shopeepay`   |                                        |
-| BCA VA        | `bca_va`      | Virtual account                        |
-| BNI VA        | `bni_va`      | Virtual account                        |
-| BRI VA        | `bri_va`      | Virtual account                        |
-| Permata VA    | `permata_va`  | Virtual account                        |
-| Mandiri Bill  | `echannel`    | Mandiri Bill Payment (Snap channel)    |
-| Credit card   | `credit_card` | 3DS enabled by default                 |
-| Indomaret     | `indomaret`   | Over-the-counter cash                  |
-| Alfamart      | `alfamart`    | Over-the-counter cash                  |
+| Channel      | Snap code     | Notes                                 |
+| ------------ | ------------- | ------------------------------------- |
+| QRIS         | `qris`        | Universal QR. Works for any e-wallet. |
+| GoPay        | `gopay`       |                                       |
+| ShopeePay    | `shopeepay`   |                                       |
+| BCA VA       | `bca_va`      | Virtual account                       |
+| BNI VA       | `bni_va`      | Virtual account                       |
+| BRI VA       | `bri_va`      | Virtual account                       |
+| Permata VA   | `permata_va`  | Virtual account                       |
+| Mandiri Bill | `echannel`    | Mandiri Bill Payment (Snap channel)   |
+| Credit card  | `credit_card` | 3DS enabled by default                |
+| Indomaret    | `indomaret`   | Over-the-counter cash                 |
+| Alfamart     | `alfamart`    | Over-the-counter cash                 |
 
 DANA and OVO are not in the default set: DANA is enabled via the
 QRIS rail (any DANA wallet can scan a QRIS), and OVO has been
@@ -67,12 +67,11 @@ export default defineConfig({
     midtransPlugin({
       serverKey: process.env.MIDTRANS_SERVER_KEY ?? "",
       clientKey: process.env.MIDTRANS_CLIENT_KEY ?? "",
-      mode: process.env.MIDTRANS_MODE === "production"
-        ? "production"
-        : "sandbox",
-      finishUrl:  "https://shop.example.id/checkout/selesai",
+      mode:
+        process.env.MIDTRANS_MODE === "production" ? "production" : "sandbox",
+      finishUrl: "https://shop.example.id/checkout/selesai",
       pendingUrl: "https://shop.example.id/checkout/menunggu",
-      errorUrl:   "https://shop.example.id/checkout/gagal",
+      errorUrl: "https://shop.example.id/checkout/gagal",
     }),
   ],
 });
@@ -80,11 +79,11 @@ export default defineConfig({
 
 ### 3. Environment variables
 
-| Variable                | Required | Notes                                  |
-| ----------------------- | -------- | -------------------------------------- |
-| `MIDTRANS_SERVER_KEY`   | yes      | From the Midtrans dashboard.           |
-| `MIDTRANS_CLIENT_KEY`   | yes      | Public; loaded into the storefront.    |
-| `MIDTRANS_MODE`         | no       | `sandbox` (default) or `production`.   |
+| Variable              | Required | Notes                                |
+| --------------------- | -------- | ------------------------------------ |
+| `MIDTRANS_SERVER_KEY` | yes      | From the Midtrans dashboard.         |
+| `MIDTRANS_CLIENT_KEY` | yes      | Public; loaded into the storefront.  |
+| `MIDTRANS_MODE`       | no       | `sandbox` (default) or `production`. |
 
 ### 4. Webhook URL
 
@@ -151,8 +150,9 @@ buyer paying — those flows require the Midtrans simulator UI.
 
 ## Reference
 
-- mt-commerce plugin author guide:
-  [`docs/plugins/author-guide.md`](../../../docs/plugins/author-guide.md).
+- mt-commerce
+  [plugin author guide](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/docs/src/content/docs/plugins/author-guide.mdx)
+  on the docs site.
 - Midtrans Snap API reference:
   <https://docs.midtrans.com/docs/snap-api-overview-snap>.
 - Midtrans webhook signature reference:

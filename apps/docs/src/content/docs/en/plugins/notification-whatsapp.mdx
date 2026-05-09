@@ -1,0 +1,67 @@
+---
+title: "Notifications: WhatsApp"
+description: Send order confirmations, payment receipts, and shipping updates over WhatsApp via the Meta Cloud API.
+---
+
+`@mt-commerce/plugin-notification-whatsapp` replaces the v0.1 in-tree
+`whatsapp` stub channel (which throws on every send) with an adapter
+backed by the Meta WhatsApp Business Cloud API.
+
+Once registered, the notification service's `order.placed`,
+`payment.captured`, and `fulfillment.shipped` listeners route customer
+pings through WhatsApp for any order whose customer (or shipping
+address) carries a phone number — alongside the email path.
+
+## What the plugin does
+
+- Registers a notification channel with id `whatsapp` that POSTs to
+  `https://graph.facebook.com/v20.0/{phoneNumberId}/messages` using the
+  `template` message type.
+- Maps each supported notification kind (`order_confirmation`,
+  `payment_received`, `shipping_update`) to a Meta-approved template,
+  with a small per-kind mapper that fills the template's positional body
+  variables.
+- Normalises Indonesian phone numbers to the WhatsApp wire shape
+  (`628123456789` — no `+`, no separators) before dispatch. Both the
+  national trunk form (`08...`) and already-international forms work.
+- Surfaces upstream rejections as `ChannelDispatchError` carrying the
+  parsed Meta error envelope so audit-row failures are diagnosable from
+  logs alone.
+
+## Prerequisites
+
+1. A Meta Business Manager account with a verified business and an
+   approved WhatsApp Business Account.
+2. A verified phone number on that WABA, with a permanent access token
+   (system user token recommended over the 24-hour temporary token).
+3. Three templates approved in the Meta dashboard with the variable
+   counts and order documented in the plugin README.
+
+## Configuration
+
+```ts
+// mt-commerce.config.ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import whatsappPlugin from "@mt-commerce/plugin-notification-whatsapp";
+
+export default defineConfig({
+  plugins: [
+    whatsappPlugin({
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID!,
+      accessToken: process.env.WHATSAPP_ACCESS_TOKEN!,
+      language: "id",
+      templates: {
+        orderConfirmation: process.env.WHATSAPP_TEMPLATE_ORDER!,
+        paymentReceived: process.env.WHATSAPP_TEMPLATE_PAYMENT!,
+        shippingUpdate: process.env.WHATSAPP_TEMPLATE_SHIPPING!,
+      },
+    }),
+  ],
+});
+```
+
+## Reference
+
+- [Full plugin README](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/notification-whatsapp/README.md) — template variable layouts, error handling, audit trail behaviour.
+- [Plugin author guide](/plugins/author-guide) — for building your own
+  notification channel plugin.

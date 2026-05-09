@@ -16,7 +16,7 @@
  *     to confirm their api boots with plugins enabled).
  *   - Serves as the template plugin authors copy when starting a new
  *     plugin. The shape — factory `(opts) => Plugin` — is the
- *     recommended pattern; see `docs/plugins/author-guide.md`.
+ *     recommended pattern; see the plugin author guide on the docs site.
  *
  * Keep this file short. Real plugins move per-extension code into their
  * own files under `src/`; the index stays as the manifest declaration.

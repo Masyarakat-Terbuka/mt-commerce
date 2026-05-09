@@ -1,11 +1,14 @@
-# Plugin author guide
+---
+title: Plugin author guide
+description: Build a plugin that registers payment providers, shipping providers, notification channels, or event listeners with the mt-commerce API at boot.
+---
 
 mt-commerce is extended through plugins — npm packages that register
 payment providers, shipping providers, notification channels, and event
 listeners with the api at boot.
 
 This guide is for plugin authors. For the architectural decision behind
-this model, see [ADR-0008](../adr/0008-plugins-as-npm-packages.md).
+this model, see [ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md).
 
 ---
 
@@ -90,9 +93,10 @@ Minimal `package.json`:
 ```
 
 The `peerDependencies` entry is the contract from
-[ADR-0008](../adr/0008-plugins-as-npm-packages.md): plugins declare the
-mt-commerce versions they support against `@mt-commerce/core`. Pin a
-range — e.g. `"^0.1.0"` — once the core package starts publishing.
+[ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md):
+plugins declare the mt-commerce versions they support against
+`@mt-commerce/core`. Pin a range — e.g. `"^0.1.0"` — once the core package
+starts publishing.
 
 When publishing to npm:
 
@@ -232,7 +236,7 @@ wrapper.
 
 Construct a fake `PluginContext` in tests — that is what
 `@mt-commerce/plugin-example`'s tests do (see
-[`packages/plugins/example/tests/index.test.ts`](../../packages/plugins/example/tests/index.test.ts)).
+[`packages/plugins/example/tests/index.test.ts`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/example/tests/index.test.ts)).
 The contract is small enough that a hand-rolled fake is shorter than
 anything you would import.
 
@@ -274,7 +278,8 @@ Failures:
 
 - **No sandboxing.** A plugin runs with the same privileges as the api
   process. Operators trust the plugins they install.
-  ([ADR-0008](../adr/0008-plugins-as-npm-packages.md) discusses why.)
+  ([ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md)
+  discusses why.)
 - **No hot-reload.** Updating a plugin requires reinstalling and
   restarting. Intentional — restart is a clean state transition.
 - **No reaching into api modules.** Import only from
@@ -287,11 +292,7 @@ Failures:
 
 ## Reference
 
-- [ADR-0008](../adr/0008-plugins-as-npm-packages.md) — the architectural
-  decision behind this model.
-- [`@mt-commerce/core/plugin`](../../packages/core/src/plugin.ts) —
-  every type referenced in this guide.
-- [`@mt-commerce/plugin-example`](../../packages/plugins/example/src/index.ts) —
-  the template plugin.
-- [`apps/api/src/lib/plugins.ts`](../../apps/api/src/lib/plugins.ts) —
-  the loader implementation.
+- [ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md) — the architectural decision behind this model.
+- [`@mt-commerce/core/plugin`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/core/src/plugin.ts) — every type referenced in this guide.
+- [`@mt-commerce/plugin-example`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/example/src/index.ts) — the template plugin.
+- [`apps/api/src/lib/plugins.ts`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/api/src/lib/plugins.ts) — the loader implementation.

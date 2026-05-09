@@ -59,10 +59,10 @@ export default defineConfig({
 
 ### Environment variables (operator-facing)
 
-| Variable                     | Required | What it is                                                                  |
-| ---------------------------- | -------- | --------------------------------------------------------------------------- |
-| `WHATSAPP_PHONE_NUMBER_ID`   | yes      | The phone number id from the Meta WhatsApp Business dashboard.              |
-| `WHATSAPP_ACCESS_TOKEN`      | yes      | A permanent (system user) WhatsApp Business API access token.               |
+| Variable                   | Required | What it is                                                     |
+| -------------------------- | -------- | -------------------------------------------------------------- |
+| `WHATSAPP_PHONE_NUMBER_ID` | yes      | The phone number id from the Meta WhatsApp Business dashboard. |
+| `WHATSAPP_ACCESS_TOKEN`    | yes      | A permanent (system user) WhatsApp Business API access token.  |
 
 The plugin itself reads neither — operators wire them through the config
 file. Pulling them from env vars is the recommended pattern so secrets
@@ -83,11 +83,11 @@ A short order-receipt ping that confirms the order id, the total, and
 the item count. The full line breakdown stays in the email; WhatsApp's
 approved template body is constrained to a single glance-sized message.
 
-| Variable | Example       | Source                           |
-| -------- | ------------- | -------------------------------- |
+| Variable | Example          | Source                         |
+| -------- | ---------------- | ------------------------------ |
 | `{{1}}`  | `MT-2025-000123` | order number (customer-facing) |
-| `{{2}}`  | `Rp 670.000`  | total, formatted                 |
-| `{{3}}`  | `3 barang`    | item count + locale label        |
+| `{{2}}`  | `Rp 670.000`     | total, formatted               |
+| `{{3}}`  | `3 barang`       | item count + locale label      |
 
 Indonesian sample body:
 
@@ -97,11 +97,11 @@ Halo, pesanan {{1}} sudah kami terima. Total: {{2}} ({{3}}). Kami akan kabari ke
 
 ### `payment_received_id` — 3 variables
 
-| Variable | Example         | Source            |
-| -------- | --------------- | ----------------- |
-| `{{1}}`  | `MT-2025-000123` | order number     |
-| `{{2}}`  | `Rp 670.000`    | amount, formatted |
-| `{{3}}`  | `manual_transfer` | payment method  |
+| Variable | Example           | Source            |
+| -------- | ----------------- | ----------------- |
+| `{{1}}`  | `MT-2025-000123`  | order number      |
+| `{{2}}`  | `Rp 670.000`      | amount, formatted |
+| `{{3}}`  | `manual_transfer` | payment method    |
 
 Indonesian sample body:
 
@@ -111,11 +111,11 @@ Pembayaran {{2}} untuk pesanan {{1}} ({{3}}) sudah kami terima. Pesanan akan seg
 
 ### `shipping_update_id` — 3 variables
 
-| Variable | Example         | Source                                        |
-| -------- | --------------- | --------------------------------------------- |
-| `{{1}}`  | `MT-2025-000123` | order number                                 |
-| `{{2}}`  | `Dikirim`       | localised status (`Dikirim` / `Shipped`, etc.)|
-| `{{3}}`  | `JX-998877`     | tracking code (or `-` when none)              |
+| Variable | Example          | Source                                         |
+| -------- | ---------------- | ---------------------------------------------- |
+| `{{1}}`  | `MT-2025-000123` | order number                                   |
+| `{{2}}`  | `Dikirim`        | localised status (`Dikirim` / `Shipped`, etc.) |
+| `{{3}}`  | `JX-998877`      | tracking code (or `-` when none)               |
 
 Indonesian sample body:
 
@@ -159,7 +159,8 @@ unknown recipients.
 
 ## Reference
 
-For the plugin authoring contract, see
-[`docs/plugins/author-guide.md`](../../../docs/plugins/author-guide.md).
-For the notification module's channel/service contract, see
+For the plugin authoring contract, see the
+[plugin author guide](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/docs/src/content/docs/plugins/author-guide.mdx)
+on the docs site. For the notification module's channel/service contract,
+see
 [`apps/api/src/modules/notification/channels/types.ts`](../../../apps/api/src/modules/notification/channels/types.ts).

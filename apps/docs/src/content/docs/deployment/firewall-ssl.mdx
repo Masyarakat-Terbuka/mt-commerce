@@ -1,0 +1,124 @@
+---
+title: Firewall dan SSL
+description: Konfigurasi tepi jaringan, sertifikat yang diterbitkan Caddy, dan latihan rotasi rahasia.
+---
+
+Halaman ini membahas konfigurasi tepi jaringan yang sudah disiapkan
+oleh [panduan mulai](/deployment/getting-started), ditambah beberapa
+tugas operasional yang biasanya muncul kemudian.
+
+## Firewall
+
+Host menjalankan `ufw` dengan kebijakan default-deny inbound dan tiga
+port terbuka:
+
+| Port    | Protokol | Tujuan                              |
+|---------|----------|-------------------------------------|
+| 22      | tcp      | SSH                                 |
+| 80      | tcp      | HTTP — Caddy redirect ke 443        |
+| 443     | tcp      | HTTPS                               |
+| 443     | udp      | HTTP/3 (QUIC) via Caddy             |
+
+Verifikasi dengan:
+
+```bash
+sudo ufw status verbose
+```
+
+Bila Anda menyediakan VM lewat penyedia yang sudah menerapkan firewall
+jaringan (Hetzner Cloud Firewall, panel firewall Biznet Gio, panel
+firewall IDCloudHost), tetap jalankan `ufw` di host — itu melindungi
+dari aturan yang tak sengaja diloggarkan di panel.
+
+Container Postgres dan Redis **tidak** mempublikasikan port host.
+Keduanya hanya dapat dijangkau di dalam jaringan bridge docker
+`mt-commerce`.
+
+## Mengapa tidak meng-expose API langsung?
+
+Caddy di depan API memberi Anda:
+
+- Sertifikat Let's Encrypt otomatis dengan perpanjangan.
+- Header HSTS dan keamanan lain yang terpusat.
+- Terminasi HTTP/2 + HTTP/3.
+- Satu tempat untuk menambah aturan rate-limit atau basic-auth nanti.
+
+API hanya mendengarkan jaringan docker internal. Bila Anda perlu
+meng-expose metric atau endpoint admin di kemudian hari, lakukan via
+Caddy dengan route yang dikunci, bukan dengan membuka port host.
+
+## Sertifikat SSL
+
+Caddy menerbitkan sertifikat saat pertama kali melihat request ke
+hostname yang ada di Caddyfile. Bila DNS sudah benar dan port 80/443
+dapat dijangkau dari internet publik, ini berjalan otomatis.
+
+Verifikasi sertifikat dari host:
+
+```bash
+echo | openssl s_client -connect api.${DOMAIN}:443 -servername api.${DOMAIN} 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+```
+
+Anda seharusnya melihat issuer `Let's Encrypt` dan `notAfter` ~90 hari
+ke depan. Caddy memperpanjang otomatis di tanda 60 hari.
+
+Bila penerbitan sertifikat gagal, periksa log Caddy:
+
+```bash
+docker compose -f docker-compose.prod.yml logs caddy
+```
+
+Penyebab paling umum: DNS belum mengarah ke host, atau firewall di
+depan VM memblokir traffic masuk ke 80/443.
+
+## Memutar rahasia Better Auth
+
+`BETTER_AUTH_SECRET` dipakai untuk menandatangani cookie sesi.
+Memutarnya akan membatalkan semua sesi yang ada, jadi user keluar
+otomatis dan harus masuk lagi. Better Auth saat ini belum mendukung
+jendela "rahasia sebelumnya" untuk rotasi yang halus; trade-off di
+bawah inilah yang Anda punya hari ini.
+
+Rencanakan rotasi pada jam sepi traffic, lalu:
+
+```bash
+cd ~/mt-commerce
+# 1. Buat rahasia baru.
+NEW_SECRET=$(openssl rand -base64 32)
+echo "$NEW_SECRET"
+
+# 2. Edit .env.production dan ganti nilai BETTER_AUTH_SECRET.
+$EDITOR .env.production
+
+# 3. Restart API saja. Postgres, Redis, admin, storefront, dan Caddy
+#    tetap berjalan.
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d api
+```
+
+Pelanggan dan staf yang ada akan diminta masuk lagi pada request
+berikutnya. Sesi baru ditandatangani dengan rahasia baru.
+
+Setelah rotasi, pantau sign-in di `auth_users` selama sehari untuk
+memastikan semuanya sehat:
+
+```bash
+docker compose -f docker-compose.prod.yml logs api | grep -i auth
+```
+
+## Daftar pemeriksaan hardening
+
+Daftar singkat untuk ditelusuri setelah deploy pertama:
+
+- [ ] `ufw status` menunjukkan default-deny inbound.
+- [ ] Auth password SSH dimatikan (`PasswordAuthentication no`).
+- [ ] Login SSH untuk root dimatikan (`PermitRootLogin no`).
+- [ ] `fail2ban` berjalan.
+- [ ] Tiga subdomain memiliki sertifikat Let's Encrypt yang valid.
+- [ ] Port Postgres dan Redis (5432, 6379) **tidak** dapat dijangkau
+      dari luar host. Konfirmasi dengan `ss -tlnp | grep -E '5432|6379'`
+      — seharusnya tidak ada hasil.
+- [ ] `BETTER_AUTH_SECRET` unik untuk deploy ini dan minimal 32 karakter
+      entropi.
+- [ ] `.env.production` ber-mode `0600` dan dimiliki user deploy.
+- [ ] Backup berjalan dan minimal sekali sudah diuji-restore.

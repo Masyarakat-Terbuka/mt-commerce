@@ -1,0 +1,27 @@
+---
+title: Men-deploy ke Biznet Gio
+description: Catatan khusus penyedia untuk menjalankan mt-commerce di infrastruktur Biznet Gio.
+---
+
+[Panduan Hetzner](/deployment/getting-started) berlaku sepenuhnya.
+Halaman ini hanya mencatat perbedaan khusus penyedia yang patut
+dicermati.
+
+- **Compute**: instance Biznet Gio Neo Lite atau Neo Cloud. Pilih
+  ukuran dengan minimal 2 vCPU / 4 GB RAM. Ubuntu 22.04 LTS tersedia
+  sebagai stock image.
+- **Region**: Jakarta (`jakarta-1`, dst.) untuk RTT terendah ke
+  pelanggan Indonesia.
+- **Firewall**: dikonfigurasi di panel Biznet Gio, atau via `ufw`
+  bila Anda lebih suka. Buka 22/tcp, 80/tcp, 443/tcp, dan 443/udp.
+  Aturan `ufw` di dalam VM dari panduan Hetzner juga dapat dipakai —
+  defense in depth tidak masalah.
+- **Object storage** (untuk backup off-site): storage S3-compatible
+  Biznet Gio bekerja dengan rclone memakai tipe remote `s3`. Lihat
+  [Cadangan & pemulihan](/deployment/backup-restore).
+
+> **TODO**: verifikasi penamaan UI firewall dan endpoint rclone yang
+> tepat untuk object storage Biznet Gio, lalu perbarui halaman ini.
+
+Selebihnya (record DNS, pemasangan Docker, `docker compose up -d --build`,
+seeding, provisioning owner) identik dengan panduan Hetzner.

@@ -8,14 +8,14 @@
 
 ## Context
 
-[ADR-0008](./0008-plugins-as-npm-packages.md) commits the project to npm-format plugins registered through a `mt-commerce.config.ts`. That decision settles the *packaging* of plugins. It does not settle the runtime mechanics: where the loader looks for the config, what happens when a plugin's `setup` throws, what `definePlugin` actually does, what extension points exist, and how the example plugin proves the surface works.
+[ADR-0008](./0008-plugins-as-npm-packages.md) commits the project to npm-format plugins registered through a `mt-commerce.config.ts`. That decision settles the _packaging_ of plugins. It does not settle the runtime mechanics: where the loader looks for the config, what happens when a plugin's `setup` throws, what `definePlugin` actually does, what extension points exist, and how the example plugin proves the surface works.
 
 Concretely:
 
 - A plugin author writes `definePlugin({ name, version, setup })`. Should `definePlugin` validate the manifest, or just narrow types?
 - An operator who has not adopted plugins should still be able to boot the api. Where is the line between "plugins are optional" and "a misconfigured plugin set is fatal"?
 - mt-commerce.config.ts can sensibly live next to the api (`apps/api/`) or at the workspace root. Which is canonical?
-- v0.1 needs *some* extension points to ship. Which ones?
+- v0.1 needs _some_ extension points to ship. Which ones?
 - Should the example plugin be inline test fixtures or a real workspace package?
 
 These are small decisions individually. Together they shape what the plugin ecosystem feels like to authors and operators.
@@ -56,8 +56,8 @@ The four extension points are the minimum that lets a v0.1 plugin do useful work
 A real workspace package as the example is the right shape because:
 
 - It exercises the actual build pipeline plugin authors will use (`tsc`, `peerDependencies`, ESM exports). An inline fixture would not catch a packaging mistake the same way.
-- It serves as a copy-paste template. `docs/plugins/author-guide.md` says "look at `@mt-commerce/plugin-example`," and that pointer goes to a directory the author can read straight through.
-- The api's plugin-loader integration tests use it as the under-test fixture, so the example is *also* what proves the loader works end-to-end. One artifact, two roles.
+- It serves as a copy-paste template. The plugin author guide (`apps/docs/src/content/docs/plugins/author-guide.mdx`) says "look at `@mt-commerce/plugin-example`," and that pointer goes to a directory the author can read straight through.
+- The api's plugin-loader integration tests use it as the under-test fixture, so the example is _also_ what proves the loader works end-to-end. One artifact, two roles.
 - Operators can drop the example into their `mt-commerce.config.ts` to confirm their api boots with plugins enabled. Smoke testing the wiring is decoupled from smoke testing any specific plugin.
 
 ### Negative
@@ -101,7 +101,7 @@ Failing fast on any plugin error matches a "plugins are infrastructure" intuitio
 
 ### Inline plugin example as test fixtures
 
-Having the example plugin live inside `apps/api/tests/fixtures/` was simpler. It was rejected because plugin authors would not be able to read it as a template without understanding the api's test setup. A real package is also what an author *will* ship — the example should match.
+Having the example plugin live inside `apps/api/tests/fixtures/` was simpler. It was rejected because plugin authors would not be able to read it as a template without understanding the api's test setup. A real package is also what an author _will_ ship — the example should match.
 
 ### Schema extension via plugins from day one
 
@@ -119,4 +119,4 @@ A plugin extension point that lets plugins add tables and migrations was conside
 - `packages/core/src/plugin.ts` — `definePlugin`, `defineConfig`, `PluginContext`, the four extension-point interfaces.
 - `apps/api/src/lib/plugins.ts` — the loader.
 - `packages/plugins/example/` — the reference plugin.
-- `docs/plugins/author-guide.md` — the author-facing guide.
+- `apps/docs/src/content/docs/plugins/author-guide.mdx` — the author-facing guide.

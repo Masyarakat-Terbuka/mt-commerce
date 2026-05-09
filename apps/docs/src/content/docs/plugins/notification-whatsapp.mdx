@@ -1,0 +1,70 @@
+---
+title: "Notifikasi: WhatsApp"
+description: Mengirim konfirmasi pesanan, struk pembayaran, dan update pengiriman lewat WhatsApp via Meta Cloud API.
+---
+
+`@mt-commerce/plugin-notification-whatsapp` menggantikan kanal stub
+`whatsapp` bawaan v0.1 (yang melempar pada setiap kirim) dengan
+adapter yang didukung Meta WhatsApp Business Cloud API.
+
+Setelah didaftarkan, listener `order.placed`, `payment.captured`, dan
+`fulfillment.shipped` dari notification service merutekan ping
+pelanggan melalui WhatsApp untuk setiap order yang pelanggannya (atau
+alamat pengirimannya) memiliki nomor telepon — bersamaan dengan jalur
+email.
+
+## Apa yang dilakukan plugin
+
+- Mendaftarkan kanal notifikasi dengan id `whatsapp` yang melakukan
+  POST ke `https://graph.facebook.com/v20.0/{phoneNumberId}/messages`
+  memakai tipe pesan `template`.
+- Memetakan setiap jenis notifikasi yang didukung
+  (`order_confirmation`, `payment_received`, `shipping_update`) ke
+  template yang sudah disetujui Meta, dengan mapper kecil per-jenis
+  yang mengisi variabel positional body template.
+- Menormalisasi nomor telepon Indonesia ke bentuk wire WhatsApp
+  (`628123456789` — tanpa `+`, tanpa pemisah) sebelum dispatch. Baik
+  bentuk trunk nasional (`08...`) maupun bentuk internasional dapat
+  diproses.
+- Menampilkan penolakan upstream sebagai `ChannelDispatchError` yang
+  membawa envelope error Meta yang sudah di-parse, sehingga
+  kegagalan baris audit dapat didiagnosis hanya dari log.
+
+## Persiapan
+
+1. Akun Meta Business Manager dengan bisnis terverifikasi dan
+   WhatsApp Business Account yang disetujui.
+2. Nomor telepon yang sudah diverifikasi pada WABA itu, dengan
+   permanent access token (token system user disarankan ketimbang
+   token sementara 24 jam).
+3. Tiga template yang disetujui di dashboard Meta dengan jumlah dan
+   urutan variabel sesuai yang didokumentasikan README plugin.
+
+## Konfigurasi
+
+```ts
+// mt-commerce.config.ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import whatsappPlugin from "@mt-commerce/plugin-notification-whatsapp";
+
+export default defineConfig({
+  plugins: [
+    whatsappPlugin({
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID!,
+      accessToken: process.env.WHATSAPP_ACCESS_TOKEN!,
+      language: "id",
+      templates: {
+        orderConfirmation: process.env.WHATSAPP_TEMPLATE_ORDER!,
+        paymentReceived: process.env.WHATSAPP_TEMPLATE_PAYMENT!,
+        shippingUpdate: process.env.WHATSAPP_TEMPLATE_SHIPPING!,
+      },
+    }),
+  ],
+});
+```
+
+## Referensi
+
+- [README plugin lengkap](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/notification-whatsapp/README.md) — layout variabel template, penanganan error, perilaku audit trail.
+- [Panduan penulis plugin](/plugins/author-guide) — untuk membangun
+  plugin kanal notifikasi Anda sendiri.

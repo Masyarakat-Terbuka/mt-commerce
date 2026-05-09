@@ -1,0 +1,87 @@
+---
+title: API reference
+description: Where the OpenAPI document lives, how to read it locally, and how to authenticate against the API.
+---
+
+The mt-commerce API is the public contract of the platform. Every route
+is described in an OpenAPI document generated from Zod schemas via
+`@hono/zod-openapi`, so the document and the runtime never drift.
+
+## Browsing the API
+
+The fastest path is the [interactive explorer](/api-reference/explorer)
+— it renders every endpoint with request/response schemas and lets you
+try requests against the spec inline.
+
+Underneath, every page on this docs site is backed by the same OpenAPI
+document the API serves at:
+
+```
+GET /openapi.json
+```
+
+In development, the API also exposes a Swagger UI explorer at
+`http://localhost:8000/docs`. The Swagger UI is intentionally only
+mounted in development; production deployments expose the JSON
+document but not the explorer.
+
+A vendored copy of the spec is committed under
+`apps/docs/public/openapi.json` so the docs site is self-contained
+without a live API in front of it. Refresh the vendored copy whenever
+the API contract changes:
+
+```bash
+bun --filter @mt-commerce/api dump:openapi
+```
+
+Saving the spec for offline review against a remote API:
+
+```bash
+curl -o openapi.json https://api.mystore.example.com/openapi.json
+```
+
+## Authentication
+
+mt-commerce supports two auth shapes:
+
+- **Session cookies** (`mt_session`) for the admin and storefront,
+  issued by [Better Auth](https://better-auth.com).
+- **API keys** (`Authorization: Bearer apik_...`) for external services
+  like webhook receivers and marketplace sync workers.
+
+See [Authentication](/api-reference/authentication) for the full
+reference.
+
+## Errors
+
+Every error response uses the same envelope:
+
+```json
+{ "error": { "code": "...", "message": "...", "details": {} } }
+```
+
+Common shapes:
+
+| Status | Code               | When                                            |
+| ------ | ------------------ | ----------------------------------------------- |
+| 400    | `validation_error` | Body or query failed Zod validation             |
+| 401    | `unauthorized`     | No session, expired session, or bad API key    |
+| 403    | `forbidden`        | Authenticated, but role/scope is not in the set |
+| 404    | `not_found`        | Resource missing or scoped out of view          |
+| 409    | `idempotency_key_reuse` | Idempotent endpoint hit with a changed body that reused an in-flight key |
+
+## Idempotency
+
+Mutating endpoints that the storefront calls (cart, checkout) accept an
+optional `Idempotency-Key` header. Repeating a request with the same
+key returns the original response, even after a client retry. See the
+individual route docs in the OpenAPI document for which keys are
+honoured.
+
+## Rate limits
+
+Rate limits are applied per IP for unauthenticated routes and per
+session for authenticated ones. The exact limits are configurable per
+deployment via the `RATE_LIMIT_*` environment variables; the running
+API exposes the current values via response headers
+(`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`).

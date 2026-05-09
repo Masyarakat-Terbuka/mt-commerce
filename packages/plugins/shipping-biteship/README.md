@@ -77,11 +77,11 @@ export default defineConfig({
 
 ### Environment variables
 
-| Variable                     | Required | Purpose                                              |
-| ---------------------------- | -------- | ---------------------------------------------------- |
-| `BITESHIP_API_KEY`           | yes      | Biteship API key (`test_*` or `live_*`).             |
-| `BITESHIP_WEBHOOK_SECRET`    | for webhooks | HMAC-SHA256 secret operators paste from the dashboard. |
-| `BITESHIP_SANDBOX_API_KEY`   | tests only | Enables the gated sandbox tests in this package. |
+| Variable                   | Required     | Purpose                                                |
+| -------------------------- | ------------ | ------------------------------------------------------ |
+| `BITESHIP_API_KEY`         | yes          | Biteship API key (`test_*` or `live_*`).               |
+| `BITESHIP_WEBHOOK_SECRET`  | for webhooks | HMAC-SHA256 secret operators paste from the dashboard. |
+| `BITESHIP_SANDBOX_API_KEY` | tests only   | Enables the gated sandbox tests in this package.       |
 
 ## Seed shipping methods
 
@@ -158,6 +158,8 @@ bun --filter @mt-commerce/plugin-shipping-biteship test
 ## Reference
 
 - [Biteship API docs](https://biteship.com/id/docs)
-- [`docs/plugins/author-guide.md`](../../../docs/plugins/author-guide.md)
+- mt-commerce
+  [plugin author guide](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/docs/src/content/docs/plugins/author-guide.mdx)
+  on the docs site.
 - [`packages/core/src/plugin.ts`](../../core/src/plugin.ts) — the
   `ShippingProvider` interface this plugin implements.

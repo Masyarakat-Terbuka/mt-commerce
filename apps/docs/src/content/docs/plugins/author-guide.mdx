@@ -1,0 +1,305 @@
+---
+title: Panduan penulis plugin
+description: Membangun plugin yang mendaftarkan provider pembayaran, provider pengiriman, kanal notifikasi, atau pendengar event ke API mt-commerce saat boot.
+---
+
+mt-commerce diperluas lewat plugin — paket npm yang mendaftarkan
+provider pembayaran, provider pengiriman, kanal notifikasi, dan
+pendengar event ke API saat boot.
+
+Panduan ini ditujukan untuk penulis plugin. Untuk argumen arsitektural
+di balik model ini, lihat [ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md).
+
+---
+
+## Apa itu plugin
+
+Plugin adalah paket berformat npm yang default export-nya adalah
+factory yang mengembalikan manifest `Plugin` hasil `definePlugin`:
+
+```ts
+import { definePlugin, type Plugin } from "@mt-commerce/core/plugin";
+
+export interface MyPluginOptions {
+  apiKey: string;
+}
+
+export default function myPlugin(options: MyPluginOptions): Plugin {
+  return definePlugin({
+    name: "@my-org/payment-foo",
+    version: "1.0.0",
+    setup(ctx) {
+      ctx.registerPaymentProvider({
+        code: "foo",
+        displayName: "Foo Payments",
+        async initiate(intent) {
+          /* ... */
+        },
+        async refund(intent) {
+          /* ... */
+        },
+        verifyWebhookSignature({ rawBody, headers }) {
+          /* ... */
+          return true;
+        },
+      });
+    },
+  });
+}
+```
+
+Pola factory menjaga opsi operator tetap di luar bentuk statis manifest.
+Operator memasang plugin di `mt-commerce.config.ts`:
+
+```ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import myPlugin from "@my-org/payment-foo";
+
+export default defineConfig({
+  plugins: [
+    myPlugin({ apiKey: process.env.FOO_API_KEY ?? "" }),
+  ],
+});
+```
+
+---
+
+## Scaffolding plugin baru
+
+Paket bawaan `@mt-commerce/plugin-example` adalah templatenya. Salin
+bentuknya:
+
+```
+packages/plugins/your-plugin/
+├── package.json          # name, version, peerDependencies ke @mt-commerce/core
+├── tsconfig.json         # extends ../../../tsconfig.base.json
+├── tsconfig.build.json
+├── src/index.ts          # factory default-exported
+└── tests/index.test.ts   # unit test vitest
+```
+
+`package.json` minimal:
+
+```jsonc
+{
+  "name": "@your-org/plugin-foo",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "peerDependencies": {
+    "@mt-commerce/core": "workspace:*"
+  }
+}
+```
+
+Entri `peerDependencies` adalah kontrak dari
+[ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md):
+plugin mendeklarasikan versi mt-commerce yang didukungnya terhadap
+`@mt-commerce/core`. Kunci range — mis. `"^0.1.0"` — begitu paket core
+mulai di-publish.
+
+Saat publish ke npm:
+
+- ESM saja (`"type": "module"`).
+- Sertakan tipe (`exports` harus memetakan path runtime dan `types`).
+- Deklarasikan dependensi runtime (SDK provider, library signing) di
+  `dependencies`, bukan `peerDependencies`. Operator tidak ingin
+  belajar nama SDK provider Anda.
+
+---
+
+## Bentuk `Plugin`
+
+| Field      | Wajib | Apa itu                                                       |
+| ---------- | ----- | ------------------------------------------------------------- |
+| `name`     | ya    | Identifier stabil untuk log dan manifest loader. Pakai nama paket npm. |
+| `version`  | ya    | Semver. Di-log saat load.                                      |
+| `setup`    | ya    | Dipanggil sekali saat boot API dengan `PluginContext`. Boleh async; boleh mengembalikan fungsi teardown (disiapkan untuk shutdown wiring di masa depan). |
+
+---
+
+## Titik ekstensi
+
+API mengekspos empat registry lewat `PluginContext`. Setiap
+`registerXxx` melempar pada identifier ganda; loader menangkap dan
+menampilkan kegagalan per-plugin.
+
+### Provider pembayaran
+
+```ts
+ctx.registerPaymentProvider({
+  code: "midtrans",
+  displayName: "Midtrans",
+  initiate(intent) { /* ... */ },
+  capture(intent) { /* opsional — provider yang auto-capture mengabaikan ini */ },
+  refund(intent, amount?) { /* ... */ },
+  verifyWebhookSignature({ rawBody, headers }) { /* ... */ },
+});
+```
+
+`code` adalah identifier yang dilihat operator — disimpan di baris
+`payments` agar refund dan webhook bisa kembali ke provider yang benar
+setelah restart. Huruf kecil, stabil, unik di antara plugin yang
+ter-load.
+
+`verifyWebhookSignature` dipanggil SEBELUM API mem-parse atau
+mempercayai field apa pun dari `rawBody`. Mengembalikan `false`
+membuat handler webhook merespons 401 tanpa men-dispatch.
+
+### Provider pengiriman
+
+```ts
+ctx.registerShippingProvider({
+  code: "biteship-jne-reg",
+  displayName: "Biteship — JNE REG",
+  async quote(method, { currency }) {
+    return { amount: 18000n, currency };
+  },
+});
+```
+
+Modul shipping API merutekan method yang barisnya memiliki
+`provider_kind = 'plugin'` ke provider terdaftar yang `code`-nya
+sesuai dengan `code` method itu. Operator membuat shipping method
+melalui admin yang menunjuk ke `code` provider Anda; penulis plugin
+tidak mengelola baris.
+
+`quote` HARUS mengembalikan `Money` yang `currency`-nya sama dengan
+`opts.currency`. Service mengecek ulang di batas; melempar error yang
+bersih lebih ramah.
+
+### Kanal notifikasi
+
+```ts
+ctx.registerNotificationChannel({
+  id: "sms",
+  async send({ recipient, kind, body }) {
+    /* kirim lewat jaringan; lempar pada kegagalan transport */
+  },
+});
+```
+
+Id bawaan (`email`, `whatsapp`) sudah dipesan; loader menolak benturan.
+Pilih id baru (`sms`, `push`, `whatsapp-cloud`).
+
+API menyimpan baris audit sebelum memanggil `send`. Melempar berarti
+baris berpindah ke `failed`; kembali normal berarti `sent`.
+
+### Pendengar event
+
+```ts
+const unsubscribe = ctx.on("order.placed", async (payload) => {
+  /* respons event; aman menyentuh database */
+});
+```
+
+Listener dipanggil berurutan di emit pasca-commit. Bus menangkap dan
+mencatat throw per-listener supaya subscriber yang bug tidak meracuni
+yang lain, tetapi listener lambat memperlambat emit. Jaga pekerjaan
+tetap kecil atau enqueue ke job queue.
+
+Listener HARUS idempotent. Bus berlaku at-least-once lintas restart.
+
+Permukaan event saat ini (lihat `DomainEventMap` di
+`@mt-commerce/core/plugin`):
+
+| Event                          | Kapan                                        |
+| ------------------------------ | -------------------------------------------- |
+| `checkout.started`             | Sesi checkout dibuka.                        |
+| `checkout.shipping_set`        | Pembeli memilih shipping method.             |
+| `checkout.payment_initiated`   | Pembayaran diinisiasi untuk checkout.        |
+| `checkout.completed`           | Checkout berpindah ke completed.             |
+| `checkout.failed`              | Checkout berpindah ke failed.                |
+| `order.placed`                 | Order terbentuk dari checkout.               |
+| `order.paid`                   | Pembayaran order ter-capture.                |
+| `order.fulfilled`              | Order dikirim.                               |
+| `order.cancelled`              | Order dibatalkan.                            |
+| `order.refunded`               | Order di-refund.                             |
+
+---
+
+## Logging dan konfigurasi
+
+`ctx.log` adalah child logger ber-bentuk pino yang ber-scope ke plugin
+Anda (`{ plugin: "<name>" }`). Lebih baik bentuk struktural agar
+pipeline log meng-index field-nya:
+
+```ts
+ctx.log.info({ orderId }, "shipped");      // bagus
+ctx.log.info("shipped");                   // juga oke
+```
+
+Konfigurasi operator masuk lewat argumen factory Anda; `ctx.config`
+juga tersedia untuk plugin yang hanya memakai `definePlugin` tanpa
+factory wrapper.
+
+---
+
+## Menguji plugin Anda
+
+Buat `PluginContext` palsu di test — itulah yang dilakukan test
+`@mt-commerce/plugin-example` (lihat
+[`packages/plugins/example/tests/index.test.ts`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/example/tests/index.test.ts)).
+Kontraknya cukup kecil sehingga fake yang ditulis tangan lebih pendek
+daripada apa pun yang akan Anda import.
+
+Penulis plugin yang menginginkan test lebih dekat ke kondisi nyata
+dapat menjalankan API di sub-suite, menempatkan plugin di
+`mt-commerce.config.ts`, dan menguji perilaku lewat permukaan HTTP —
+tetapi untuk pekerjaan unit-test biasa, pendekatan fake-context lebih
+cepat dan sama informatifnya.
+
+---
+
+## Bagaimana loader mengambil plugin Anda
+
+Saat boot API, loader mencari konfigurasi operator dengan urutan
+berikut:
+
+1. Path di `MT_COMMERCE_CONFIG` (override; absolute atau relatif
+   workspace)
+2. `apps/api/mt-commerce.config.ts` (kanonik)
+3. `<workspace-root>/mt-commerce.config.ts` (fallback)
+
+File tidak ada → daftar plugin kosong dan log level info. Plugin
+bersifat opt-in.
+
+Bila konfigurasi ditemukan, loader meng-import-nya via dynamic
+`import()` — Bun menyelesaikan file `.ts` secara native. Untuk setiap
+`Plugin` di array `plugins`, loader membangun `PluginContext`,
+memanggil `setup(ctx)`, dan pada keberhasilan mencatat plugin di
+manifest dalam-proses (`getLoadedPlugins()`).
+
+Kegagalan:
+
+- Mode lenient (default) — setup plugin yang melempar dicatat dan
+  dilewati; plugin lain tetap load, API tetap boot.
+- Mode strict (`MT_COMMERCE_STRICT_PLUGINS=true`) — throw yang sama
+  membatalkan boot. Operator yang menganggap plugin sebagai
+  load-bearing menyalakan ini.
+
+---
+
+## Yang plugin tidak bisa lakukan
+
+- **Tidak ada sandboxing.** Plugin berjalan dengan privilege yang sama
+  dengan proses API. Operator memercayai plugin yang mereka pasang.
+  ([ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md)
+  membahas alasannya.)
+- **Tidak ada hot-reload.** Memperbarui plugin mengharuskan install
+  ulang dan restart. Ini disengaja — restart adalah transisi state
+  yang bersih.
+- **Tidak boleh menjangkau modul API.** Import hanya dari
+  `@mt-commerce/core/plugin` (dan sisa `@mt-commerce/core`). Import
+  langsung dari `@mt-commerce/api` tidak akan lulus type-check (paket
+  itu bukan peer dep) dan tidak akan jalan (loader tidak meng-expose
+  internal API lewat `PluginContext`).
+
+---
+
+## Referensi
+
+- [ADR-0008](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/docs/adr/0008-plugins-as-npm-packages.md) — keputusan arsitektural di balik model ini.
+- [`@mt-commerce/core/plugin`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/core/src/plugin.ts) — setiap tipe yang dirujuk panduan ini.
+- [`@mt-commerce/plugin-example`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/example/src/index.ts) — plugin template.
+- [`apps/api/src/lib/plugins.ts`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/api/src/lib/plugins.ts) — implementasi loader.

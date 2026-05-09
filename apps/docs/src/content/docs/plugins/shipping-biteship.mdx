@@ -1,0 +1,61 @@
+---
+title: "Pengiriman: Biteship"
+description: Plugin agregator pengiriman Biteship — satu API untuk JNE, J&T, SiCepat, Gojek, Grab, dan lainnya.
+---
+
+`@mt-commerce/plugin-shipping-biteship` mengintegrasikan
+[Biteship](https://biteship.com), agregator pengiriman Indonesia yang
+mengekspos satu API di atas JNE, J&T, SiCepat, AnterAja, Gojek, Grab,
+Pos Indonesia, Ninja Xpress, dan lainnya.
+
+## Apa yang dilakukan plugin
+
+- Mendaftarkan `ShippingProvider` (code `"biteship"`) yang melakukan
+  quote lewat `/v1/rates/couriers` dan membuat order lewat
+  `/v1/orders`.
+- Mengekspos verifikasi webhook dan event mapper yang dijalankan
+  layer route webhook API. Event tracking Biteship dipetakan ke
+  `fulfillment.shipped` (pada `picked_up`, `in_transit`, dst.) dan
+  `fulfillment.delivered` (pada `delivered`).
+- Mendukung cash-on-delivery: kirim `cod: true` pada saat quote untuk
+  menyaring rate ladder ke kurir yang mendukung COD, dan kirim
+  `cod: true` + `codAmount` saat membuat order agar Biteship
+  menginstruksikan kurir mengambil tunai.
+- Menyediakan seed list default untuk service kurir umum (`JNE_REG`,
+  `JNT_EZ`, `SICEPAT_BEST`, `GOJEK_INSTANT`, ...) bagi langkah seeding
+  shipping method yang dijalankan operator.
+
+## Kurir yang aktif default
+
+`jne`, `jnt`, `sicepat`, `anteraja`, `gojek`, `grab`. Kurir lain
+tersedia — kirim `couriers: [...]` untuk mengaktifkannya. Set default
+mencakup pilihan nationwide dan same-day utama yang biasanya pertama
+kali diaktifkan merchant Indonesia.
+
+## Konfigurasi
+
+```ts
+// mt-commerce.config.ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import biteship from "@mt-commerce/plugin-shipping-biteship";
+
+export default defineConfig({
+  plugins: [
+    biteship({
+      mode: process.env.NODE_ENV === "production" ? "production" : "sandbox",
+      apiKey: process.env.BITESHIP_API_KEY!,
+      webhookSecret: process.env.BITESHIP_WEBHOOK_SECRET!,
+    }),
+  ],
+});
+```
+
+Daftar di [biteship.com](https://biteship.com), ambil test key
+(`test_*`) dari **Dashboard → Account → API** untuk sandbox dan live
+key (`live_*`) untuk production.
+
+## Referensi
+
+- [README plugin lengkap](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/shipping-biteship/README.md) — penyiapan webhook, konfigurasi COD, seeding, override kurir.
+- [Panduan penulis plugin](/plugins/author-guide) — untuk membangun
+  plugin provider pengiriman Anda sendiri.

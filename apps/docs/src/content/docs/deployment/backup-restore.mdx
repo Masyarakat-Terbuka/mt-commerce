@@ -1,0 +1,156 @@
+---
+title: Cadangan dan pemulihan
+description: Dump Postgres harian, salinan off-site dengan rclone, dan latihan restore.
+---
+
+Postgres adalah satu-satunya service stateful yang menyimpan data
+bisnis; Redis hanya cache dan antrian pekerjaan, dan bisa dibangun
+ulang. Data Caddy (sertifikat) juga dapat dipulihkan — kehilangannya
+memaksa penerbitan ulang dari Let's Encrypt, tetapi itu berlangsung
+dalam hitungan detik. Jadi cerita backup berkutat pada Postgres.
+
+## Strategi
+
+- **Dump logis harian** dengan `pg_dump`, ditulis ke direktori yang
+  di-mount dari host.
+- **Retensi**: 7 snapshot harian + 4 snapshot mingguan, dipangkas
+  otomatis oleh skrip.
+- **Salinan off-site**: `rclone sync` ke object storage S3-compatible
+  (Cloudflare R2, Wasabi, Biznet Gio, IDCloudHost storage).
+
+Satu `pg_dump` di skala ini (satu merchant, katalog moderat) selesai
+dalam beberapa detik dan menghasilkan file terkompresi yang ringkas.
+Point-in-time recovery (PITR) dengan WAL archiving terlalu berlebih
+untuk v0.1; bila volume transaksi Anda nantinya membenarkan, ganti ke
+pgBackRest atau WAL-G.
+
+## Penyiapan
+
+Buat direktori host untuk backup:
+
+```bash
+sudo mkdir -p /var/backups/mt-commerce
+sudo chown $USER:$USER /var/backups/mt-commerce
+```
+
+Skrip-nya sudah ada di repo pada `scripts/backup-postgres.sh`. Jadikan
+executable:
+
+```bash
+chmod +x ~/mt-commerce/scripts/backup-postgres.sh
+```
+
+## Jalankan harian
+
+Tambahkan entri cron sisi-host sebagai user `deploy`:
+
+```bash
+crontab -e
+```
+
+```bash
+# Backup postgres mt-commerce, setiap hari pukul 02:30 waktu lokal.
+30 2 * * * cd /home/deploy/mt-commerce && ./scripts/backup-postgres.sh >> /var/log/mt-commerce-backup.log 2>&1
+```
+
+Konfirmasi run berikutnya:
+
+```bash
+ls -lh /var/backups/mt-commerce/
+```
+
+## Salinan off-site dengan rclone
+
+Pasang rclone:
+
+```bash
+curl https://rclone.org/install.sh | sudo bash
+```
+
+Konfigurasikan remote (S3-compatible — bekerja untuk R2, Wasabi,
+Biznet Gio, IDCloudHost):
+
+```bash
+rclone config
+# n) New remote
+# name> mt-backup
+# storage> s3
+# provider> Other (atau Cloudflare, Wasabi sesuai)
+# env_auth> false
+# access_key_id> ...
+# secret_access_key> ...
+# endpoint> https://... (spesifik provider)
+# Sisanya biarkan default.
+```
+
+Uji:
+
+```bash
+rclone lsd mt-backup:
+```
+
+Lalu tambahkan langkah sync ke cron job:
+
+```bash
+30 2 * * * cd /home/deploy/mt-commerce && ./scripts/backup-postgres.sh && rclone sync /var/backups/mt-commerce mt-backup:mt-commerce-backups >> /var/log/mt-commerce-backup.log 2>&1
+```
+
+## Pemulihan
+
+Hentikan API supaya tidak menulis selagi database di bawahnya
+ditukar:
+
+```bash
+cd ~/mt-commerce
+docker compose -f docker-compose.prod.yml stop api
+```
+
+Drop dan buat ulang database, lalu restore. Dari host:
+
+```bash
+# Pilih dump untuk di-restore.
+ls /var/backups/mt-commerce/
+DUMP=/var/backups/mt-commerce/mt_commerce-2026-05-08.sql.gz
+
+# Drop + buat ulang database.
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U "$POSTGRES_USER" -d postgres \
+  -c "DROP DATABASE IF EXISTS $POSTGRES_DB;" \
+  -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;"
+
+# Restore dari dump SQL ber-gzip.
+gunzip -c "$DUMP" | docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+
+# Hidupkan kembali API.
+docker compose -f docker-compose.prod.yml start api
+```
+
+Variabel shell `$POSTGRES_USER` dan `$POSTGRES_DB` berasal dari file
+`.env.production` — `source .env.production` dulu bila shell-nya
+baru.
+
+## Memverifikasi backup
+
+Backup yang tidak pernah diuji bukanlah backup. Setidaknya sekali
+per kuartal:
+
+1. Jalankan container Postgres baru di lokal.
+2. Restore dump terbaru ke dalamnya.
+3. Lakukan pemeriksaan baca-saja kecil (jumlah `orders`, `products`,
+   dst.).
+
+```bash
+docker run --rm -d --name mt-restore-test \
+  -e POSTGRES_USER=mt -e POSTGRES_PASSWORD=mt -e POSTGRES_DB=mt_commerce \
+  -p 5433:5432 postgres:16-alpine
+
+# Tunggu sampai healthy, lalu:
+gunzip -c /path/to/dump.sql.gz | \
+  docker exec -i mt-restore-test psql -U mt -d mt_commerce
+
+docker exec mt-restore-test psql -U mt -d mt_commerce \
+  -c "SELECT count(*) FROM orders;"
+
+docker stop mt-restore-test
+```

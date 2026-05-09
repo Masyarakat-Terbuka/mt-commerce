@@ -1,12 +1,15 @@
-# Authentication
+---
+title: Authentication
+description: Sessions, passwords, API keys, and roles. The full reference for wiring the platform into a deployment.
+---
 
 mt-commerce uses [Better Auth](https://better-auth.com) for password-based
-authentication and HTTP-only session cookies, plus a small layer on top for
-staff roles and API keys.
+authentication and HTTP-only session cookies, plus a small layer on top
+for staff roles and API keys.
 
-This document is for operators wiring the platform into a deployment. For the
-developer-facing module overview, see
-[`apps/api/src/modules/auth/README.md`](../../apps/api/src/modules/auth/README.md).
+This document is for operators wiring the platform into a deployment. For
+the developer-facing module overview, see
+[`apps/api/src/modules/auth/README.md`](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/api/src/modules/auth/README.md).
 
 ---
 
@@ -17,21 +20,21 @@ There are two audiences:
 - **Staff** — shop owners and their teams using the admin app.
 - **Customers** — shoppers using the storefront.
 
-Both authenticate against the same identity table (`auth_users`), but staff
-also have a row in `staff_profiles` that carries a role
-(`owner | admin | staff | viewer`). A user without a `staff_profiles` row
-cannot reach `/admin/v1/...` routes — even if the cookie is valid.
+Both authenticate against the same identity table (`auth_users`), but
+staff also have a row in `staff_profiles` that carries a role
+(`owner | admin | staff | viewer`). A user without a `staff_profiles`
+row cannot reach `/admin/v1/...` routes — even if the cookie is valid.
 
-External services (payment provider webhooks, marketplace sync workers) use
-**API keys** instead of cookies. Keys carry explicit scopes
+External services (payment provider webhooks, marketplace sync workers)
+use **API keys** instead of cookies. Keys carry explicit scopes
 (`catalog:read`, `catalog:write`, `webhooks:receive`).
 
 ---
 
 ## Sessions
 
-When a user signs in with email and password, Better Auth issues a session
-cookie:
+When a user signs in with email and password, Better Auth issues a
+session cookie:
 
 | Property      | Value                                              |
 | ------------- | -------------------------------------------------- |
@@ -93,19 +96,21 @@ URL is logged to the console with module `auth`:
 ```
 
 A real email adapter lives in the notification module (a follow-up). To
-require email verification before sign-in, set `requireEmailVerification`
-to `true` in `apps/api/src/modules/auth/better-auth.ts` and rebuild.
+require email verification before sign-in, set
+`requireEmailVerification` to `true` in
+`apps/api/src/modules/auth/better-auth.ts` and rebuild.
 
 ---
 
 ## Provisioning the first owner
 
 mt-commerce enforces in code: the FIRST staff user must have role `owner`.
-The check lives in `AuthService.assignRole` so a seed script cannot quietly
-create a non-owner first staff and lock the platform out.
+The check lives in `AuthService.assignRole` so a seed script cannot
+quietly create a non-owner first staff and lock the platform out.
 
-The auth user must exist before they can be promoted (the `staff_profiles`
-row points at `auth_users.id`), so provisioning is a two-step flow.
+The auth user must exist before they can be promoted (the
+`staff_profiles` row points at `auth_users.id`), so provisioning is a
+two-step flow.
 
 First, sign the user up:
 
@@ -127,23 +132,23 @@ confirmation before promoting; pass `--yes` (or `-y`) to skip the prompt
 in non-interactive contexts.
 
 After promotion, sign in with the same credentials. Subsequent staff can
-be created through `POST /admin/v1/auth/staff` while authenticated as the
-owner.
+be created through `POST /admin/v1/auth/staff` while authenticated as
+the owner.
 
 ---
 
 ## API keys
 
-API keys are for external services. They authenticate via the `Authorization`
-header instead of a cookie:
+API keys are for external services. They authenticate via the
+`Authorization` header instead of a cookie:
 
 ```
 Authorization: Bearer apik_01HZX....SECRETPART
 ```
 
-The format is `<id>.<secret>`. Both halves are ULID-shaped. The id is logged
-in audit trails; the secret half is never logged or stored — the database
-keeps only an Argon2id hash.
+The format is `<id>.<secret>`. Both halves are ULID-shaped. The id is
+logged in audit trails; the secret half is never logged or stored — the
+database keeps only an Argon2id hash.
 
 ### Lifecycle
 
@@ -177,7 +182,8 @@ Routes meant to be called by API keys declare a scope. v0.1 starter set:
 | `catalog:write`     | Mutate products, variants, inventory       |
 | `webhooks:receive`  | Inbound webhook receivers                  |
 
-Adding a scope is a one-line change in `apps/api/src/modules/auth/types.ts`.
+Adding a scope is a one-line change in
+`apps/api/src/modules/auth/types.ts`.
 
 ---
 
@@ -212,7 +218,8 @@ openssl rand -base64 32
 ```
 
 Rotating the secret invalidates ALL existing sessions and verification
-tokens. Plan the rotation accordingly.
+tokens. Plan the rotation accordingly — see
+[Firewall and SSL](/deployment/firewall-ssl) for the procedure.
 
 ---
 

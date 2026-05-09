@@ -1,7 +1,10 @@
-# Deploying to Biznet Gio
+---
+title: Deploying to Biznet Gio
+description: Provider-specific notes for running mt-commerce on Biznet Gio infrastructure.
+---
 
-The [Hetzner guide](./getting-started.md) applies in full. This page only
-records provider-specific differences worth noting.
+The [Hetzner guide](/deployment/getting-started) applies in full. This page
+only records provider-specific differences worth noting.
 
 - **Compute**: Biznet Gio Neo Lite or Neo Cloud instances. Pick a size with
   at least 2 vCPU / 4 GB RAM. Ubuntu 22.04 LTS is offered as a stock image.
@@ -12,7 +15,7 @@ records provider-specific differences worth noting.
   rules from the Hetzner guide work too — defense in depth is fine.
 - **Object storage** (for off-site backups): Biznet Gio S3-compatible
   storage works with rclone using the `s3` remote type. See
-  [`backup-restore.md`](./backup-restore.md).
+  [Backup and restore](/deployment/backup-restore).
 
 > **TODO**: verify the firewall UI naming and the exact rclone endpoint for
 > Biznet Gio object storage, then update this page.

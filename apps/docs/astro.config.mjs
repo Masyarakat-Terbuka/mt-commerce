@@ -123,7 +123,24 @@ export default defineConfig({
         {
           label: "Referensi API",
           translations: { en: "API reference" },
-          link: "/api-reference",
+          collapsed: true,
+          items: [
+            {
+              label: "Ikhtisar",
+              translations: { en: "Overview" },
+              link: "/api-reference",
+            },
+            {
+              label: "Penjelajah",
+              translations: { en: "Explorer" },
+              link: "/api-reference/explorer",
+            },
+            {
+              label: "Autentikasi",
+              translations: { en: "Authentication" },
+              link: "/api-reference/authentication",
+            },
+          ],
         },
         {
           label: "ADR",

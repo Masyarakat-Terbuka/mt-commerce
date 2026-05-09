@@ -1,0 +1,89 @@
+---
+title: Referensi API
+description: Tempat dokumen OpenAPI berada, cara membacanya secara lokal, dan cara melakukan autentikasi terhadap API.
+---
+
+API mt-commerce adalah kontrak publik platform. Setiap route
+dijelaskan dalam dokumen OpenAPI yang dibangkitkan dari skema Zod
+melalui `@hono/zod-openapi`, sehingga dokumen dan runtime tidak pernah
+mendrift.
+
+## Menjelajah API
+
+Jalur tercepat adalah [penjelajah interaktif](/api-reference/explorer)
+— ia merender setiap endpoint berikut skema request/response dan
+memungkinkan Anda mencoba request langsung di tempat.
+
+Di balik layar, setiap halaman pada situs docs ini didukung dokumen
+OpenAPI yang sama yang disajikan API di:
+
+```
+GET /openapi.json
+```
+
+Di pengembangan, API juga mengekspos penjelajah Swagger UI di
+`http://localhost:8000/docs`. Swagger UI sengaja hanya dipasang di
+pengembangan; deployment production mengekspos dokumen JSON tetapi
+tidak penjelajahnya.
+
+Salinan spec yang di-vendor disimpan di
+`apps/docs/public/openapi.json` agar situs docs mandiri tanpa API
+hidup di depannya. Refresh salinan tersebut setiap kali kontrak API
+berubah:
+
+```bash
+bun --filter @mt-commerce/api dump:openapi
+```
+
+Menyimpan spec untuk review offline terhadap API jarak jauh:
+
+```bash
+curl -o openapi.json https://api.mystore.example.com/openapi.json
+```
+
+## Autentikasi
+
+mt-commerce mendukung dua bentuk autentikasi:
+
+- **Cookie sesi** (`mt_session`) untuk admin dan storefront,
+  diterbitkan oleh [Better Auth](https://better-auth.com).
+- **API key** (`Authorization: Bearer apik_...`) untuk service
+  eksternal seperti webhook receiver dan worker sinkronisasi
+  marketplace.
+
+Lihat [Autentikasi](/api-reference/authentication) untuk referensi
+lengkap.
+
+## Error
+
+Setiap response error memakai envelope yang sama:
+
+```json
+{ "error": { "code": "...", "message": "...", "details": {} } }
+```
+
+Bentuk umum:
+
+| Status | Code               | Kapan                                          |
+| ------ | ------------------ | ---------------------------------------------- |
+| 400    | `validation_error` | Body atau query gagal validasi Zod             |
+| 401    | `unauthorized`     | Tidak ada sesi, sesi kedaluwarsa, atau API key salah |
+| 403    | `forbidden`        | Sudah autentikasi, tetapi role/scope tidak masuk set |
+| 404    | `not_found`        | Resource tidak ada atau di luar lingkup        |
+| 409    | `idempotency_key_reuse` | Endpoint idempotent dipanggil dengan body yang berubah memakai key yang masih in-flight |
+
+## Idempotency
+
+Endpoint mutasi yang dipanggil storefront (cart, checkout) menerima
+header opsional `Idempotency-Key`. Mengulang request dengan key yang
+sama mengembalikan response asli, bahkan setelah retry dari klien.
+Lihat dokumentasi route individual di dokumen OpenAPI untuk mengetahui
+key mana yang dihormati.
+
+## Rate limit
+
+Rate limit diterapkan per IP untuk route tanpa autentikasi dan per
+sesi untuk yang sudah autentikasi. Batasnya dapat dikonfigurasi per
+deployment lewat variabel lingkungan `RATE_LIMIT_*`; API yang berjalan
+mengekspos nilai saat ini lewat header response (`X-RateLimit-Limit`,
+`X-RateLimit-Remaining`, `X-RateLimit-Reset`).

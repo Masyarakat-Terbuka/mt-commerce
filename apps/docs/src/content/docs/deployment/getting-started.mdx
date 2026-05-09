@@ -1,0 +1,205 @@
+---
+title: Men-deploy mt-commerce
+description: Pasang mt-commerce di VPS dalam satu sesi. Hetzner Cloud dipakai sebagai contoh; langkah yang sama berlaku di host Ubuntu 22.04 LTS apa pun.
+---
+
+Seorang pemilik toko atau pengembang dapat memasang mt-commerce di sebuah
+VPS dalam satu sesi. Panduan ini menelusuri jalur itu di Hetzner Cloud;
+langkah yang sama berlaku di VPS Ubuntu 22.04 LTS mana pun, termasuk
+penyedia Indonesia — lihat [Biznet Gio](/deployment/biznet-gio) dan
+[IDCloudHost](/deployment/idcloudhost).
+
+Stack berjalan sebagai lima container di belakang Caddy: Postgres,
+Redis, API (Hono di atas Bun), admin SPA (Vite + React), dan storefront
+(Astro). Caddy menangani TLS dan mengambil sertifikat Let's Encrypt
+secara otomatis.
+
+## Persiapan
+
+- Domain terdaftar yang DNS-nya Anda kontrol.
+- VPS dengan minimal 2 vCPU dan 4 GB RAM. Hetzner CX22 ukuran awal yang
+  wajar; hanya API dan Postgres yang benar-benar terbantu oleh memori
+  lebih besar.
+- Pasangan kunci SSH di laptop Anda.
+
+## 1. Sediakan server
+
+Hetzner Cloud:
+
+1. Buat project baru, lalu server baru.
+2. Image: Ubuntu 22.04 LTS.
+3. Tipe: CX22 (atau lebih besar).
+4. Region: pilih yang paling dekat dengan pelanggan Anda. Falkenstein
+   dan Helsinki masuk akal untuk traffic Eropa; Singapore untuk Asia
+   Tenggara.
+5. Tambahkan kunci SSH Anda di "SSH keys".
+6. Opsional: aktifkan IPv6, backup, dan firewall Hetzner.
+
+Catat alamat IPv4 publik server.
+
+## 2. Arahkan DNS ke server
+
+Di penyedia DNS Anda, buat tiga record A:
+
+```
+mystore.example.com           A   <ip-server>
+admin.mystore.example.com     A   <ip-server>
+api.mystore.example.com       A   <ip-server>
+```
+
+Bila Anda memakai IPv6, tambahkan record AAAA yang sepadan. DNS harus
+sudah propagate sebelum Caddy bisa menyelesaikan tantangan ACME di
+langkah 6.
+
+## 3. Hardening awal
+
+SSH masuk sebagai `root`, lalu:
+
+```bash
+# Buat user non-root dengan sudo.
+adduser deploy
+usermod -aG sudo deploy
+
+# Pindahkan kunci SSH Anda.
+mkdir -p /home/deploy/.ssh
+cp ~/.ssh/authorized_keys /home/deploy/.ssh/
+chown -R deploy:deploy /home/deploy/.ssh
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/authorized_keys
+
+# Matikan SSH untuk root dan auth via password.
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+systemctl reload ssh
+
+# Firewall: hanya SSH + HTTP + HTTPS.
+apt update && apt install -y ufw fail2ban
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 443/udp   # HTTP/3 (Caddy memakai QUIC untuk HTTP/3)
+ufw --force enable
+
+systemctl enable --now fail2ban
+```
+
+Disconnect, lalu SSH masuk lagi sebagai `deploy`. Mulai sekarang,
+jalankan perintah sebagai `deploy` dan tambahkan `sudo` bila perlu.
+
+## 4. Pasang Docker
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+
+sudo usermod -aG docker $USER
+newgrp docker
+docker run --rm hello-world
+```
+
+## 5. Clone repo dan konfigurasi
+
+```bash
+cd ~
+git clone https://github.com/masyarakat-terbuka/mt-commerce.git
+cd mt-commerce
+cp .env.production.example .env.production
+```
+
+Buka `.env.production` di editor teks dan isi:
+
+- `DOMAIN` — domain apex Anda (mis. `mystore.example.com`).
+- `ACME_EMAIL` — inbox yang dipantau untuk peringatan kedaluwarsa
+  Let's Encrypt.
+- `POSTGRES_PASSWORD` — buat dengan `openssl rand -base64 24`.
+- `DATABASE_URL` — harus cocok dengan kredensial Postgres di atas.
+- `BETTER_AUTH_SECRET` — buat dengan `openssl rand -base64 32`.
+- `SMTP_*` — kredensial provider email transaksional.
+
+Biarkan variabel plugin opsional (`MIDTRANS_*`, `BITESHIP_*`,
+`WHATSAPP_*`) kosong kecuali plugin tersebut sudah dipasang di
+`apps/api/mt-commerce.config.ts`.
+
+## 6. Build dan jalankan
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+Build pertama memakan 2–4 menit tergantung server. Caddy mengambil
+sertifikat TLS pada kali pertama setiap subdomain menerima request.
+Pantau lognya:
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f caddy
+```
+
+Cari baris `certificate obtained successfully` untuk tiap subdomain.
+
+## 7. Penyiapan awal
+
+Migrasi dijalankan otomatis tiap kali container API start, jadi skema
+sudah ada. Tinggal dua langkah manual.
+
+Seed wilayah Indonesia (provinsi, kabupaten/kota, kecamatan,
+kelurahan):
+
+```bash
+docker compose -f docker-compose.prod.yml exec api bun run db:seed:regions
+```
+
+Buat owner pertama. User-nya harus sudah ada — daftar dulu via
+storefront atau `POST /api/auth/sign-up/email`, baru:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api \
+  bun run provision-owner you@example.com
+```
+
+## 8. Verifikasi
+
+```
+https://api.mystore.example.com/health    → {"status":"ok"}
+https://admin.mystore.example.com/login   → halaman login admin
+https://mystore.example.com/              → beranda storefront
+```
+
+Cek container yang berjalan:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+
+Semua service seharusnya melaporkan `healthy` dalam sekitar satu menit.
+
+## Selanjutnya
+
+- [Cadangan & pemulihan](/deployment/backup-restore) — siapkan dump
+  Postgres harian.
+- [Firewall & SSL](/deployment/firewall-ssl) — verifikasi hardening,
+  rotasi rahasia.
+
+## Update
+
+```bash
+cd ~/mt-commerce
+git pull
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+Migrasi dijalankan otomatis pada boot pertama container API yang baru.

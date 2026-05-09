@@ -1,4 +1,7 @@
-# Backup and restore
+---
+title: Backup and restore
+description: Nightly Postgres dumps, off-site copy with rclone, and the restore drill.
+---
 
 Postgres is the only stateful service that holds business data; Redis is a
 cache and a job queue, and is rebuildable. Caddy data (certificates) is
@@ -43,7 +46,7 @@ Add a host-side cron entry as the `deploy` user:
 crontab -e
 ```
 
-```cron
+```bash
 # mt-commerce postgres backup, every day at 02:30 local time.
 30 2 * * * cd /home/deploy/mt-commerce && ./scripts/backup-postgres.sh >> /var/log/mt-commerce-backup.log 2>&1
 ```
@@ -86,7 +89,7 @@ rclone lsd mt-backup:
 
 Then add a sync step to the cron job:
 
-```cron
+```bash
 30 2 * * * cd /home/deploy/mt-commerce && ./scripts/backup-postgres.sh && rclone sync /var/backups/mt-commerce mt-backup:mt-commerce-backups >> /var/log/mt-commerce-backup.log 2>&1
 ```
 

@@ -1,9 +1,12 @@
-# Deploying mt-commerce
+---
+title: Deploying mt-commerce
+description: Put mt-commerce on a VPS in one sitting. Hetzner Cloud is the worked example; the same steps work on any Ubuntu 22.04 LTS host.
+---
 
 A merchant or developer can put mt-commerce on a VPS in one sitting. This
 guide walks through that path on Hetzner Cloud; the same steps work on any
 Ubuntu 22.04 LTS VPS, including Indonesian providers — see
-[`biznet-gio.md`](./biznet-gio.md) and [`idcloudhost.md`](./idcloudhost.md).
+[Biznet Gio](/deployment/biznet-gio) and [IDCloudHost](/deployment/idcloudhost).
 
 The stack runs as five containers behind Caddy: Postgres, Redis, the API
 (Hono on Bun), the admin SPA (Vite + React), and the storefront (Astro).
@@ -180,8 +183,8 @@ All services should report `healthy` after about a minute.
 
 ## What's next
 
-- [Backup and restore](./backup-restore.md) — set up nightly Postgres dumps.
-- [Firewall and SSL](./firewall-ssl.md) — verify hardening, rotate secrets.
+- [Backup and restore](/deployment/backup-restore) — set up nightly Postgres dumps.
+- [Firewall and SSL](/deployment/firewall-ssl) — verify hardening, rotate secrets.
 
 ## Updating
 

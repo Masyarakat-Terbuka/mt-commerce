@@ -1,0 +1,60 @@
+---
+title: "Shipping: Biteship"
+description: Biteship shipping aggregator plugin — one API for JNE, J&T, SiCepat, Gojek, Grab, and others.
+---
+
+`@mt-commerce/plugin-shipping-biteship` integrates
+[Biteship](https://biteship.com), an Indonesian shipping aggregator that
+exposes a single API on top of JNE, J&T, SiCepat, AnterAja, Gojek, Grab,
+Pos Indonesia, Ninja Xpress, and others.
+
+## What the plugin does
+
+- Registers a `ShippingProvider` (code `"biteship"`) that quotes through
+  `/v1/rates/couriers` and creates orders through `/v1/orders`.
+- Exposes a webhook verification + event mapper the api's webhook route
+  layer drives. Biteship tracking events map to `fulfillment.shipped`
+  (on `picked_up`, `in_transit`, etc.) and `fulfillment.delivered` (on
+  `delivered`).
+- Supports cash-on-delivery: pass `cod: true` at quote time to filter
+  the rate ladder to COD-capable couriers, and pass `cod: true` +
+  `codAmount` at order creation time so Biteship instructs the courier
+  to collect cash.
+- Ships a default seed list of common courier services (`JNE_REG`,
+  `JNT_EZ`, `SICEPAT_BEST`, `GOJEK_INSTANT`, ...) for the operator-run
+  shipping-methods seeding step.
+
+## Couriers enabled by default
+
+`jne`, `jnt`, `sicepat`, `anteraja`, `gojek`, `grab`. Others are
+available — pass `couriers: [...]` to enable them. The default set
+covers the major nationwide and same-day options Indonesian merchants
+typically enable first.
+
+## Configuration
+
+```ts
+// mt-commerce.config.ts
+import { defineConfig } from "@mt-commerce/core/plugin";
+import biteship from "@mt-commerce/plugin-shipping-biteship";
+
+export default defineConfig({
+  plugins: [
+    biteship({
+      mode: process.env.NODE_ENV === "production" ? "production" : "sandbox",
+      apiKey: process.env.BITESHIP_API_KEY!,
+      webhookSecret: process.env.BITESHIP_WEBHOOK_SECRET!,
+    }),
+  ],
+});
+```
+
+Sign up at [biteship.com](https://biteship.com), grab the test key
+(`test_*`) from **Dashboard → Account → API** for sandbox and the live
+key (`live_*`) for production.
+
+## Reference
+
+- [Full plugin README](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/packages/plugins/shipping-biteship/README.md) — webhook setup, COD configuration, seeding, courier overrides.
+- [Plugin author guide](/plugins/author-guide) — for building your own
+  shipping provider plugin.

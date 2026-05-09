@@ -22,5 +22,6 @@ export default defineConfig({
 
 ## Reference
 
-For the full plugin authoring contract, see
-[`docs/plugins/author-guide.md`](../../../docs/plugins/author-guide.md).
+For the full plugin authoring contract, see the
+[plugin author guide](https://github.com/masyarakat-terbuka/mt-commerce/blob/main/apps/docs/src/content/docs/plugins/author-guide.mdx)
+on the docs site.
