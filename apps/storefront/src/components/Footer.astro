@@ -91,9 +91,10 @@ const aboutColumn = {
   heading: t("footer.about.heading"),
   links: [
     { label: t("footer.about.about"), href: localePath(locale, "/about") },
-    // /contact does not exist yet — point at /about anchor as a calm
-    // placeholder. Updates to a real /contact page in a follow-up.
-    { label: t("footer.about.contact"), href: localePath(locale, "/about") },
+    // The "Hubungi" / "Contact" link is omitted until a real /contact page
+    // ships. Pointing it at /about made the link feel like a stage set —
+    // the about page has no contact form or address. Re-add when the
+    // page exists.
     {
       label: t("footer.col.community.github"),
       href: "https://github.com/masyarakat-terbuka/mt-commerce",

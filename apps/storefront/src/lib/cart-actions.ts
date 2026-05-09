@@ -20,8 +20,9 @@
  *     3. Broadcasts the same `mt:cart-changed` event CartProvider
  *        broadcasts, so every other island (header badge, drawer, /cart
  *        page) re-hydrates exactly the way it does on a CartProvider-driven
- *        add. The drawer auto-open behavior is unchanged: we dispatch the
- *        same `mt:cart-open` signal.
+ *        add. The drawer auto-open is decided per-caller — QuickAdd skips
+ *        it (browse-flow add) while PDP "Add to cart" still triggers it
+ *        via `CartProvider.openDrawer()`.
  *
  * `CartProvider.addItem` is refactored on top of this helper so the wire
  * format and event shape stay identical between the two paths — there is
@@ -32,7 +33,6 @@ import { rememberProductInfo, type ProductInfo } from "./cart-product-info.js";
 
 const STORAGE_KEY = "mt.cartId";
 const CART_CHANGED_EVENT = "mt:cart-changed";
-const CART_OPEN_EVENT = "mt:cart-open";
 
 /** Single-source-of-truth currency for v0.1; mirrors CartProvider. */
 const DEFAULT_CURRENCY = "IDR";
@@ -72,11 +72,6 @@ function broadcastCartChange(detail: CartChangedDetail): void {
   window.dispatchEvent(
     new CustomEvent<CartChangedDetail>(CART_CHANGED_EVENT, { detail }),
   );
-}
-
-export function openCartDrawer(): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(CART_OPEN_EVENT));
 }
 
 function totalQuantity(cart: Cart | null): number {
@@ -123,9 +118,9 @@ export interface AddLineItemResult {
  * `CartProvider.addItem` propagates so `AddToCartButton` can flip its
  * state).
  *
- * The helper does NOT open the drawer — the caller decides whether to
- * dispatch `openCartDrawer()` (PDP and quick-add both do; a future
- * silent-add path could opt out).
+ * The helper does NOT open the drawer — the caller decides. PDP "Add to
+ * cart" opens it (deliberate, user is committed to the product); QuickAdd
+ * does not (browse-flow add).
  */
 export async function addLineItem(
   input: AddLineItemInput,

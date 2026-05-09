@@ -91,8 +91,24 @@ export type ProductDetailProps = {
   addedLabel: string;
   /** Localized generic error copy for cart failures. */
   cartErrorLabel: string;
-  /** Localized "Beranda / Home" label — kept in props for backwards compat. */
+  /** Localized "Beranda / Home" label for the visible breadcrumb. */
   breadcrumbHomeLabel: string;
+  /** Localized "Produk / Products" label for the visible breadcrumb. */
+  breadcrumbProductsLabel: string;
+  /** Locale-aware href for the breadcrumb's home link. */
+  homeHref: string;
+  /** Localized "Jumlah / Quantity" label for the stepper, sr-only. */
+  quantityLabel: string;
+  /** Localized aria-label for the +/- stepper buttons. */
+  quantityIncreaseLabel: string;
+  quantityDecreaseLabel: string;
+  /**
+   * Localized shipping caption shown next to the CTA — a calm, factual
+   * "Pengiriman dari Jakarta · 2-5 hari kerja · mulai dari Rp 15.000".
+   * Static copy by design: it answers "if I add this, when does it
+   * arrive and how much?" before the user is forced through checkout.
+   */
+  shippingEtaLabel: string;
   /** Localized "Produk serupa" / "Related products" heading. */
   relatedTitle: string;
   /** Path prefix for sibling product links — locale-aware, page builds it. */
@@ -211,6 +227,13 @@ export default function ProductDetail(props: ProductDetailProps) {
     outOfStockLabel,
     addedLabel,
     cartErrorLabel,
+    breadcrumbHomeLabel,
+    breadcrumbProductsLabel,
+    homeHref,
+    quantityLabel,
+    quantityIncreaseLabel,
+    quantityDecreaseLabel,
+    shippingEtaLabel,
     relatedTitle,
     detailHrefBase,
     categoryName,
@@ -231,6 +254,13 @@ export default function ProductDetail(props: ProductDetailProps) {
     }
     return { status: "loading" };
   });
+
+  // Quantity stepper state. Lives here (not in AddToCartButton) so the
+  // visible -/+ controls can sit beside the CTA and so a successful add
+  // can reset us back to 1 — the next add shouldn't carry the previous
+  // count forward by surprise.
+  const [quantity, setQuantity] = useState<number>(1);
+  const QUANTITY_MAX = 99;
 
   // Skip the kick-off fetch when we just seeded from `initialProduct`. The
   // ref clears after the first effect run so a later slug change still
@@ -385,14 +415,57 @@ export default function ProductDetail(props: ProductDetailProps) {
   const base = lowestPrice(product);
   const altText = product.imageAlt ?? product.title;
 
-  // The page resolves the localized category name server-side via
-  // `listCategories(locale)` and forwards it as `categoryName`. We never
-  // render the raw slug/id as the visible label — when the lookup fails
-  // (or the product has no category) the overline is hidden instead.
-  const overlineHref = categoryHref ?? detailHrefBase;
-
   return (
     <article>
+      {/*
+        Visible breadcrumb. The PDP previously hid it under a single
+        category overline below the hero; that lost wayfinding for users
+        who deep-linked into a product. Format: Beranda · Produk · [Cat].
+        We omit the product title (it's the H1 right below) so the row
+        stays short. Sits inside the same container width as the body.
+      */}
+      <nav
+        aria-label="Breadcrumb"
+        className="mx-auto max-w-[1280px] px-5 pt-5 md:px-8 md:pt-6"
+      >
+        <ol className="t-caption flex flex-wrap items-center gap-x-2">
+          <li>
+            <a
+              href={homeHref}
+              className="text-muted hover:text-accent transition-colors duration-150"
+            >
+              {breadcrumbHomeLabel}
+            </a>
+          </li>
+          <li aria-hidden="true" className="text-faint">
+            ·
+          </li>
+          <li>
+            <a
+              href={detailHrefBase}
+              className="text-muted hover:text-accent transition-colors duration-150"
+            >
+              {breadcrumbProductsLabel}
+            </a>
+          </li>
+          {categoryName && categoryHref && (
+            <>
+              <li aria-hidden="true" className="text-faint">
+                ·
+              </li>
+              <li>
+                <a
+                  href={categoryHref}
+                  className="text-muted hover:text-accent transition-colors duration-150"
+                >
+                  {categoryName}
+                </a>
+              </li>
+            </>
+          )}
+        </ol>
+      </nav>
+
       {/*
         Hero image — FULL BLEED, no border, no breadcrumb above it.
         The wrapper reserves a 4:3 / 16:9 aspect ratio so the eventual
@@ -401,7 +474,7 @@ export default function ProductDetail(props: ProductDetailProps) {
         in Lighthouse). The image fills the wrapper and crops via
         `object-cover`, matching the no-image placeholder shape.
       */}
-      <section className="bg-cream">
+      <section className="bg-cream mt-5 md:mt-6">
         <div className="aspect-[4/3] w-full overflow-hidden md:aspect-[16/9] md:max-h-[80vh]">
           {product.imageUrl ? (
             <img
@@ -427,21 +500,12 @@ export default function ProductDetail(props: ProductDetailProps) {
         </div>
       </section>
 
-      {/* Body — single centered narrow column, generous vertical room. */}
+      {/* Body — single centered narrow column, generous vertical room.
+          The category link lives in the breadcrumb above the hero now;
+          the redundant overline-pill that used to sit here was removed. */}
       <section className="mx-auto max-w-[640px] px-5 pt-12 pb-32 md:px-8 md:pt-20 md:pb-24">
-        {/* Overline category — replaces the breadcrumb trail. Hidden when
-            the server-side category lookup didn't resolve a name. */}
-        {categoryName && (
-          <a
-            href={overlineHref}
-            className="t-overline text-muted hover:text-accent transition-colors duration-150"
-          >
-            {categoryName}
-          </a>
-        )}
-
         {/* Title + price — generous spacing between, no horizontal rule. */}
-        <header className="mt-4">
+        <header>
           <h1 className="t-display text-fg">{product.title}</h1>
           {base && (
             <p className="t-h1 price-figure text-fg mt-6">
@@ -468,10 +532,16 @@ export default function ProductDetail(props: ProductDetailProps) {
               />
             </div>
 
+            {/* Shipping ETA — calm, factual answer to "if I order this,
+                when does it arrive and how much shipping?" before the
+                user is forced through checkout. Static copy by design;
+                lives in i18n so operators can edit it. */}
+            <p className="t-caption text-muted mt-8">{shippingEtaLabel}</p>
+
             {/* Inline de-risking line — sits between variants and the CTA so
                 the reassurance lands at the moment of decision. Outside the
                 sticky CTA wrapper so it doesn't pin to the viewport on mobile. */}
-            <p className="t-caption text-faint mt-8">
+            <p className="t-caption text-faint mt-3">
               {contactInlineText}{" "}
               <a
                 href={contactHref}
@@ -491,18 +561,76 @@ export default function ProductDetail(props: ProductDetailProps) {
                 paddingBottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
               }}
             >
-              <AddToCartButton
-                productId={product.id}
-                variantId={firstVariant.id}
-                productTitle={product.title}
-                productImageUrl={product.imageUrl}
-                productImageAlt={altText}
-                label={addToCartLabel}
-                soldOutLabel={outOfStockLabel}
-                addedLabel={addedLabel}
-                errorLabel={cartErrorLabel}
-                soldOut={!firstVariant.available}
-              />
+              {/* Quantity stepper. Sits above the CTA on mobile (stacked)
+                  and to the left of it on desktop (`md:flex` row). */}
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
+                <div className="flex items-center">
+                  <span id="qty-label" className="sr-only">
+                    {quantityLabel}
+                  </span>
+                  <div
+                    role="group"
+                    aria-labelledby="qty-label"
+                    className="border-line flex h-12 w-32 shrink-0 items-center border"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                      disabled={quantity <= 1 || !firstVariant.available}
+                      aria-label={quantityDecreaseLabel}
+                      className="t-body text-fg hover:text-accent disabled:text-faint flex h-full w-10 shrink-0 items-center justify-center transition-colors duration-150 disabled:cursor-not-allowed"
+                    >
+                      &minus;
+                    </button>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={QUANTITY_MAX}
+                      value={quantity}
+                      onChange={(e) => {
+                        const next = Number.parseInt(e.target.value, 10);
+                        if (Number.isNaN(next)) {
+                          setQuantity(1);
+                          return;
+                        }
+                        setQuantity(Math.min(QUANTITY_MAX, Math.max(1, next)));
+                      }}
+                      aria-label={quantityLabel}
+                      className="price-figure t-body text-fg flex-1 [appearance:textfield] bg-transparent text-center outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setQuantity((q) => Math.min(QUANTITY_MAX, q + 1))
+                      }
+                      disabled={
+                        quantity >= QUANTITY_MAX || !firstVariant.available
+                      }
+                      aria-label={quantityIncreaseLabel}
+                      className="t-body text-fg hover:text-accent disabled:text-faint flex h-full w-10 shrink-0 items-center justify-center transition-colors duration-150 disabled:cursor-not-allowed"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <AddToCartButton
+                    productId={product.id}
+                    variantId={firstVariant.id}
+                    productTitle={product.title}
+                    productImageUrl={product.imageUrl}
+                    productImageAlt={altText}
+                    label={addToCartLabel}
+                    soldOutLabel={outOfStockLabel}
+                    addedLabel={addedLabel}
+                    errorLabel={cartErrorLabel}
+                    soldOut={!firstVariant.available}
+                    quantity={quantity}
+                    onAdded={() => setQuantity(1)}
+                  />
+                </div>
+              </div>
             </div>
           </>
         )}

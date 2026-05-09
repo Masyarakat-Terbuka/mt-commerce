@@ -32,6 +32,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { format as formatMoney, type Money } from "@mt-commerce/core/money";
 import { createClient } from "@mt-commerce/sdk";
+import { paginationItems } from "../lib/pagination.js";
 
 const MAX_QUERY_LENGTH = 200;
 const PAGE_SIZE = 12;
@@ -389,7 +390,7 @@ function Pagination({
 }) {
   const buildHref = (p: number) =>
     `${searchHref}?q=${encodeURIComponent(q)}&page=${p}`;
-  const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+  const items = paginationItems(page, totalPages);
   const hasPrev = page > 1;
   const hasNext = page < totalPages;
   return (
@@ -412,21 +413,27 @@ function Pagination({
         ·
       </span>
       <ul className="flex items-center gap-4">
-        {pages.map((p) => (
-          <li key={p}>
-            <a
-              href={buildHref(p)}
-              aria-current={p === page ? "page" : undefined}
-              className={
-                p === page
-                  ? "price-figure text-fg transition-colors duration-150"
-                  : "price-figure text-faint hover:text-accent transition-colors duration-150"
-              }
-            >
-              {p}
-            </a>
-          </li>
-        ))}
+        {items.map((item) =>
+          item.type === "ellipsis" ? (
+            <li key={item.key} aria-hidden="true" className="text-faint">
+              …
+            </li>
+          ) : (
+            <li key={item.page}>
+              <a
+                href={buildHref(item.page)}
+                aria-current={item.page === page ? "page" : undefined}
+                className={
+                  item.page === page
+                    ? "price-figure text-fg transition-colors duration-150"
+                    : "price-figure text-faint hover:text-accent transition-colors duration-150"
+                }
+              >
+                {item.page}
+              </a>
+            </li>
+          ),
+        )}
       </ul>
       <span className="text-faint" aria-hidden="true">
         ·

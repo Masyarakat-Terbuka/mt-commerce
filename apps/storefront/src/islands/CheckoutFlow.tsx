@@ -40,9 +40,10 @@
  *
  *   - v0.1 requires a customer (the API rejects guest addresses with
  *     `guest_address_unsupported`). The island reads a `mt.customerId`
- *     localStorage entry as the stand-in for the future auth session;
- *     when missing it shows the guest-unsupported message and a future
- *     "sign up" link. This keeps the gap honest until customer-auth lands.
+ *     localStorage entry as the stand-in for the auth session; when
+ *     missing, the gate routes the user to `/sign-up?next=/checkout`
+ *     (or `/sign-in?next=/checkout`) so they can return to the funnel
+ *     after auth without losing their cart.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format as formatMoney, type Money } from "@mt-commerce/core/money";
@@ -62,6 +63,15 @@ import {
 } from "@mt-commerce/sdk";
 import { CartProvider, useCart } from "./CartProvider.js";
 import { resolveApiUrl } from "../lib/api.js";
+import {
+  getProductInfo,
+  PRODUCT_INFO_CHANGED_EVENT,
+  type ProductInfo,
+} from "../lib/cart-product-info.js";
+import {
+  AddressFormPanel,
+  type AddressFormLabels,
+} from "./lib/AddressFormPanel.js";
 
 const ORDER_INTENT_STORAGE_PREFIX = "mt.orderIntent.";
 const CUSTOMER_ID_STORAGE_KEY = "mt.customerId";
@@ -70,7 +80,12 @@ const CUSTOMER_ID_STORAGE_KEY = "mt.customerId";
 const PAYMENT_METHOD = "manual_bank_transfer";
 
 type Step = "address" | "shipping" | "payment" | "review";
-const STEP_ORDER: readonly Step[] = ["address", "shipping", "payment", "review"];
+const STEP_ORDER: readonly Step[] = [
+  "address",
+  "shipping",
+  "payment",
+  "review",
+];
 
 export type CheckoutFlowProps = {
   /** BCP47 (e.g. "id-ID") — used by `Intl.NumberFormat`. */
@@ -81,6 +96,10 @@ export type CheckoutFlowProps = {
   cartHref: string;
   /** Path to the home/products listing for the empty-cart CTA. */
   productsHref: string;
+  /** `/sign-up?next=/checkout` — used by the guest gate in step 1. */
+  signUpHref: string;
+  /** `/sign-in?next=/checkout` — paired with the sign-up CTA. */
+  signInHref: string;
   /** Locale-aware path used to navigate to the confirmation page. */
   confirmedHrefPattern: string;
   /** All UI labels travel as props so the island stays locale-independent. */
@@ -103,6 +122,8 @@ export type CheckoutLabels = {
     selectExisting: string;
     addNew: string;
     addNewHint: string;
+    /** Calm explainer shown above the embedded form on first-time customers. */
+    addNewIntro: string;
     billingSame: string;
     billingDifferent: string;
     billingSelect: string;
@@ -110,6 +131,9 @@ export type CheckoutLabels = {
     empty: string;
     guestUnsupported: string;
     guestSignup: string;
+    guestHaveAccount: string;
+    guestSignIn: string;
+    form: AddressFormLabels;
   };
   shipping: {
     title: string;
@@ -153,11 +177,20 @@ export type CheckoutLabels = {
     unknownStep: string;
     idempotencyConflict: string;
   };
+  /**
+   * Fallback label for cart lines when no product info is cached for a
+   * variant — same role as the cart drawer/page prop. Surfaces "Produk" /
+   * "Product" instead of a raw variant id.
+   */
+  productFallbackLabel: string;
 };
 
 /** Generate an idempotency key — UUIDv4 from the platform crypto API. */
 function newIdempotencyKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   // Defensive fallback for older runtimes; the storefront targets modern
@@ -223,7 +256,9 @@ function serializeMoney(money: Money): { amount: string; currency: string } {
 }
 
 function formatAddressLine(address: CustomerAddress): string {
-  return [address.addressLine1, address.addressLine2].filter(Boolean).join(", ");
+  return [address.addressLine1, address.addressLine2]
+    .filter(Boolean)
+    .join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +272,15 @@ interface StepNavProps {
   onStepClick: (step: Step) => void;
 }
 
-function StepNav({ currentStep, reachedSteps, labels, onStepClick }: StepNavProps) {
+function StepNav({
+  currentStep,
+  reachedSteps,
+  labels,
+  onStepClick,
+}: StepNavProps) {
   return (
-    <nav aria-label="Checkout steps" className="border-b border-line">
-      <ol className="mx-auto flex max-w-[1100px] items-center gap-3 px-5 py-5 t-caption md:gap-6 md:px-8">
+    <nav aria-label="Checkout steps" className="border-line border-b">
+      <ol className="t-caption mx-auto flex max-w-[1100px] items-center gap-3 px-5 py-5 md:gap-6 md:px-8">
         {STEP_ORDER.map((step, idx) => {
           const isCurrent = step === currentStep;
           const isReached = reachedSteps.has(step);
@@ -256,7 +296,7 @@ function StepNav({ currentStep, reachedSteps, labels, onStepClick }: StepNavProp
                 <button
                   type="button"
                   onClick={() => onStepClick(step)}
-                  className="lowercase tracking-[0.05em] text-muted transition-colors duration-150 hover:text-accent"
+                  className="text-muted hover:text-accent tracking-[0.05em] lowercase transition-colors duration-150"
                 >
                   {label}
                 </button>
@@ -265,8 +305,8 @@ function StepNav({ currentStep, reachedSteps, labels, onStepClick }: StepNavProp
                   aria-current={isCurrent ? "step" : undefined}
                   className={
                     isCurrent
-                      ? "lowercase tracking-[0.05em] text-fg"
-                      : "lowercase tracking-[0.05em] text-faint"
+                      ? "text-fg tracking-[0.05em] lowercase"
+                      : "text-faint tracking-[0.05em] lowercase"
                   }
                 >
                   {label}
@@ -289,11 +329,16 @@ interface AddressStepProps {
   client: MtCommerceClient;
   shippingAddressId: string | null;
   billingAddressId: string | null;
-  onSelect: (shippingAddressId: string, billingAddressId: string | null) => void;
+  onSelect: (
+    shippingAddressId: string,
+    billingAddressId: string | null,
+  ) => void;
   busy: boolean;
   error: string | null;
   labels: CheckoutLabels["address"];
   buttonLabel: string;
+  signUpHref: string;
+  signInHref: string;
 }
 
 function AddressStep({
@@ -306,6 +351,8 @@ function AddressStep({
   error,
   labels,
   buttonLabel,
+  signUpHref,
+  signInHref,
 }: AddressStepProps) {
   const [addresses, setAddresses] = useState<CustomerAddress[] | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -315,18 +362,30 @@ function AddressStep({
     billingAddressId !== null && billingAddressId !== shippingAddressId,
   );
   const [billId, setBillId] = useState<string | null>(billingAddressId);
+  // First-time customers land here with no saved addresses. Rather than
+  // forcing them out to /account/addresses to add one, we render the form
+  // inline when the list is empty (or on demand via the "Add" button).
+  const [showForm, setShowForm] = useState<boolean>(false);
 
   useEffect(() => {
     if (!customerId) {
+      // Guest path: no customer means nothing to load. Synchronous
+      // setState is fine — single render, no cascade.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(false);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const list = await client.storefront.customer.myAddresses({ customerId });
+        const list = await client.storefront.customer.myAddresses({
+          customerId,
+        });
         if (cancelled) return;
         setAddresses(list);
+        // Auto-open the embedded form on first-time customers — the only
+        // useful action from an empty list is to add the first address.
+        if (list.length === 0) setShowForm(true);
         // Prefer default shipping; otherwise the first address.
         if (!shipId) {
           const preferred =
@@ -347,23 +406,31 @@ function AddressStep({
     };
   }, [client, customerId, shipId]);
 
+  const hasAddresses = !!addresses && addresses.length > 0;
+
   if (!customerId) {
     return (
       <section className="space-y-6">
         <header>
           <h2 className="t-h1 text-fg">{labels.title}</h2>
         </header>
-        <div className="border border-line bg-paper p-6">
+        <div className="border-line bg-paper border p-6">
           <p className="t-body text-muted">{labels.guestUnsupported}</p>
-          {/* TODO: /signup route does not exist yet. The link is left active
-              so the visual slot is in place once the auth integration lands. */}
           <a
-            href="#"
-            aria-disabled="true"
-            className="mt-3 inline-flex t-body text-faint"
+            href={signUpHref}
+            className="btn-primary mt-5 inline-flex md:px-12"
           >
             {labels.guestSignup}
           </a>
+          <p className="t-caption text-muted mt-4">
+            {labels.guestHaveAccount}{" "}
+            <a
+              href={signInHref}
+              className="text-fg hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
+            >
+              {labels.guestSignIn}
+            </a>
+          </p>
         </div>
       </section>
     );
@@ -379,34 +446,80 @@ function AddressStep({
       </header>
 
       {loading ? (
-        <div className="h-32 w-full skeleton" aria-busy="true" />
+        <div className="skeleton h-32 w-full" aria-busy="true" />
       ) : loadError ? (
         <p role="alert" className="t-body text-danger">
           {loadError}
         </p>
-      ) : !addresses || addresses.length === 0 ? (
-        <div className="border border-line bg-paper p-6">
-          <p className="t-body text-muted">{labels.empty}</p>
-          <p className="mt-2 t-caption text-faint">{labels.addNewHint}</p>
-        </div>
       ) : (
-        <fieldset className="space-y-3">
-          <legend className="t-caption text-muted">{labels.selectExisting}</legend>
-          {addresses.map((address) => (
-            <AddressRadioCard
-              key={address.id}
-              address={address}
-              name="shipping-address"
-              selected={shipId === address.id}
-              onChange={() => setShipId(address.id)}
-            />
-          ))}
-        </fieldset>
+        <>
+          {hasAddresses && (
+            <fieldset className="space-y-3">
+              <legend className="t-caption text-muted">
+                {labels.selectExisting}
+              </legend>
+              {addresses!.map((address) => (
+                <AddressRadioCard
+                  key={address.id}
+                  address={address}
+                  name="shipping-address"
+                  selected={shipId === address.id}
+                  onChange={() => setShipId(address.id)}
+                />
+              ))}
+              {!showForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowForm(true)}
+                  className="t-caption text-muted hover:text-accent mt-2 inline-flex underline-offset-[4px] transition-colors duration-150 hover:underline"
+                >
+                  + {labels.addNew}
+                </button>
+              )}
+            </fieldset>
+          )}
+
+          {showForm && (
+            <div
+              className={
+                hasAddresses
+                  ? "border-line border-t pt-6"
+                  : "border-line bg-paper border p-6"
+              }
+            >
+              {!hasAddresses && (
+                <p className="t-body text-muted mb-6">{labels.addNewIntro}</p>
+              )}
+              <AddressFormPanel
+                mode={{ kind: "new" }}
+                client={client}
+                customerId={customerId}
+                labels={labels.form}
+                hideTitle
+                onCancel={() => {
+                  // Cancel only makes sense when there are existing
+                  // addresses to fall back to. On an empty list the form
+                  // is the only useful action, so the button is a no-op
+                  // there.
+                  if (hasAddresses) setShowForm(false);
+                }}
+                onSaved={async (saved) => {
+                  // Append, select, hide. The list refresh is local — the
+                  // saved address came back from the SDK, so we don't need
+                  // a round-trip to display it.
+                  setAddresses((prev) => [...(prev ?? []), saved]);
+                  setShipId(saved.id);
+                  setShowForm(false);
+                }}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {addresses && addresses.length > 0 && (
         <div className="space-y-3">
-          <label className="flex items-center gap-3 t-body text-fg">
+          <label className="t-body text-fg flex items-center gap-3">
             <input
               type="checkbox"
               checked={billDifferent}
@@ -415,13 +528,15 @@ function AddressStep({
                 setBillDifferent(next);
                 if (!next) setBillId(null);
               }}
-              className="h-4 w-4 border-line accent-accent"
+              className="border-line accent-accent h-4 w-4"
             />
             {labels.billingDifferent}
           </label>
           {billDifferent && (
-            <fieldset className="space-y-3 border-t border-line pt-4">
-              <legend className="t-caption text-muted">{labels.billingSelect}</legend>
+            <fieldset className="border-line space-y-3 border-t pt-4">
+              <legend className="t-caption text-muted">
+                {labels.billingSelect}
+              </legend>
               {addresses.map((address) => (
                 <AddressRadioCard
                   key={`bill-${address.id}`}
@@ -467,11 +582,16 @@ interface AddressRadioCardProps {
   onChange: () => void;
 }
 
-function AddressRadioCard({ address, name, selected, onChange }: AddressRadioCardProps) {
+function AddressRadioCard({
+  address,
+  name,
+  selected,
+  onChange,
+}: AddressRadioCardProps) {
   return (
     <label
       className={
-        "flex cursor-pointer items-start gap-4 border bg-paper p-5 transition-colors duration-150 " +
+        "bg-paper flex cursor-pointer items-start gap-4 border p-5 transition-colors duration-150 " +
         (selected ? "border-line-strong" : "border-line hover:border-fg")
       }
     >
@@ -480,7 +600,7 @@ function AddressRadioCard({ address, name, selected, onChange }: AddressRadioCar
         name={name}
         checked={selected}
         onChange={onChange}
-        className="mt-1 h-4 w-4 accent-accent"
+        className="accent-accent mt-1 h-4 w-4"
       />
       <div className="flex-1 space-y-1">
         <p className="t-body text-fg">{address.recipientName}</p>
@@ -538,7 +658,9 @@ function ShippingStep({
         }
       } catch (err) {
         if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : "shipping_load_failed");
+        setLoadError(
+          err instanceof Error ? err.message : "shipping_load_failed",
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -555,23 +677,25 @@ function ShippingStep({
       </header>
 
       {loading ? (
-        <div className="h-24 w-full skeleton" aria-busy="true" />
+        <div className="skeleton h-24 w-full" aria-busy="true" />
       ) : loadError ? (
         <p role="alert" className="t-body text-danger">
           {loadError}
         </p>
       ) : !methods || methods.length === 0 ? (
-        <div className="border border-line bg-paper p-6">
+        <div className="border-line bg-paper border p-6">
           <p className="t-body text-muted">{labels.empty}</p>
         </div>
       ) : (
         <fieldset className="space-y-3">
-          <legend className="t-caption text-muted">{labels.selectMethod}</legend>
+          <legend className="t-caption text-muted">
+            {labels.selectMethod}
+          </legend>
           {methods.map((method) => (
             <label
               key={method.id}
               className={
-                "flex cursor-pointer items-start gap-4 border bg-paper p-5 transition-colors duration-150 " +
+                "bg-paper flex cursor-pointer items-start gap-4 border p-5 transition-colors duration-150 " +
                 (chosenCode === method.code
                   ? "border-line-strong"
                   : "border-line hover:border-fg")
@@ -582,12 +706,14 @@ function ShippingStep({
                 name="shipping-method"
                 checked={chosenCode === method.code}
                 onChange={() => setChosenCode(method.code)}
-                className="mt-1 h-4 w-4 accent-accent"
+                className="accent-accent mt-1 h-4 w-4"
               />
               <div className="flex flex-1 items-center justify-between gap-4">
                 <span className="t-body text-fg">{method.name}</span>
                 <span className="price-figure t-body text-fg">
-                  {method.flatRate ? formatMoney(method.flatRate, { locale }) : "—"}
+                  {method.flatRate
+                    ? formatMoney(method.flatRate, { locale })
+                    : "—"}
                 </span>
               </div>
             </label>
@@ -635,17 +761,19 @@ function PaymentStep({ onContinue, labels }: PaymentStepProps) {
         <h2 className="t-h1 text-fg">{labels.title}</h2>
       </header>
       <fieldset className="space-y-3">
-        <label className="flex items-start gap-4 border border-line-strong bg-paper p-5">
+        <label className="border-line-strong bg-paper flex items-start gap-4 border p-5">
           <input
             type="radio"
             name="payment-method"
             checked
             readOnly
-            className="mt-1 h-4 w-4 accent-accent"
+            className="accent-accent mt-1 h-4 w-4"
           />
           <div className="flex-1 space-y-2">
             <p className="t-body text-fg">{labels.manualBankTransfer}</p>
-            <p className="t-caption text-muted">{labels.manualBankTransferNote}</p>
+            <p className="t-caption text-muted">
+              {labels.manualBankTransferNote}
+            </p>
           </div>
         </label>
       </fieldset>
@@ -693,6 +821,27 @@ function ReviewStep({
   locale,
   labels,
 }: ReviewStepProps) {
+  // Mirror the cart drawer/page: resolve {title, image} per variant from the
+  // localStorage cache populated at add-time. The cart wire shape doesn't
+  // carry product titles, so without this the review screen renders raw
+  // variant ids — devastating at the highest-stakes moment of the funnel.
+  const [infoTick, setInfoTick] = useState(0);
+  useEffect(() => {
+    function onInfo() {
+      setInfoTick((n) => n + 1);
+    }
+    window.addEventListener(PRODUCT_INFO_CHANGED_EVENT, onInfo);
+    return () => window.removeEventListener(PRODUCT_INFO_CHANGED_EVENT, onInfo);
+  }, []);
+  const itemInfo = useMemo(() => {
+    const map = new Map<string, ProductInfo | null>();
+    for (const item of cart.items)
+      map.set(item.variantId, getProductInfo(item.variantId));
+    return map;
+    // `infoTick` invalidates the map when a new entry lands in the cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart.items, infoTick]);
+
   const total = useMemo<Money>(() => {
     if (!shippingAmount) return cart.totals.total;
     // Use the precomputed `subtotalIncludingTax` line from the API so the
@@ -718,7 +867,9 @@ function ReviewStep({
         {shippingAddress ? (
           <>
             <p className="t-body text-fg">{shippingAddress.recipientName}</p>
-            <p className="t-caption text-muted">{formatAddressLine(shippingAddress)}</p>
+            <p className="t-caption text-muted">
+              {formatAddressLine(shippingAddress)}
+            </p>
             <p className="t-caption text-muted">
               {shippingAddress.kotaKabupatenId} · {shippingAddress.postalCode}
             </p>
@@ -736,7 +887,9 @@ function ReviewStep({
           onEdit={() => onEdit("address")}
         >
           <p className="t-body text-fg">{billingAddress.recipientName}</p>
-          <p className="t-caption text-muted">{formatAddressLine(billingAddress)}</p>
+          <p className="t-caption text-muted">
+            {formatAddressLine(billingAddress)}
+          </p>
         </ReviewBlock>
       )}
 
@@ -759,31 +912,40 @@ function ReviewStep({
         onEdit={() => onEdit("payment")}
       >
         <p className="t-body text-fg">{labels.payment.manualBankTransfer}</p>
-        <p className="t-caption text-muted">{labels.payment.manualBankTransferNote}</p>
+        <p className="t-caption text-muted">
+          {labels.payment.manualBankTransferNote}
+        </p>
       </ReviewBlock>
 
-      <div className="border-t border-line pt-6">
+      <div className="border-line border-t pt-6">
         <h3 className="t-caption text-muted">{labels.review.itemsLabel}</h3>
-        <ul className="mt-3 divide-y divide-line">
-          {cart.items.map((item) => (
-            <li key={item.id} className="flex items-start justify-between gap-4 py-4">
-              <div className="space-y-1">
-                <p className="t-body text-fg">{item.variantId}</p>
-                <p className="t-caption text-muted">× {item.quantity}</p>
-              </div>
-              <p className="price-figure t-body text-fg">
-                {formatMoney(item.lineTotal, { locale })}
-              </p>
-            </li>
-          ))}
+        <ul className="divide-line mt-3 divide-y">
+          {cart.items.map((item) => {
+            const info = itemInfo.get(item.variantId) ?? null;
+            const lineTitle = info?.title ?? labels.productFallbackLabel;
+            return (
+              <li
+                key={item.id}
+                className="flex items-start justify-between gap-4 py-4"
+              >
+                <div className="space-y-1">
+                  <p className="t-body text-fg">{lineTitle}</p>
+                  <p className="t-caption text-muted">× {item.quantity}</p>
+                </div>
+                <p className="price-figure t-body text-fg">
+                  {formatMoney(item.lineTotal, { locale })}
+                </p>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
-      <dl className="space-y-2 border-t border-line pt-6 t-body">
-        <div className="flex justify-between text-muted">
+      <dl className="border-line t-body space-y-2 border-t pt-6">
+        <div className="text-muted flex justify-between">
           <dt className="flex flex-col">
             <span>{labels.totals.subtotalIncludingTax}</span>
-            <span className="t-caption text-muted/70">
+            <span className="t-caption text-faint">
               {cart.totals.taxRateBasisPoints !== null
                 ? `${labels.totals.taxIncludedNote} ${cart.totals.taxRateBasisPoints / 100}%`
                 : labels.totals.taxIncludedNote}
@@ -793,13 +955,13 @@ function ReviewStep({
             {formatMoney(cart.totals.subtotalIncludingTax, { locale })}
           </dd>
         </div>
-        <div className="flex justify-between text-muted">
+        <div className="text-muted flex justify-between">
           <dt>{labels.totals.shipping}</dt>
           <dd className="price-figure">
             {shippingAmount ? formatMoney(shippingAmount, { locale }) : "—"}
           </dd>
         </div>
-        <div className="flex justify-between border-t border-line pt-3 text-fg">
+        <div className="border-line text-fg flex justify-between border-t pt-3">
           <dt>{labels.totals.total}</dt>
           <dd className="price-figure">{formatMoney(total, { locale })}</dd>
         </div>
@@ -835,13 +997,13 @@ interface ReviewBlockProps {
 
 function ReviewBlock({ title, editLabel, onEdit, children }: ReviewBlockProps) {
   return (
-    <div className="border border-line bg-paper p-5">
+    <div className="border-line bg-paper border p-5">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="t-caption text-muted">{title}</h3>
         <button
           type="button"
           onClick={onEdit}
-          className="t-caption text-muted underline-offset-[4px] transition-colors duration-150 hover:text-accent hover:underline"
+          className="t-caption text-muted hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
         >
           {editLabel}
         </button>
@@ -856,7 +1018,15 @@ function ReviewBlock({ title, editLabel, onEdit, children }: ReviewBlockProps) {
 // ---------------------------------------------------------------------------
 
 function CheckoutFlowInner(props: CheckoutFlowProps) {
-  const { locale, apiLocale, productsHref, confirmedHrefPattern, labels } = props;
+  const {
+    locale,
+    apiLocale,
+    productsHref,
+    confirmedHrefPattern,
+    signUpHref,
+    signInHref,
+    labels,
+  } = props;
   const { cart, loading: cartLoading, clear: clearCart } = useCart();
   const client = useMemo<MtCommerceClient>(
     () => createClient({ baseUrl: resolveApiUrl(), locale: apiLocale }),
@@ -865,7 +1035,9 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
 
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("address");
-  const [reachedSteps, setReachedSteps] = useState<Set<Step>>(new Set(["address"]));
+  const [reachedSteps, setReachedSteps] = useState<Set<Step>>(
+    new Set(["address"]),
+  );
   const [checkout, setCheckout] = useState<Checkout | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
   const [busy, setBusy] = useState<boolean>(false);
@@ -881,6 +1053,8 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
   const idempotencyKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // localStorage hydration on mount; SSR-safe pattern for Astro islands.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCustomerId(readCustomerIdStandIn());
   }, []);
 
@@ -922,7 +1096,9 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
         setCheckout(updated);
         goToStep("shipping");
       } catch (err) {
-        setStepError(err instanceof ApiError ? err.message : labels.errors.generic);
+        setStepError(
+          err instanceof ApiError ? err.message : labels.errors.generic,
+        );
       } finally {
         setBusy(false);
       }
@@ -936,13 +1112,18 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
       setBusy(true);
       setStepError(null);
       try {
-        const updated = await client.storefront.checkout.setShipping(checkout.id, {
-          shippingMethodCode,
-        });
+        const updated = await client.storefront.checkout.setShipping(
+          checkout.id,
+          {
+            shippingMethodCode,
+          },
+        );
         setCheckout(updated);
         goToStep("payment");
       } catch (err) {
-        setStepError(err instanceof ApiError ? err.message : labels.errors.generic);
+        setStepError(
+          err instanceof ApiError ? err.message : labels.errors.generic,
+        );
       } finally {
         setBusy(false);
       }
@@ -962,7 +1143,9 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const list = await client.storefront.customer.myAddresses({ customerId });
+        const list = await client.storefront.customer.myAddresses({
+          customerId,
+        });
         if (!cancelled) setAddressBook(list);
       } catch {
         // Silent — the address step renders the same error inline.
@@ -1008,8 +1191,9 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
   const shippingMethod = useMemo(
     () =>
       checkout?.shippingMethodCode
-        ? (shippingMethods.find((m) => m.code === checkout.shippingMethodCode) ??
-          null)
+        ? (shippingMethods.find(
+            (m) => m.code === checkout.shippingMethodCode,
+          ) ?? null)
         : null,
     [checkout, shippingMethods],
   );
@@ -1066,9 +1250,12 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
   // ---- Gate ---------------------------------------------------------------
   if (cartLoading && !cart) {
     return (
-      <div className="mx-auto max-w-[1100px] px-5 py-16 md:px-8" aria-busy="true">
-        <div className="h-9 w-48 skeleton" />
-        <div className="mt-10 h-32 w-full skeleton" />
+      <div
+        className="mx-auto max-w-[1100px] px-5 py-16 md:px-8"
+        aria-busy="true"
+      >
+        <div className="skeleton h-9 w-48" />
+        <div className="skeleton mt-10 h-32 w-full" />
       </div>
     );
   }
@@ -1077,10 +1264,10 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
     return (
       <div className="mx-auto max-w-[1100px] px-5 py-24 md:px-8">
         <h1 className="t-display text-fg">{labels.pageTitle}</h1>
-        <p className="mt-6 t-body text-muted">{labels.emptyCart}</p>
+        <p className="t-body text-muted mt-6">{labels.emptyCart}</p>
         <a
           href={productsHref}
-          className="mt-4 inline-flex t-body text-fg underline-offset-[6px] transition-colors duration-150 hover:text-accent hover:underline"
+          className="t-body text-fg hover:text-accent mt-4 inline-flex underline-offset-[6px] transition-colors duration-150 hover:underline"
         >
           {labels.emptyCartCta} &rarr;
         </a>
@@ -1110,6 +1297,8 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
               error={stepError}
               labels={labels.address}
               buttonLabel={labels.address.continueLabel}
+              signUpHref={signUpHref}
+              signInHref={signInHref}
             />
           ) : step === "shipping" ? (
             <ShippingStep
@@ -1124,7 +1313,10 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
               buttonLabel={labels.shipping.continueLabel}
             />
           ) : step === "payment" ? (
-            <PaymentStep onContinue={handlePaymentContinue} labels={labels.payment} />
+            <PaymentStep
+              onContinue={handlePaymentContinue}
+              labels={labels.payment}
+            />
           ) : step === "review" ? (
             <ReviewStep
               cart={cart}
@@ -1151,7 +1343,7 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
               onClick={() =>
                 goToStep(STEP_ORDER[Math.max(0, STEP_ORDER.indexOf(step) - 1)]!)
               }
-              className="mt-8 inline-flex items-center gap-2 t-caption text-muted transition-colors duration-150 hover:text-accent"
+              className="t-caption text-muted hover:text-accent mt-8 inline-flex items-center gap-2 transition-colors duration-150"
             >
               <HugeiconsIcon
                 icon={ArrowLeft02Icon}
@@ -1159,18 +1351,22 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
                 strokeWidth={1.5}
                 aria-hidden
               />
-              {labels.steps[STEP_ORDER[Math.max(0, STEP_ORDER.indexOf(step) - 1)]!]}
+              {
+                labels.steps[
+                  STEP_ORDER[Math.max(0, STEP_ORDER.indexOf(step) - 1)]!
+                ]
+              }
             </button>
           )}
         </div>
 
-        <aside className="border-t border-line pt-8 md:border-l md:border-t-0 md:pl-8 md:pt-0">
+        <aside className="border-line border-t pt-8 md:border-t-0 md:border-l md:pt-0 md:pl-8">
           <h2 className="t-caption text-muted">{labels.totals.total}</h2>
-          <dl className="mt-4 space-y-2 t-body">
-            <div className="flex justify-between text-muted">
+          <dl className="t-body mt-4 space-y-2">
+            <div className="text-muted flex justify-between">
               <dt className="flex flex-col">
                 <span>{labels.totals.subtotalIncludingTax}</span>
-                <span className="t-caption text-muted/70">
+                <span className="t-caption text-faint">
                   {cart.totals.taxRateBasisPoints !== null
                     ? `${labels.totals.taxIncludedNote} ${cart.totals.taxRateBasisPoints / 100}%`
                     : labels.totals.taxIncludedNote}
@@ -1180,7 +1376,7 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
                 {formatMoney(cart.totals.subtotalIncludingTax, { locale })}
               </dd>
             </div>
-            <div className="flex justify-between text-muted">
+            <div className="text-muted flex justify-between">
               <dt>{labels.totals.shipping}</dt>
               <dd className="price-figure">
                 {checkout?.shippingAmount
@@ -1188,7 +1384,7 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
                   : "—"}
               </dd>
             </div>
-            <div className="flex justify-between border-t border-line pt-3 text-fg">
+            <div className="border-line text-fg flex justify-between border-t pt-3">
               <dt>{labels.totals.total}</dt>
               <dd className="price-figure">
                 {checkout?.shippingAmount
@@ -1206,7 +1402,7 @@ function CheckoutFlowInner(props: CheckoutFlowProps) {
             </div>
           </dl>
           {checkout?.state === "completed" && (
-            <p className="mt-6 inline-flex items-center gap-2 t-caption text-success">
+            <p className="t-caption text-success mt-6 inline-flex items-center gap-2">
               <HugeiconsIcon
                 icon={CheckmarkCircle02Icon}
                 size={14}

@@ -12,13 +12,13 @@ const home = locale === "en" ? "Back to home" : "Kembali ke beranda";
 ---
 
 <BaseLayout title={`${heading} — mt-commerce`} description={body}>
-  <section class="mx-auto max-w-[640px] px-5 py-32 text-center md:px-8 md:py-40">
+  <section class="mx-auto max-w-[640px] px-5 py-32 md:px-8 md:py-40">
     <p class="t-overline text-muted">404</p>
-    <h1 class="mt-4 t-display text-fg">{heading}</h1>
-    <p class="mt-5 t-body text-muted">{body}</p>
+    <h1 class="t-display text-fg mt-4">{heading}</h1>
+    <p class="t-body text-muted mt-5">{body}</p>
     <a
       href={localePath(locale, "/")}
-      class="mt-10 inline-flex items-center gap-2 t-body text-fg underline-offset-[6px] transition-colors duration-200 hover:text-accent hover:underline"
+      class="t-body text-fg hover:text-accent mt-10 inline-flex items-center gap-2 underline-offset-[6px] transition-colors duration-200 hover:underline"
     >
       &larr; {home}
     </a>

@@ -37,7 +37,7 @@
 import { useEffect, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
-import { addLineItem, openCartDrawer } from "../lib/cart-actions.js";
+import { addLineItem } from "../lib/cart-actions.js";
 import { resolveApiUrl } from "../lib/api.js";
 
 export type QuickAddButtonProps = {
@@ -148,7 +148,14 @@ export default function QuickAddButton({
         },
       });
       setJustAdded(true);
-      openCartDrawer();
+      // Intentionally NOT opening the cart drawer here. QuickAdd lives on
+      // the catalog grid; a user clicking it is mid-browse, and a sliding
+      // drawer would yank them out of that flow. The header cart-count
+      // badge bumps in sync (CartCountBadge), the in-button checkmark
+      // flashes for ~900ms, and a polite live region announces the add —
+      // that's enough feedback for an aside-style action. Deliberate
+      // commits (PDP "Add to cart") still open the drawer; see
+      // AddToCartButton.tsx.
     } catch {
       setErrorVisible(true);
     } finally {

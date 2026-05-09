@@ -26,10 +26,11 @@
  *   - Network → "network".
  *   - Anything else → "generic".
  */
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { ApiError, createClient } from "@mt-commerce/sdk";
 import { resolveApiUrl } from "../lib/api.js";
 import { writeCachedCustomerId } from "../lib/account.js";
+import { isValidE164, normalizePhone } from "../lib/phone.js";
 
 export interface SignUpLabels {
   name: string;
@@ -37,7 +38,19 @@ export interface SignUpLabels {
   phone: string;
   phoneHint: string;
   password: string;
+  /**
+   * Static one-line hint shown on the password field. Kept for
+   * backwards-compat with existing pages even though the live
+   * checklist below the field renders the same information more
+   * usefully — operators can decide whether to show both or hide the
+   * static line by passing an empty string.
+   */
   passwordHint: string;
+  passwordCheckLength: string;
+  passwordCheckLetters: string;
+  passwordCheckDigits: string;
+  showPassword: string;
+  hidePassword: string;
   submit: string;
   submitting: string;
   errors: {
@@ -55,8 +68,6 @@ export interface SignUpFormProps {
   nextHref: string;
   labels: SignUpLabels;
 }
-
-const PHONE_REGEX = /^\+?[1-9]\d{1,14}$/;
 
 function mapApiError(err: unknown, labels: SignUpLabels): string {
   if (err instanceof ApiError) {
@@ -102,6 +113,11 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  // Show/Hide password toggle — flips the input's `type` attribute.
+  // Default off (mask) so a passing shoulder doesn't catch the password
+  // by accident. The toggle is a small text button beside the label, in
+  // line with the storefront's quiet visual register.
+  const [showPassword, setShowPassword] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -111,6 +127,35 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
     phone: string | null;
     password: string | null;
   }>({ name: null, email: null, phone: null, password: null });
+
+  // Live checklist for the password field. Three criteria, all required —
+  // mirrors the server-side `passwordSchema`. Each entry's `met` flag
+  // drives the visible ✓ / · indicator and the colour swap.
+  const passwordChecks = useMemo(
+    () => [
+      {
+        key: "length",
+        label: labels.passwordCheckLength,
+        met: password.length >= 12,
+      },
+      {
+        key: "letters",
+        label: labels.passwordCheckLetters,
+        met: /[A-Za-z]/.test(password),
+      },
+      {
+        key: "digits",
+        label: labels.passwordCheckDigits,
+        met: /\d/.test(password),
+      },
+    ],
+    [
+      password,
+      labels.passwordCheckLength,
+      labels.passwordCheckLetters,
+      labels.passwordCheckDigits,
+    ],
+  );
 
   function validate(): boolean {
     let firstInvalid: HTMLInputElement | null = null;
@@ -132,9 +177,14 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
       next.email = labels.errors.invalidEmail;
       firstInvalid ??= emailRef.current;
     }
-    if (phone.trim().length > 0 && !PHONE_REGEX.test(phone.trim())) {
-      next.phone = labels.errors.invalidPhone;
-      firstInvalid ??= phoneRef.current;
+    if (phone.trim().length > 0) {
+      // Normalize (e.g. `081234567890` → `+6281234567890`) before checking
+      // E.164. Avoids rejecting the form Indonesian shoppers actually type.
+      const normalized = normalizePhone(phone);
+      if (!isValidE164(normalized)) {
+        next.phone = labels.errors.invalidPhone;
+        firstInvalid ??= phoneRef.current;
+      }
     }
     if (
       password.length < 12 ||
@@ -163,22 +213,23 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
     setBusy(true);
     try {
       const client = createClient({ baseUrl: resolveApiUrl() });
-      const trimmedPhone = phone.trim();
+      // Always send the normalized phone — the API only knows E.164.
+      const normalizedPhone = normalizePhone(phone);
       const me = await client.storefront.auth.signUp({
         email,
         password,
         name,
-        ...(trimmedPhone.length > 0 ? { phone: trimmedPhone } : {}),
+        ...(normalizedPhone.length > 0 ? { phone: normalizedPhone } : {}),
       });
       const customerId = me.customer?.id ?? null;
       writeCachedCustomerId(customerId);
 
       // Better Auth's sign-up does not currently forward the phone field.
       // If the user provided one, patch it onto the customer record now.
-      if (trimmedPhone.length > 0 && customerId) {
+      if (normalizedPhone.length > 0 && customerId) {
         try {
           await client.storefront.customer.profile.update(
-            { phone: trimmedPhone },
+            { phone: normalizedPhone },
             { customerId },
           );
         } catch {
@@ -295,26 +346,42 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
       </div>
 
       <div className="space-y-2">
-        <label htmlFor={passwordId} className="t-caption text-muted block">
-          {labels.password}
-        </label>
+        <div className="flex items-center justify-between">
+          <label htmlFor={passwordId} className="t-caption text-muted">
+            {labels.password}
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            // Pressed state mirrors the visible eye icon's purpose; we
+            // skip the icon since the storefront prefers text affordances.
+            aria-pressed={showPassword}
+            className="t-caption text-muted hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
+          >
+            {showPassword ? labels.hidePassword : labels.showPassword}
+          </button>
+        </div>
         <input
           id={passwordId}
           ref={passwordRef}
           name="password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           autoComplete="new-password"
+          // `spellCheck=false` because masked passwords can briefly flash
+          // through the spellcheck UI on some browsers, and a typed pass
+          // shouldn't be red-squiggled.
+          spellCheck={false}
           required
           minLength={12}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           aria-invalid={errors.password !== null}
           aria-describedby={
-            errors.password ? `${passwordId}-error` : `${passwordId}-hint`
+            errors.password ? `${passwordId}-error` : `${passwordId}-checklist`
           }
           className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
         />
-        {errors.password ? (
+        {errors.password && (
           <p
             id={`${passwordId}-error`}
             role="alert"
@@ -322,10 +389,27 @@ export default function SignUpForm({ nextHref, labels }: SignUpFormProps) {
           >
             {errors.password}
           </p>
-        ) : (
-          <p id={`${passwordId}-hint`} className="t-caption text-faint">
-            {labels.passwordHint}
-          </p>
+        )}
+        {/* Live requirement checklist. Only renders once the user has
+            started typing — showing all-failing criteria on an empty
+            field would read as nagging. Each criterion flips to a
+            success-coloured ✓ when met. */}
+        {password.length > 0 && (
+          <ul id={`${passwordId}-checklist`} className="t-caption space-y-1">
+            {passwordChecks.map((check) => (
+              <li
+                key={check.key}
+                className={
+                  check.met
+                    ? "text-success flex items-baseline gap-2"
+                    : "text-faint flex items-baseline gap-2"
+                }
+              >
+                <span aria-hidden="true">{check.met ? "✓" : "·"}</span>
+                <span>{check.label}</span>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 

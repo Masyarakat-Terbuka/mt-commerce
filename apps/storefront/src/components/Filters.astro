@@ -78,6 +78,18 @@ const activeSort =
     : "newest";
 
 const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
+
+// Applied-filter chips read URL params on the client. Categories carry
+// their {slug → localized name} map as JSON so the client script can
+// render a real category label, not just the slug. Search chip's value
+// is whatever the user typed; min/max chips are formatted as a price-
+// range hint.
+const categoryNamesPayload = JSON.stringify(
+  Object.fromEntries(categories.map((c) => [c.slug, c.name[locale]])),
+);
+const chipPriceMin = t("products.filters.price_min");
+const chipPriceMax = t("products.filters.price_max");
+const chipSearchPrefix = t("products.filters.search");
 ---
 
 <form method="get" action={formAction} data-filters-form class="t-body">
@@ -252,6 +264,39 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
   </div>
 </form>
 
+{
+  /*
+  Applied-filter chip row. Hidden until a client script reads the URL
+  params and discovers at least one active filter. Categories carry
+  their localized names as JSON so chips show "Kopi" instead of "kopi".
+  Search/price chips are JS-built from raw URL values.
+
+  Click the "Hapus filter" link to return to the canonical unfiltered
+  listing — it points at the same path the form action uses, so the
+  href works even if JS is off.
+  */
+}
+<div
+  data-applied-filters
+  data-clear-href={formAction}
+  data-category-names={categoryNamesPayload}
+  data-chip-search={chipSearchPrefix}
+  data-chip-min={chipPriceMin}
+  data-chip-max={chipPriceMax}
+  class="border-line mt-6 hidden flex-wrap items-center gap-x-3 gap-y-2 border-t pt-4"
+  hidden
+>
+  <span class="t-caption text-muted">{t("products.list.applied_filters")}:</span
+  >
+  <ul data-applied-filters-list class="contents"></ul>
+  <a
+    href={formAction}
+    class="t-caption text-fg hover:text-accent ml-auto inline-flex min-h-9 items-center underline-offset-[4px] transition-colors duration-150 hover:underline"
+  >
+    {t("products.list.clear_filters")} &rarr;
+  </a>
+</div>
+
 <script>
   /**
    * Auto-submit wiring for the filter form(s).
@@ -260,7 +305,12 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
    * and the mobile sheet). Each gets its own debounce timer keyed off the
    * element itself.
    */
-  const DEBOUNCE_MS = 300;
+  // 700ms felt right empirically: long enough that a typist entering
+  // "250000" on the price field doesn't fire 6 mid-keystroke submits, short
+  // enough that the perceived debounce after an Apply-style pause is
+  // imperceptible. The earlier 300ms was eager — every paused keystroke
+  // produced a network round-trip and a results re-render.
+  const DEBOUNCE_MS = 700;
 
   function wire(form: HTMLFormElement) {
     let priceTimer: number | undefined;
@@ -306,4 +356,84 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
   document
     .querySelectorAll<HTMLFormElement>("form[data-filters-form]")
     .forEach(wire);
+</script>
+
+<script>
+  /**
+   * Applied-filter chips. The static build can't observe URL params at
+   * frontmatter time, so the chip row is server-rendered hidden and
+   * filled in client-side from `window.location.search`. Each chip is
+   * read-only (no per-chip remove yet) and the "Hapus filter" link in
+   * the row clears every filter at once by navigating back to the
+   * canonical listing path.
+   */
+  function renderAppliedFilters(container: HTMLElement) {
+    const list = container.querySelector<HTMLElement>(
+      "[data-applied-filters-list]",
+    );
+    if (!list) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const category = params.get("category") ?? "";
+    const search = params.get("q") ?? "";
+    const min = params.get("min") ?? "";
+    const max = params.get("max") ?? "";
+
+    const categoryNames = (() => {
+      try {
+        return JSON.parse(
+          container.getAttribute("data-category-names") ?? "{}",
+        ) as Record<string, string>;
+      } catch {
+        return {} as Record<string, string>;
+      }
+    })();
+    const chipSearch = container.getAttribute("data-chip-search") ?? "";
+    const chipMin = container.getAttribute("data-chip-min") ?? "";
+    const chipMax = container.getAttribute("data-chip-max") ?? "";
+
+    const chips: string[] = [];
+    if (category && categoryNames[category]) {
+      chips.push(categoryNames[category]!);
+    } else if (category) {
+      chips.push(category);
+    }
+    if (search) chips.push(`${chipSearch}: ${search}`);
+    if (min) chips.push(`${chipMin}: ${min}`);
+    if (max) chips.push(`${chipMax}: ${max}`);
+
+    if (chips.length === 0) {
+      container.classList.add("hidden");
+      container.setAttribute("hidden", "");
+      list.replaceChildren();
+      return;
+    }
+
+    container.classList.remove("hidden");
+    container.classList.add("flex");
+    container.removeAttribute("hidden");
+
+    const fragment = document.createDocumentFragment();
+    for (const text of chips) {
+      const li = document.createElement("li");
+      li.className =
+        "border-line t-caption text-fg inline-flex items-center border px-3 py-1";
+      li.textContent = text;
+      fragment.appendChild(li);
+    }
+    list.replaceChildren(fragment);
+  }
+
+  function refreshAll() {
+    document
+      .querySelectorAll<HTMLElement>("[data-applied-filters]")
+      .forEach(renderAppliedFilters);
+  }
+
+  refreshAll();
+  window.addEventListener("popstate", refreshAll);
+  // Astro's ClientRouter may swap the page in place; re-render chips
+  // after the new DOM is committed so a back-nav from /products?cat=batik
+  // still picks up the active state.
+  document.addEventListener("astro:page-load", refreshAll);
 </script>

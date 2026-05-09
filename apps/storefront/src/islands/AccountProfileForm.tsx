@@ -28,6 +28,7 @@ import {
   refreshAccount,
   writeCachedCustomerId,
 } from "../lib/account.js";
+import { isValidE164, normalizePhone } from "../lib/phone.js";
 
 export interface AccountProfileFormLabels {
   title: string;
@@ -53,8 +54,6 @@ export interface AccountProfileFormProps {
   currentPath: string;
   labels: AccountProfileFormLabels;
 }
-
-const PHONE_REGEX = /^\+?[1-9]\d{1,14}$/;
 
 type Phase = "loading" | "ready" | "redirecting" | "error";
 
@@ -155,7 +154,7 @@ export default function AccountProfileForm({
       setNameError(null);
     }
 
-    if (phone.trim().length > 0 && !PHONE_REGEX.test(phone.trim())) {
+    if (phone.trim().length > 0 && !isValidE164(normalizePhone(phone))) {
       setPhoneError(labels.errors.invalidPhone);
       firstInvalid ??= phoneRef.current;
       valid = false;
@@ -178,13 +177,14 @@ export default function AccountProfileForm({
     // short-circuits here so the user gets immediate feedback.
     const patch: { displayName?: string | null; phone?: string | null } = {};
     const trimmedName = name.trim();
-    const trimmedPhone = phone.trim();
+    // Always send the normalized phone — the API only knows E.164.
+    const normalizedPhone = normalizePhone(phone);
 
     if (trimmedName !== (profile?.displayName ?? me.user?.name ?? "")) {
       patch.displayName = trimmedName.length === 0 ? null : trimmedName;
     }
-    if (trimmedPhone !== (profile?.phone ?? "")) {
-      patch.phone = trimmedPhone.length === 0 ? null : trimmedPhone;
+    if (normalizedPhone !== (profile?.phone ?? "")) {
+      patch.phone = normalizedPhone.length === 0 ? null : normalizedPhone;
     }
 
     if (Object.keys(patch).length === 0) {
@@ -213,8 +213,8 @@ export default function AccountProfileForm({
   if (phase === "loading" || phase === "redirecting") {
     return (
       <div className="space-y-6" aria-busy="true">
-        <div className="h-9 w-72 skeleton" />
-        <div className="h-32 w-full skeleton" />
+        <div className="skeleton h-9 w-72" />
+        <div className="skeleton h-32 w-full" />
       </div>
     );
   }
@@ -232,7 +232,7 @@ export default function AccountProfileForm({
         className="max-w-[480px] space-y-6"
       >
         <div className="space-y-2">
-          <label htmlFor={nameId} className="block t-caption text-muted">
+          <label htmlFor={nameId} className="t-caption text-muted block">
             {labels.name}
           </label>
           <input
@@ -246,17 +246,21 @@ export default function AccountProfileForm({
             onChange={(e) => setName(e.target.value)}
             aria-invalid={nameError !== null}
             aria-describedby={nameError ? `${nameId}-error` : undefined}
-            className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+            className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
           />
           {nameError && (
-            <p id={`${nameId}-error`} role="alert" className="t-caption text-danger">
+            <p
+              id={`${nameId}-error`}
+              role="alert"
+              className="t-caption text-danger"
+            >
               {nameError}
             </p>
           )}
         </div>
 
         <div className="space-y-2">
-          <label htmlFor={emailId} className="block t-caption text-muted">
+          <label htmlFor={emailId} className="t-caption text-muted block">
             {labels.email}
           </label>
           <input
@@ -267,7 +271,7 @@ export default function AccountProfileForm({
             value={me?.user?.email ?? ""}
             readOnly
             aria-describedby={`${emailId}-hint`}
-            className="w-full border border-line bg-cream px-3 py-2 t-body text-muted outline-none"
+            className="border-line bg-cream t-body text-muted w-full border px-3 py-2 outline-none"
           />
           <p id={`${emailId}-hint`} className="t-caption text-faint">
             {labels.emailHint}
@@ -275,7 +279,7 @@ export default function AccountProfileForm({
         </div>
 
         <div className="space-y-2">
-          <label htmlFor={phoneId} className="block t-caption text-muted">
+          <label htmlFor={phoneId} className="t-caption text-muted block">
             {labels.phone}
           </label>
           <input
@@ -291,7 +295,7 @@ export default function AccountProfileForm({
             aria-describedby={
               phoneError ? `${phoneId}-error` : `${phoneId}-hint`
             }
-            className="w-full border border-line bg-paper px-3 py-2 t-body text-fg outline-none transition-colors duration-150 focus:border-fg"
+            className="border-line bg-paper t-body text-fg focus:border-fg w-full border px-3 py-2 transition-colors duration-150 outline-none"
           />
           {phoneError ? (
             <p

@@ -13,7 +13,12 @@
  */
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import CheckoutConfirmed from "@/islands/CheckoutConfirmed.tsx";
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -39,6 +44,7 @@ const title = `${t("checkout.confirmed.title")} — mt-commerce`;
     missingLabel={t("checkout.confirmed.missing")}
     itemsLabel={t("checkout.review.items_label")}
     addressLabel={t("checkout.review.address_label")}
+    productFallbackLabel={t("cart.product_fallback")}
     totalsLabels={{
       subtotal: t("cart.subtotal"),
       tax: t("cart.tax"),

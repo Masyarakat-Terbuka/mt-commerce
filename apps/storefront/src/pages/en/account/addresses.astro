@@ -1,7 +1,12 @@
 ---
 import AccountLayout from "@/layouts/AccountLayout.astro";
 import AccountAddresses from "@/islands/AccountAddresses.tsx";
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -24,6 +29,9 @@ const labels = {
   kindBilling: t("account.addresses.kind.billing"),
   loading: t("account.orders.loading"),
   error: t("account.orders.error"),
+  saveSuccess: t("account.addresses.save_success"),
+  deleteSuccess: t("account.addresses.delete_success"),
+  actionError: t("account.addresses.action_error"),
   form: {
     titleNew: t("account.address_form.title_new"),
     titleEdit: t("account.address_form.title_edit"),
@@ -63,7 +71,11 @@ const labels = {
 const title = `${t("account.addresses.title")} — mt-commerce`;
 ---
 
-<AccountLayout title={title} description={t("account.addresses.title")} active="addresses">
+<AccountLayout
+  title={title}
+  description={t("account.addresses.title")}
+  active="addresses"
+>
   <AccountAddresses
     client:load
     apiLocale={locale}

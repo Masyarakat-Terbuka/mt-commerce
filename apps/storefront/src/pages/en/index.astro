@@ -247,37 +247,6 @@ const activities = [
   },
 ] as const;
 
-const journalCards = [
-  {
-    tag: t("home.journal.brewing.tag"),
-    title: t("home.journal.brewing.title"),
-    alt: t("home.journal.brewing.alt"),
-    img: unsplash("photo-1506372023823-741c83b836fe", 600),
-    href: `${productsHref}?category=kopi`,
-  },
-  {
-    tag: t("home.journal.batik.tag"),
-    title: t("home.journal.batik.title"),
-    alt: t("home.journal.batik.alt"),
-    img: unsplash("photo-1567620905732-2d1ec7ab7445", 600),
-    href: `${productsHref}?category=batik`,
-  },
-  {
-    tag: t("home.journal.craft.tag"),
-    title: t("home.journal.craft.title"),
-    alt: t("home.journal.craft.alt"),
-    img: unsplash("photo-1550583724-b2692b85b150", 600),
-    href: `${productsHref}?category=kerajinan`,
-  },
-  {
-    tag: t("home.journal.kuliner.tag"),
-    title: t("home.journal.kuliner.title"),
-    alt: t("home.journal.kuliner.alt"),
-    img: unsplash("photo-1551717743-49959800b1f6", 600),
-    href: `${productsHref}?category=kuliner`,
-  },
-] as const;
-
 const [categories, newest] = await Promise.all([
   listCategories(locale),
   listProducts(locale, { pageSize: 6, sort: "newest" }),
@@ -577,59 +546,6 @@ const showNewest = newest.items.length > 0;
               </div>
               <p class="t-body text-fg group-hover:text-accent mt-3 transition-colors duration-200">
                 {item.title}
-              </p>
-            </a>
-          </li>
-        ))
-      }
-    </ul>
-  </section>
-
-  <section
-    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
-    aria-labelledby="home-journal"
-  >
-    <div class="flex items-baseline justify-between gap-4">
-      <h2 id="home-journal" class="t-overline text-muted">
-        {t("home.journal.title")}
-      </h2>
-      <a
-        href={localePath("en", "/products")}
-        class="t-body text-muted hover:text-accent transition-colors duration-150"
-      >
-        {t("home.journal.see_all")}
-      </a>
-    </div>
-    <ul
-      class="mt-5 grid grid-cols-2 gap-x-4 gap-y-7 md:mt-8 md:grid-cols-4 md:gap-x-6"
-    >
-      {
-        journalCards.map((card) => (
-          <li>
-            <a href={card.href} class="group block">
-              <div class="img-frame bg-cream relative aspect-square w-full overflow-hidden">
-                <img
-                  src={card.img.src}
-                  srcset={card.img.srcset}
-                  sizes="(min-width: 768px) 22vw, 50vw"
-                  alt={card.alt}
-                  loading="lazy"
-                  decoding="async"
-                  width="600"
-                  height="600"
-                  onerror="this.parentElement.dataset.broken='true'"
-                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
-                />
-                <span
-                  class="img-fallback absolute inset-0 items-center justify-center px-4 text-center"
-                  aria-hidden="true"
-                >
-                  <span class="t-caption text-fg line-clamp-2">{card.tag}</span>
-                </span>
-              </div>
-              <p class="t-overline text-muted mt-4">{card.tag}</p>
-              <p class="t-body text-fg group-hover:text-accent mt-2 transition-colors duration-200">
-                {card.title}
               </p>
             </a>
           </li>

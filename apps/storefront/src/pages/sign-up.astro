@@ -5,7 +5,12 @@
  */
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import SignUpForm from "@/islands/SignUpForm.tsx";
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -29,6 +34,11 @@ const labels = {
   phoneHint: t("auth.sign_up.phone_hint"),
   password: t("auth.sign_up.password"),
   passwordHint: t("auth.sign_up.password_hint"),
+  passwordCheckLength: t("auth.password_check.length"),
+  passwordCheckLetters: t("auth.password_check.letters"),
+  passwordCheckDigits: t("auth.password_check.digits"),
+  showPassword: t("auth.show_password"),
+  hidePassword: t("auth.hide_password"),
   submit: t("auth.sign_up.submit"),
   submitting: t("auth.sign_up.submitting"),
   errors: {
@@ -52,10 +62,10 @@ const labels = {
 
     <SignUpForm client:load nextHref={nextHref} labels={labels} />
 
-    <p class="mt-10 t-caption text-muted">
+    <p class="t-caption text-muted mt-10">
       {t("auth.sign_up.have_account")}{" "}
       <a
-        class="text-fg underline-offset-[4px] transition-colors duration-150 hover:text-accent hover:underline"
+        class="text-fg hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
         href={signInHref}
       >
         {t("auth.sign_up.sign_in")}

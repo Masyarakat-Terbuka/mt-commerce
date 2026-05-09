@@ -53,12 +53,13 @@ export default function VariantSelector({
   heading,
   compareAtLabel,
 }: VariantSelectorProps) {
+  // Hooks must run on every render in the same order — gate the JSX below,
+  // not the hook calls. Initial state defaults to "" when the variant list
+  // is empty so React's hook-order invariant holds across renders that flip
+  // between empty and non-empty (e.g. an upstream slug change).
   const initial = variants[0];
-  if (!initial) {
-    return null;
-  }
-  const [selectedId, setSelectedId] = useState(initial.id);
-  const selected = variants.find((v) => v.id === selectedId) ?? initial;
+  const [selectedId, setSelectedId] = useState(initial?.id ?? "");
+  const selected = variants.find((v) => v.id === selectedId) ?? initial ?? null;
 
   // Seed the store with the initial variant on mount so subscribers (e.g.
   // AddToCartButton) see a value even before the user clicks a chip. We
@@ -69,9 +70,10 @@ export default function VariantSelector({
   // Initial seed is keyed to the productId only. Re-seeding when the
   // `variants` array reference changes would clobber the user's pick, so
   // we read `initial` via a ref-equivalent local instead of widening deps.
-  const initialVariantId = initial.id;
-  const initialAvailable = initial.available;
+  const initialVariantId = initial?.id ?? null;
+  const initialAvailable = initial?.available ?? false;
   useEffect(() => {
+    if (initialVariantId === null) return;
     setSelectedVariant(productId, {
       variantId: initialVariantId,
       available: initialAvailable,
@@ -86,10 +88,10 @@ export default function VariantSelector({
     });
   }
 
-  // If there is only a single variant, hide the chips entirely — picking
-  // among one option is noise.
-  const showChips = variants.length > 1;
-  if (!showChips) {
+  // Render gates run after every hook so the order stays stable: skip the
+  // chips when there are zero variants (nothing to render) or only one
+  // (picking among one option is noise).
+  if (!selected || variants.length <= 1) {
     return null;
   }
 
@@ -105,7 +107,7 @@ export default function VariantSelector({
                 key={v.id}
                 type="button"
                 disabled
-                className="cursor-not-allowed border border-line px-5 py-2 t-body text-faint line-through"
+                className="border-line t-body text-faint cursor-not-allowed border px-5 py-2 line-through"
               >
                 {v.name}
               </button>
@@ -119,8 +121,8 @@ export default function VariantSelector({
               aria-pressed={isSelected}
               className={
                 isSelected
-                  ? "border border-accent px-5 py-2 t-body text-fg transition-colors duration-150"
-                  : "border border-line px-5 py-2 t-body text-fg transition-colors duration-150 hover:border-line-strong"
+                  ? "border-accent t-body text-fg border px-5 py-2 transition-colors duration-150"
+                  : "border-line t-body text-fg hover:border-line-strong border px-5 py-2 transition-colors duration-150"
               }
             >
               {v.name}
@@ -131,7 +133,7 @@ export default function VariantSelector({
 
       {/* Selected variant's compare-at, if any — sits below the chips. */}
       {selected.compareAt && (
-        <p className="mt-4 t-caption text-muted">
+        <p className="t-caption text-muted mt-4">
           <span aria-label={compareAtLabel}>
             {formatMoney(selected.compareAt, { locale })}
           </span>

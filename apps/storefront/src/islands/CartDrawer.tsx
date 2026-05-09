@@ -75,6 +75,14 @@ export type CartDrawerProps = {
   totalLabel: string;
   checkoutCtaLabel: string;
   removeLabel: string;
+  /**
+   * Sentence shown in place of the cart line for ~4 seconds after the
+   * user clicks "Hapus" — paired with `undoRemoveLabel` to give them a
+   * window to back out before the network removal commits.
+   */
+  removedPendingLabel: string;
+  /** "Urungkan" / "Undo" — pairs with `removedPendingLabel`. */
+  undoRemoveLabel: string;
   quantityLabel: string;
   /**
    * Fallback line label when no product info is cached for a variant
@@ -101,6 +109,8 @@ function CartDrawerInner(props: CartDrawerProps) {
     totalLabel,
     checkoutCtaLabel,
     removeLabel,
+    removedPendingLabel,
+    undoRemoveLabel,
     quantityLabel,
     productFallbackLabel,
   } = props;
@@ -123,6 +133,13 @@ function CartDrawerInner(props: CartDrawerProps) {
   const [highlightedVariantId, setHighlightedVariantId] = useState<
     string | null
   >(null);
+  // Items the user has clicked Hapus on. The line is visually replaced
+  // with an undo strip and the actual `removeItem` call only fires after
+  // ~4s — gives the user a window to back out without confirming first.
+  const [pendingRemove, setPendingRemove] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const removeTimers = useRef<Map<string, number>>(new Map());
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -198,6 +215,55 @@ function CartDrawerInner(props: CartDrawerProps) {
   const close = useCallback(() => {
     setOpen(false);
     setHighlightedVariantId(null);
+  }, []);
+
+  // 4 seconds is the same window Gmail uses for an "Undo" of an archived
+  // mail — long enough to react after a misclick, short enough that the
+  // user doesn't lose their place expecting the line to disappear.
+  const REMOVE_DELAY_MS = 4000;
+  const queueRemove = useCallback(
+    (itemId: string) => {
+      setPendingRemove((prev) => {
+        if (prev.has(itemId)) return prev;
+        const next = new Set(prev);
+        next.add(itemId);
+        return next;
+      });
+      const handle = window.setTimeout(() => {
+        removeTimers.current.delete(itemId);
+        setPendingRemove((prev) => {
+          if (!prev.has(itemId)) return prev;
+          const next = new Set(prev);
+          next.delete(itemId);
+          return next;
+        });
+        void removeItem(itemId);
+      }, REMOVE_DELAY_MS);
+      removeTimers.current.set(itemId, handle);
+    },
+    [removeItem],
+  );
+  const undoRemove = useCallback((itemId: string) => {
+    const handle = removeTimers.current.get(itemId);
+    if (handle !== undefined) {
+      window.clearTimeout(handle);
+      removeTimers.current.delete(itemId);
+    }
+    setPendingRemove((prev) => {
+      if (!prev.has(itemId)) return prev;
+      const next = new Set(prev);
+      next.delete(itemId);
+      return next;
+    });
+  }, []);
+  // Cancel any pending timers when the island unmounts so a queued
+  // remove doesn't fire after the drawer's gone.
+  useEffect(() => {
+    const timers = removeTimers.current;
+    return () => {
+      for (const handle of timers.values()) window.clearTimeout(handle);
+      timers.clear();
+    };
   }, []);
 
   const items = cart?.items ?? [];
@@ -298,6 +364,27 @@ function CartDrawerInner(props: CartDrawerProps) {
                 const info = itemInfo.get(item.variantId) ?? null;
                 const lineTitle = info?.title ?? productFallbackLabel;
                 const lineAlt = info?.imageAlt ?? lineTitle;
+                if (pendingRemove.has(item.id)) {
+                  return (
+                    <li
+                      key={item.id}
+                      className="border-line flex items-center justify-between border-y py-3"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <p className="t-caption text-muted">
+                        {removedPendingLabel}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => undoRemove(item.id)}
+                        className="t-caption text-fg hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
+                      >
+                        {undoRemoveLabel}
+                      </button>
+                    </li>
+                  );
+                }
                 return (
                   <li
                     key={item.id}
@@ -357,7 +444,7 @@ function CartDrawerInner(props: CartDrawerProps) {
                         />
                         <button
                           type="button"
-                          onClick={() => void removeItem(item.id)}
+                          onClick={() => queueRemove(item.id)}
                           className="t-caption text-muted hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
                         >
                           {removeLabel}
@@ -394,7 +481,7 @@ function CartDrawerInner(props: CartDrawerProps) {
                    * inline. Falls back to the generic note when the rate is
                    * unknown (env-var fallback path).
                    */}
-                  <span className="t-caption text-muted/70">
+                  <span className="t-caption text-faint">
                     {cart.totals.taxRateBasisPoints !== null
                       ? `${taxIncludedNote} ${cart.totals.taxRateBasisPoints / 100}%`
                       : taxIncludedNote}

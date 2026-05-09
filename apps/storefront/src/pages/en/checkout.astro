@@ -9,6 +9,10 @@ const intlLocale = "en-US";
 
 const cartHref = localePath(locale, "/cart");
 const productsHref = localePath(locale, "/products");
+// Round-trip: sign-in/sign-up both honor `?next=` and bounce back here.
+const checkoutPath = localePath(locale, "/checkout");
+const signUpHref = `${localePath(locale, "/sign-up")}?next=${encodeURIComponent(checkoutPath)}`;
+const signInHref = `${localePath(locale, "/sign-in")}?next=${encodeURIComponent(checkoutPath)}`;
 // Static-build limitation: see id-locale page comment.
 const confirmedHrefPattern = `${localePath(locale, "/checkout/confirmed")}?id=:id`;
 
@@ -30,6 +34,7 @@ const labels = {
     selectExisting: t("checkout.address.select_existing"),
     addNew: t("checkout.address.add_new"),
     addNewHint: t("checkout.address.add_new_hint"),
+    addNewIntro: t("checkout.address.add_new_intro"),
     billingSame: t("checkout.address.billing_same"),
     billingDifferent: t("checkout.address.billing_different"),
     billingSelect: t("checkout.address.billing_select"),
@@ -37,6 +42,42 @@ const labels = {
     empty: t("checkout.address.empty"),
     guestUnsupported: t("checkout.address.guest_unsupported"),
     guestSignup: t("checkout.address.guest_signup"),
+    guestHaveAccount: t("checkout.address.guest_have_account"),
+    guestSignIn: t("checkout.address.guest_sign_in"),
+    form: {
+      titleNew: t("account.address_form.title_new"),
+      titleEdit: t("account.address_form.title_edit"),
+      kind: t("account.address_form.kind"),
+      recipientName: t("account.address_form.recipient_name"),
+      phone: t("account.address_form.phone"),
+      addressLine1: t("account.address_form.address_line_1"),
+      addressLine2: t("account.address_form.address_line_2"),
+      provinsi: t("account.address_form.provinsi"),
+      kotaKabupaten: t("account.address_form.kota_kabupaten"),
+      kecamatan: t("account.address_form.kecamatan"),
+      kelurahan: t("account.address_form.kelurahan"),
+      postalCode: t("account.address_form.postal_code"),
+      notes: t("account.address_form.notes"),
+      isDefaultShipping: t("account.address_form.is_default_shipping"),
+      isDefaultBilling: t("account.address_form.is_default_billing"),
+      submitNew: t("account.address_form.submit_new"),
+      submitEdit: t("account.address_form.submit_edit"),
+      submitting: t("account.address_form.submitting"),
+      cancel: t("account.address_form.cancel"),
+      placeholderSelect: t("account.address_form.placeholder_select"),
+      loadingRegions: t("account.address_form.loading_regions"),
+      errors: {
+        fieldRequired: t("auth.errors.field_required"),
+        invalidPhone: t("auth.errors.invalid_phone"),
+        invalidPostalCode: t("auth.errors.invalid_postal_code"),
+        network: t("auth.errors.network"),
+        generic: t("auth.errors.generic"),
+      },
+      kindOptions: {
+        shipping: t("account.addresses.kind.shipping"),
+        billing: t("account.addresses.kind.billing"),
+      },
+    },
   },
   shipping: {
     title: t("checkout.shipping.title"),
@@ -74,6 +115,7 @@ const labels = {
     unknownStep: t("checkout.error.unknown_step"),
     idempotencyConflict: t("checkout.error.idempotency_conflict"),
   },
+  productFallbackLabel: t("cart.product_fallback"),
 };
 ---
 
@@ -84,6 +126,8 @@ const labels = {
     apiLocale={locale}
     cartHref={cartHref}
     productsHref={productsHref}
+    signUpHref={signUpHref}
+    signInHref={signInHref}
     confirmedHrefPattern={confirmedHrefPattern}
     labels={labels}
   />

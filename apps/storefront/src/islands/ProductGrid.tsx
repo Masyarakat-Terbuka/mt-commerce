@@ -105,6 +105,14 @@ export type ProductGridProps = {
    */
   detailHrefBase: string;
   emptyLabel: string;
+  /**
+   * Optional clear-filters CTA shown next to the empty-state copy when
+   * the URL carries at least one filter. Surfaces a way out of a
+   * dead-end filtered query without forcing the user to navigate the
+   * filter bar manually.
+   */
+  clearFiltersLabel?: string;
+  clearFiltersHref?: string;
   errorLabel: string;
   /** Localized aria-label for the loading skeleton. */
   skeletonLabel: string;
@@ -249,6 +257,8 @@ export default function ProductGrid({
   apiLocale,
   detailHrefBase,
   emptyLabel,
+  clearFiltersLabel,
+  clearFiltersHref,
   errorLabel,
   skeletonLabel,
   query,
@@ -356,7 +366,7 @@ export default function ProductGrid({
     //   2. The user changed a filter/sort/page after a seeded render —
     //      flipping back to loading is the correct UX (the previous
     //      result no longer matches the current URL).
-     
+
     setState({ status: "loading" });
 
     async function load() {
@@ -446,7 +456,25 @@ export default function ProductGrid({
   }
 
   if (state.products.length === 0) {
-    return <p className="t-body text-muted py-16">{emptyLabel}</p>;
+    const hasActiveFilter = !!(
+      effectiveQuery?.categorySlug ||
+      effectiveQuery?.search ||
+      effectiveQuery?.minPriceAmount ||
+      effectiveQuery?.maxPriceAmount
+    );
+    return (
+      <div className="py-16">
+        <p className="t-body text-muted">{emptyLabel}</p>
+        {hasActiveFilter && clearFiltersLabel && clearFiltersHref && (
+          <a
+            href={clearFiltersHref}
+            className="t-body text-fg hover:text-accent mt-4 inline-flex underline-offset-[6px] transition-colors duration-150 hover:underline"
+          >
+            {clearFiltersLabel} &rarr;
+          </a>
+        )}
+      </div>
+    );
   }
 
   // Visible-count caption. Reflects what's rendered (post-`limit` slice),

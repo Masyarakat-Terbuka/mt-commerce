@@ -90,6 +90,18 @@
     outline-offset: 2px;
   }
 
+  /*
+   * Filter category radios are visually replaced by their text labels
+   * (the radio itself is `.sr-only`). The default :focus-visible would
+   * land on the 1×1 radio and read as no outline at all to a sighted
+   * keyboard user. Promote the focus indicator to the wrapping label so
+   * the focused category is obvious.
+   */
+  [data-filters-form] label:has(.sr-only:focus-visible) {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 4px;
+  }
+
   /* Selection styling stays calm — accent at low opacity, not its full strength. */
   ::selection {
     background: rgba(184, 87, 66, 0.18);
@@ -110,9 +122,14 @@
    *
    *   .t-display   32/40 mobile → 44/52 desktop, weight 400
    *   .t-h1        22/28 mobile → 28/36 desktop, weight 400
-   *   .t-body      14/22 mobile → 15/24 desktop, weight 400
+   *   .t-body      15/24 mobile → 16/26 desktop, weight 400
    *   .t-caption   12/18,                          weight 500
    *   .t-overline  11px caps, weight 500, +0.1em tracking — used SPARINGLY
+   *
+   * Body bump 14→15→16: the earlier 14/15 scale read small on dense
+   * pages (about, help, legal, descriptions). 16px desktop matches the
+   * modern norm (Apple HIG, Material) and Geist's neutral letterforms
+   * carry the slightly-larger size without feeling heavy.
    */
   .t-display {
     font-size: 2rem; /* 32px */
@@ -129,8 +146,8 @@
   }
 
   .t-body {
-    font-size: 0.875rem; /* 14px */
-    line-height: 1.375rem; /* 22px */
+    font-size: 0.9375rem; /* 15px */
+    line-height: 1.5rem; /* 24px */
     font-weight: 400;
   }
 
@@ -165,8 +182,8 @@
       line-height: 2.25rem; /* 36px */
     }
     .t-body {
-      font-size: 0.9375rem; /* 15px */
-      line-height: 1.5rem; /* 24px */
+      font-size: 1rem; /* 16px */
+      line-height: 1.625rem; /* 26px */
     }
   }
 

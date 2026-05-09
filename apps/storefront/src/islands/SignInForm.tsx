@@ -28,6 +28,8 @@ import { writeCachedCustomerId } from "../lib/account.js";
 export interface SignInLabels {
   email: string;
   password: string;
+  showPassword: string;
+  hidePassword: string;
   submit: string;
   submitting: string;
   errors: {
@@ -72,6 +74,11 @@ export default function SignInForm({ nextHref, labels }: SignInFormProps) {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Show/Hide password toggle — flips the input's `type` attribute. The
+  // standard pattern; helpful when the user is unsure whether they typed
+  // a 12-char password correctly. Starts off (mask) so a passing shoulder
+  // doesn't catch the password by accident.
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -172,15 +179,26 @@ export default function SignInForm({ nextHref, labels }: SignInFormProps) {
       </div>
 
       <div className="space-y-2">
-        <label htmlFor={passwordId} className="t-caption text-muted block">
-          {labels.password}
-        </label>
+        <div className="flex items-center justify-between">
+          <label htmlFor={passwordId} className="t-caption text-muted">
+            {labels.password}
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-pressed={showPassword}
+            className="t-caption text-muted hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
+          >
+            {showPassword ? labels.hidePassword : labels.showPassword}
+          </button>
+        </div>
         <input
           id={passwordId}
           ref={passwordRef}
           name="password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           autoComplete="current-password"
+          spellCheck={false}
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}

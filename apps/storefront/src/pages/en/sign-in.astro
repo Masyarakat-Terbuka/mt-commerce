@@ -6,7 +6,12 @@
  */
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import SignInForm from "@/islands/SignInForm.tsx";
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -20,12 +25,17 @@ const nextHref =
 const signUpHref = `${localePath(locale, "/sign-up")}${
   nextParam ? `?next=${encodeURIComponent(nextParam)}` : ""
 }`;
+// Stopgap until a real password-reset flow ships: route locked-out users
+// to the about page (where contact info lives) so they have a path back.
+const forgotPasswordHref = localePath(locale, "/about");
 
 const title = `${t("auth.sign_in.title")} — mt-commerce`;
 
 const labels = {
   email: t("auth.sign_in.email"),
   password: t("auth.sign_in.password"),
+  showPassword: t("auth.show_password"),
+  hidePassword: t("auth.hide_password"),
   submit: t("auth.sign_in.submit"),
   submitting: t("auth.sign_in.submitting"),
   errors: {
@@ -47,10 +57,20 @@ const labels = {
 
     <SignInForm client:load nextHref={nextHref} labels={labels} />
 
-    <p class="mt-10 t-caption text-muted">
+    <p class="t-caption text-muted mt-6">
+      {t("auth.sign_in.forgot_password")}{" "}
+      <a
+        class="text-fg hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
+        href={forgotPasswordHref}
+      >
+        {t("auth.sign_in.forgot_password_link")}
+      </a>
+    </p>
+
+    <p class="t-caption text-muted mt-4">
       {t("auth.sign_in.no_account")}{" "}
       <a
-        class="text-fg underline-offset-[4px] transition-colors duration-150 hover:text-accent hover:underline"
+        class="text-fg hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
         href={signUpHref}
       >
         {t("auth.sign_in.create_account")}

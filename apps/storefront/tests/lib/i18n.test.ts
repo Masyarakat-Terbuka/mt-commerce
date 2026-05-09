@@ -10,14 +10,14 @@ describe("i18n", () => {
   describe("createTranslator", () => {
     it("returns Indonesian strings for the id locale", () => {
       const t = createTranslator("id");
-      expect(t("home.hero.title")).toBe("Mulai jualan online dengan toko Anda sendiri.");
+      expect(t("home.hero.headline")).toBe("Toko untuk hal-hal yang bertahan.");
       expect(t("nav.home")).toBe("Beranda");
       expect(t("products.detail.add_to_cart")).toBe("Tambah ke keranjang");
     });
 
     it("returns English strings for the en locale", () => {
       const t = createTranslator("en");
-      expect(t("home.hero.title")).toBe("Start selling online with your own store.");
+      expect(t("home.hero.headline")).toBe("A shop for things that last.");
       expect(t("nav.home")).toBe("Home");
       expect(t("products.detail.add_to_cart")).toBe("Add to cart");
     });

@@ -11,6 +11,7 @@
  * tone of the listing page.
  */
 import { createTranslator, resolveLocale, type Locale } from "@/lib/i18n";
+import { paginationItems } from "@/lib/pagination";
 
 export interface Props {
   page: number;
@@ -32,7 +33,9 @@ function buildHref(p: number): string {
   return `${baseUrl}${sep}page=${p}`;
 }
 
-const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+// Truncate to `1 … current-1 current current+1 … last` for deep ranges so
+// the row stays a navigational footnote, not a wall of digits.
+const items = paginationItems(page, totalPages);
 const hasPrev = page > 1;
 const hasNext = page < totalPages;
 ---
@@ -40,7 +43,7 @@ const hasNext = page < totalPages;
 {
   totalPages > 1 && (
     <nav
-      class="mt-20 flex items-center justify-center gap-4 t-caption"
+      class="t-caption mt-20 flex items-center justify-center gap-4"
       aria-label="Pagination"
     >
       <a
@@ -48,39 +51,55 @@ const hasNext = page < totalPages;
         aria-disabled={!hasPrev}
         class:list={[
           "transition-colors duration-150",
-          hasPrev ? "text-fg hover:text-accent" : "pointer-events-none text-faint",
+          hasPrev
+            ? "text-fg hover:text-accent"
+            : "text-faint pointer-events-none",
         ]}
       >
         &larr; {t("products.list.pagination.prev")}
       </a>
 
-      <span class="text-faint" aria-hidden="true">·</span>
+      <span class="text-faint" aria-hidden="true">
+        ·
+      </span>
 
       <ul class="flex items-center gap-4">
-        {pages.map((p) => (
-          <li>
-            <a
-              href={buildHref(p)}
-              aria-current={p === page ? "page" : undefined}
-              class:list={[
-                "price-figure transition-colors duration-150",
-                p === page ? "text-fg" : "text-faint hover:text-accent",
-              ]}
-            >
-              {p}
-            </a>
-          </li>
-        ))}
+        {items.map((item) =>
+          item.type === "ellipsis" ? (
+            <li aria-hidden="true" class="text-faint">
+              …
+            </li>
+          ) : (
+            <li>
+              <a
+                href={buildHref(item.page)}
+                aria-current={item.page === page ? "page" : undefined}
+                class:list={[
+                  "price-figure transition-colors duration-150",
+                  item.page === page
+                    ? "text-fg"
+                    : "text-faint hover:text-accent",
+                ]}
+              >
+                {item.page}
+              </a>
+            </li>
+          ),
+        )}
       </ul>
 
-      <span class="text-faint" aria-hidden="true">·</span>
+      <span class="text-faint" aria-hidden="true">
+        ·
+      </span>
 
       <a
         href={hasNext ? buildHref(page + 1) : undefined}
         aria-disabled={!hasNext}
         class:list={[
           "transition-colors duration-150",
-          hasNext ? "text-fg hover:text-accent" : "pointer-events-none text-faint",
+          hasNext
+            ? "text-fg hover:text-accent"
+            : "text-faint pointer-events-none",
         ]}
       >
         {t("products.list.pagination.next")} &rarr;

@@ -17,6 +17,11 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { format as formatMoney, type Money } from "@mt-commerce/core/money";
+import {
+  getProductInfo,
+  PRODUCT_INFO_CHANGED_EVENT,
+  type ProductInfo,
+} from "../lib/cart-product-info.js";
 
 const ORDER_INTENT_STORAGE_PREFIX = "mt.orderIntent.";
 
@@ -88,6 +93,13 @@ export type CheckoutConfirmedProps = {
   missingLabel: string;
   itemsLabel: string;
   addressLabel: string;
+  /**
+   * Fallback label for cart lines when no product info is cached for a
+   * variant (e.g. the cache was cleared between order placement and a
+   * later visit to this page). Surfaces "Produk" / "Product" instead of
+   * a raw variant id.
+   */
+  productFallbackLabel: string;
   totalsLabels: {
     subtotal: string;
     tax: string;
@@ -109,6 +121,7 @@ export default function CheckoutConfirmed(props: CheckoutConfirmedProps) {
     missingLabel,
     itemsLabel,
     addressLabel,
+    productFallbackLabel,
     totalsLabels,
   } = props;
 
@@ -116,11 +129,39 @@ export default function CheckoutConfirmed(props: CheckoutConfirmedProps) {
   const [hydrated, setHydrated] = useState<boolean>(false);
 
   useEffect(() => {
+    // localStorage hydration must happen client-side; lazy useState
+    // init runs server-side too. Synchronous setState on first commit
+    // is the SSR-safe pattern Astro islands use.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHandoff(readHandoff(orderIntentId));
     setHydrated(true);
   }, [orderIntentId]);
 
   const orderIntent = handoff?.orderIntent ?? null;
+
+  // Resolve cached product info for each line so the receipt shows real
+  // titles instead of raw variant ids. The cache survives the navigation
+  // from /checkout (it's localStorage, not session-bound), so a freshly
+  // placed order's lines should hit. Lines without a cache entry fall
+  // back to the generic "Produk" / "Product" label.
+  const [infoTick, setInfoTick] = useState(0);
+  useEffect(() => {
+    function onInfo() {
+      setInfoTick((n) => n + 1);
+    }
+    window.addEventListener(PRODUCT_INFO_CHANGED_EVENT, onInfo);
+    return () => window.removeEventListener(PRODUCT_INFO_CHANGED_EVENT, onInfo);
+  }, []);
+  const itemInfo = useMemo(() => {
+    const map = new Map<string, ProductInfo | null>();
+    if (orderIntent) {
+      for (const line of orderIntent.cartSnapshot)
+        map.set(line.variantId, getProductInfo(line.variantId));
+    }
+    return map;
+    // `infoTick` invalidates the map when a new cache entry lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderIntent, infoTick]);
 
   const totals = useMemo(() => {
     if (!orderIntent) return null;
@@ -133,11 +174,11 @@ export default function CheckoutConfirmed(props: CheckoutConfirmedProps) {
   }, [orderIntent]);
 
   return (
-    <div className="mx-auto max-w-[760px] px-5 pb-32 pt-16 md:px-8 md:pt-24">
+    <div className="mx-auto max-w-[760px] px-5 pt-16 pb-32 md:px-8 md:pt-24">
       <h1 className="t-display text-fg">{titleLabel}</h1>
-      <p className="mt-4 t-body text-muted">{subtitleLabel}</p>
+      <p className="t-body text-muted mt-4">{subtitleLabel}</p>
 
-      <dl className="mt-12 border-y border-line py-6">
+      <dl className="border-line mt-12 border-y py-6">
         <div className="flex flex-col gap-1 md:flex-row md:items-baseline md:justify-between md:gap-8">
           <dt className="t-caption text-muted">{orderNumberLabel}</dt>
           <dd className="t-h1 text-fg">{orderIntentId}</dd>
@@ -145,26 +186,32 @@ export default function CheckoutConfirmed(props: CheckoutConfirmedProps) {
       </dl>
 
       {hydrated && !orderIntent ? (
-        <p className="mt-12 t-body text-muted">{missingLabel}</p>
+        <p className="t-body text-muted mt-12">{missingLabel}</p>
       ) : orderIntent && totals ? (
         <>
           <section className="mt-12">
             <h2 className="t-caption text-muted">{itemsLabel}</h2>
-            <ul className="mt-4 divide-y divide-line">
-              {orderIntent.cartSnapshot.map((line) => (
-                <li
-                  key={`${line.variantId}-${line.quantity}`}
-                  className="flex items-start justify-between gap-4 py-4"
-                >
-                  <div>
-                    <p className="t-body text-fg">{line.variantId}</p>
-                    <p className="t-caption text-muted">× {line.quantity}</p>
-                  </div>
-                  <p className="price-figure t-body text-fg">
-                    {formatMoney(deserializeMoney(line.unitPrice), { locale })}
-                  </p>
-                </li>
-              ))}
+            <ul className="divide-line mt-4 divide-y">
+              {orderIntent.cartSnapshot.map((line) => {
+                const info = itemInfo.get(line.variantId) ?? null;
+                const lineTitle = info?.title ?? productFallbackLabel;
+                return (
+                  <li
+                    key={`${line.variantId}-${line.quantity}`}
+                    className="flex items-start justify-between gap-4 py-4"
+                  >
+                    <div>
+                      <p className="t-body text-fg">{lineTitle}</p>
+                      <p className="t-caption text-muted">× {line.quantity}</p>
+                    </div>
+                    <p className="price-figure t-body text-fg">
+                      {formatMoney(deserializeMoney(line.unitPrice), {
+                        locale,
+                      })}
+                    </p>
+                  </li>
+                );
+              })}
             </ul>
           </section>
 
@@ -190,32 +237,40 @@ export default function CheckoutConfirmed(props: CheckoutConfirmedProps) {
             </section>
           )}
 
-          <dl className="mt-10 space-y-2 border-t border-line pt-6 t-body">
-            <div className="flex justify-between text-muted">
+          <dl className="border-line t-body mt-10 space-y-2 border-t pt-6">
+            <div className="text-muted flex justify-between">
               <dt>{totalsLabels.subtotal}</dt>
-              <dd className="price-figure">{formatMoney(totals.subtotal, { locale })}</dd>
+              <dd className="price-figure">
+                {formatMoney(totals.subtotal, { locale })}
+              </dd>
             </div>
-            <div className="flex justify-between text-muted">
+            <div className="text-muted flex justify-between">
               <dt>{totalsLabels.tax}</dt>
-              <dd className="price-figure">{formatMoney(totals.tax, { locale })}</dd>
+              <dd className="price-figure">
+                {formatMoney(totals.tax, { locale })}
+              </dd>
             </div>
-            <div className="flex justify-between text-muted">
+            <div className="text-muted flex justify-between">
               <dt>{totalsLabels.shipping}</dt>
-              <dd className="price-figure">{formatMoney(totals.shipping, { locale })}</dd>
+              <dd className="price-figure">
+                {formatMoney(totals.shipping, { locale })}
+              </dd>
             </div>
-            <div className="flex justify-between border-t border-line pt-3 text-fg">
+            <div className="border-line text-fg flex justify-between border-t pt-3">
               <dt>{totalsLabels.total}</dt>
-              <dd className="price-figure">{formatMoney(totals.total, { locale })}</dd>
+              <dd className="price-figure">
+                {formatMoney(totals.total, { locale })}
+              </dd>
             </div>
           </dl>
         </>
       ) : null}
 
-      <p className="mt-12 t-body text-muted">{nextStepsLabel}</p>
+      <p className="t-body text-muted mt-12">{nextStepsLabel}</p>
 
       <a
         href={homeHref}
-        className="mt-10 inline-flex t-body text-fg underline-offset-[6px] transition-colors duration-150 hover:text-accent hover:underline"
+        className="t-body text-fg hover:text-accent mt-10 inline-flex underline-offset-[6px] transition-colors duration-150 hover:underline"
       >
         {backHomeLabel} &rarr;
       </a>
