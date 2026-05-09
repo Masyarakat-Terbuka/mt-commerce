@@ -449,7 +449,7 @@ const showNewest = newest.items.length > 0;
         pickupTiles.map((tile) => (
           <li>
             <a href={tile.href} class="group block">
-              <div class="bg-cream relative aspect-[4/5] w-full overflow-hidden">
+              <div class="img-frame bg-cream relative aspect-[4/5] w-full overflow-hidden">
                 <img
                   src={tile.img.src}
                   srcset={tile.img.srcset}
@@ -459,8 +459,17 @@ const showNewest = newest.items.length > 0;
                   decoding="async"
                   width="600"
                   height="750"
+                  onerror="this.parentElement.dataset.broken='true'"
                   class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
                 />
+                <span
+                  class="img-fallback absolute inset-0 items-center justify-center px-3 text-center"
+                  aria-hidden="true"
+                >
+                  <span class="t-caption text-fg line-clamp-2">
+                    {tile.label}
+                  </span>
+                </span>
               </div>
               <p class="t-body text-fg group-hover:text-accent mt-3 transition-colors duration-200">
                 {tile.label}
@@ -497,7 +506,7 @@ const showNewest = newest.items.length > 0;
               {group.items.map((item) => (
                 <li>
                   <a href={group.href} class="group block">
-                    <div class="bg-cream relative aspect-[3/2] w-full overflow-hidden">
+                    <div class="img-frame bg-cream relative aspect-[3/2] w-full overflow-hidden">
                       <img
                         src={item.img.src}
                         srcset={item.img.srcset}
@@ -507,8 +516,17 @@ const showNewest = newest.items.length > 0;
                         decoding="async"
                         width="1200"
                         height="800"
+                        onerror="this.parentElement.dataset.broken='true'"
                         class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
                       />
+                      <span
+                        class="img-fallback absolute inset-0 items-center justify-center px-6 text-center"
+                        aria-hidden="true"
+                      >
+                        <span class="t-body text-fg line-clamp-2">
+                          {item.title}
+                        </span>
+                      </span>
                     </div>
                     <p class="t-body text-fg group-hover:text-accent mt-4 max-w-[44ch] transition-colors duration-200">
                       {item.title}
@@ -537,7 +555,7 @@ const showNewest = newest.items.length > 0;
         activities.map((item) => (
           <li>
             <a href={item.href} class="group block">
-              <div class="bg-cream relative aspect-[3/2] w-full overflow-hidden">
+              <div class="img-frame bg-cream relative aspect-[3/2] w-full overflow-hidden">
                 <img
                   src={item.img.src}
                   srcset={item.img.srcset}
@@ -547,8 +565,15 @@ const showNewest = newest.items.length > 0;
                   decoding="async"
                   width="800"
                   height="533"
+                  onerror="this.parentElement.dataset.broken='true'"
                   class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
                 />
+                <span
+                  class="img-fallback absolute inset-0 items-center justify-center px-4 text-center"
+                  aria-hidden="true"
+                >
+                  <span class="t-body text-fg line-clamp-2">{item.title}</span>
+                </span>
               </div>
               <p class="t-body text-fg group-hover:text-accent mt-3 transition-colors duration-200">
                 {item.title}
@@ -582,7 +607,7 @@ const showNewest = newest.items.length > 0;
         journalCards.map((card) => (
           <li>
             <a href={card.href} class="group block">
-              <div class="bg-cream relative aspect-square w-full overflow-hidden">
+              <div class="img-frame bg-cream relative aspect-square w-full overflow-hidden">
                 <img
                   src={card.img.src}
                   srcset={card.img.srcset}
@@ -592,8 +617,15 @@ const showNewest = newest.items.length > 0;
                   decoding="async"
                   width="600"
                   height="600"
+                  onerror="this.parentElement.dataset.broken='true'"
                   class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
                 />
+                <span
+                  class="img-fallback absolute inset-0 items-center justify-center px-4 text-center"
+                  aria-hidden="true"
+                >
+                  <span class="t-caption text-fg line-clamp-2">{card.tag}</span>
+                </span>
               </div>
               <p class="t-overline text-muted mt-4">{card.tag}</p>
               <p class="t-body text-fg group-hover:text-accent mt-2 transition-colors duration-200">
