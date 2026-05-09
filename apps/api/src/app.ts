@@ -22,6 +22,8 @@
  * helper is idempotent.
  */
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { serveStatic } from "hono/bun";
+import { resolve } from "node:path";
 import { requestId } from "./middleware/request-id.js";
 import { requestLogger } from "./middleware/logger.js";
 import { corsMiddleware } from "./middleware/cors.js";
@@ -30,6 +32,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { buildRoutes } from "./routes/index.js";
 import { setupOpenApi } from "./lib/openapi.js";
 import { installBigIntJsonSerializer } from "./lib/json.js";
+import { env } from "./lib/env.js";
 import { getAuth } from "./modules/auth/index.js";
 import { getNotificationService } from "./modules/notification/index.js";
 import type { AppBindings } from "./lib/types.js";
@@ -76,6 +79,23 @@ export function createApp(): OpenAPIHono<AppBindings> {
     }
     await globalLimiter(c, next);
   });
+
+  // Static file serving for product image uploads. The route is mounted
+  // before the API routes so it does not pay the rate limiter — image
+  // requests are read-only and high-volume; the global limiter targets
+  // mutating API calls. Uploads themselves go through the rate-limited
+  // POST `/admin/v1/products/:id/image` route, which is the right gate.
+  // The path prefix ("/uploads/") stays out of any module's namespace.
+  app.use(
+    "/uploads/*",
+    serveStatic({
+      root: resolve(env.uploadDir),
+      // Strip the URL prefix so the file system lookup uses just the
+      // filename component. Without `rewriteRequestPath`, serveStatic
+      // would look for `<uploadDir>/uploads/<file>`.
+      rewriteRequestPath: (path) => path.replace(/^\/uploads/, ""),
+    }),
+  );
 
   setupOpenApi(app);
   app.route("/", buildRoutes());

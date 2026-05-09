@@ -87,6 +87,13 @@
   "editor.field.status": "Status",
   "editor.field.imageUrl": "URL gambar",
   "editor.field.imageAlt": "Teks alternatif gambar",
+  "editor.field.imageUpload": "Unggah gambar",
+  "editor.field.imageUpload_help": "JPEG, PNG, atau WebP. Hingga 5 MiB.",
+  "editor.field.imageUpload_unavailable": "Simpan produk dulu untuk mengaktifkan unggahan.",
+  "editor.field.imageUpload_choose": "Pilih file",
+  "editor.field.imageUpload_replace": "Ganti gambar",
+  "editor.field.imageUpload_uploading": "Mengunggah…",
+  "editor.field.imageUpload_failed": "Unggahan gagal. Coba lagi.",
 
   "editor.variant.title": "Varian",
   "editor.variant.empty": "Tambahkan minimal satu varian sebelum menyimpan.",

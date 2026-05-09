@@ -8,13 +8,13 @@ tables here directly. Cross-module callers go through `catalogService`.
 
 All under `apps/api/src/db/schema/`:
 
-| Table                  | Purpose                                         | ID prefix |
-| ---------------------- | ----------------------------------------------- | --------- |
-| `categories`           | Tree of categories (self-referencing `parent_id`) | `cat_`  |
-| `products`             | Product header (status, default currency, slug)   | `prod_` |
-| `product_variants`     | Priced SKU under a product                        | `var_`  |
-| `inventory_levels`     | Per-variant, per-location stock                   | `inv_`  |
-| `product_categories`   | M:N junction between products and categories      | —       |
+| Table                | Purpose                                           | ID prefix |
+| -------------------- | ------------------------------------------------- | --------- |
+| `categories`         | Tree of categories (self-referencing `parent_id`) | `cat_`    |
+| `products`           | Product header (status, default currency, slug)   | `prod_`   |
+| `product_variants`   | Priced SKU under a product                        | `var_`    |
+| `inventory_levels`   | Per-variant, per-location stock                   | `inv_`    |
+| `product_categories` | M:N junction between products and categories      | —         |
 
 Money fields follow ADR-0007: `bigint` amount + ISO 4217 currency code,
 mapped to a `Money` value object at the service boundary.
@@ -60,32 +60,33 @@ to JSON-safe strings on the way out.
 
 ### Admin (mounted at `/admin/v1`)
 
-| Method  | Path                                            | Notes                                     |
-| ------- | ----------------------------------------------- | ----------------------------------------- |
-| GET     | `/admin/v1/products`                            | List with pagination/filters               |
-| POST    | `/admin/v1/products`                            | Create                                     |
-| GET     | `/admin/v1/products/:id`                        | By id                                      |
-| PATCH   | `/admin/v1/products/:id`                        | Update                                     |
-| DELETE  | `/admin/v1/products/:id`                        | Soft delete                                |
-| POST    | `/admin/v1/products/:id/variants`               | Create variant                             |
-| PATCH   | `/admin/v1/variants/:id`                        | Update                                     |
-| DELETE  | `/admin/v1/variants/:id`                        | Soft delete                                |
-| GET     | `/admin/v1/categories`                          | List                                       |
-| POST    | `/admin/v1/categories`                          | Create                                     |
-| PATCH   | `/admin/v1/categories/:id`                      | Update                                     |
-| DELETE  | `/admin/v1/categories/:id`                      | Hard delete                                |
-| POST    | `/admin/v1/variants/:id/inventory/adjust`       | Body `{ delta, reason? }`; writes an `audit_log` row |
-| GET     | `/admin/v1/variants/:id/inventory`              | Single inventory row (404 when absent)     |
-| GET     | `/admin/v1/inventory/levels`                    | Paginated; `?productId=` narrows           |
-| GET     | `/admin/v1/variants/:id/inventory/audit`        | Paginated audit history, newest first      |
+| Method | Path                                      | Notes                                                                             |
+| ------ | ----------------------------------------- | --------------------------------------------------------------------------------- |
+| GET    | `/admin/v1/products`                      | List with pagination/filters                                                      |
+| POST   | `/admin/v1/products`                      | Create                                                                            |
+| GET    | `/admin/v1/products/:id`                  | By id                                                                             |
+| PATCH  | `/admin/v1/products/:id`                  | Update                                                                            |
+| DELETE | `/admin/v1/products/:id`                  | Soft delete                                                                       |
+| POST   | `/admin/v1/products/:id/variants`         | Create variant                                                                    |
+| PATCH  | `/admin/v1/variants/:id`                  | Update                                                                            |
+| DELETE | `/admin/v1/variants/:id`                  | Soft delete                                                                       |
+| GET    | `/admin/v1/categories`                    | List                                                                              |
+| POST   | `/admin/v1/categories`                    | Create                                                                            |
+| PATCH  | `/admin/v1/categories/:id`                | Update                                                                            |
+| DELETE | `/admin/v1/categories/:id`                | Hard delete                                                                       |
+| POST   | `/admin/v1/variants/:id/inventory/adjust` | Body `{ delta, reason? }`; writes an `audit_log` row                              |
+| GET    | `/admin/v1/variants/:id/inventory`        | Single inventory row (404 when absent)                                            |
+| GET    | `/admin/v1/inventory/levels`              | Paginated; `?productId=` narrows                                                  |
+| GET    | `/admin/v1/variants/:id/inventory/audit`  | Paginated audit history, newest first                                             |
+| POST   | `/admin/v1/products/:id/image`            | Multipart `file`; jpeg/png/webp; writes to `${UPLOAD_DIR}` and updates `imageUrl` |
 
 ### Storefront (mounted at `/storefront/v1`)
 
-| Method  | Path                                | Notes                                                |
-| ------- | ----------------------------------- | ---------------------------------------------------- |
-| GET     | `/storefront/v1/products`           | Active only; pagination, filters (`categorySlug`, search, price range), sort |
-| GET     | `/storefront/v1/products/:slug`     | Active only; includes variants                        |
-| GET     | `/storefront/v1/categories`         | Flat list with `parent_id`; client builds the tree    |
+| Method | Path                            | Notes                                                                        |
+| ------ | ------------------------------- | ---------------------------------------------------------------------------- |
+| GET    | `/storefront/v1/products`       | Active only; pagination, filters (`categorySlug`, search, price range), sort |
+| GET    | `/storefront/v1/products/:slug` | Active only; includes variants                                               |
+| GET    | `/storefront/v1/categories`     | Flat list with `parent_id`; client builds the tree                           |
 
 ## Pagination
 
@@ -129,7 +130,6 @@ the catalog you want to walk through with stakeholders.
 
 - `requireRole('admin')` middleware once the auth module ships
 - `audit_log` integration for product/variant edits (inventory done)
-- Image upload (separate concern; local disk first)
 - Integration tests against a real Postgres
 - OpenAPI annotations via `@hono/zod-openapi` for both admin and storefront
 - Price-based sort for `listProducts` (currently degrades to "newest")

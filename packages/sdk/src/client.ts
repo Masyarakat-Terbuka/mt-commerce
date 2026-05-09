@@ -164,7 +164,10 @@ import type {
   WireVariant,
 } from "./types.js";
 
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
 
 export interface ClientOptions {
   /** Base URL of the API, e.g. "http://localhost:8000". No trailing slash needed. */
@@ -702,7 +705,8 @@ function toPaymentInitiateOutcome(
       if (!w.redirectUrl) {
         throw new ApiError({
           code: "decode_error",
-          message: "Payment initiate outcome 'redirect' is missing redirectUrl.",
+          message:
+            "Payment initiate outcome 'redirect' is missing redirectUrl.",
           status: 0,
         });
       }
@@ -757,7 +761,9 @@ function serializeMoneyAmount(value: MoneyAmountInput): string {
  * `null` (the wire signal for "clear this field") and only drop keys whose
  * value is `undefined`.
  */
-function omitUndefined<T extends Record<string, unknown>>(input: T): Partial<T> {
+function omitUndefined<T extends Record<string, unknown>>(
+  input: T,
+): Partial<T> {
   const out: Partial<T> = {};
   for (const [key, value] of Object.entries(input)) {
     if (value !== undefined) {
@@ -840,7 +846,11 @@ function buildQuery(params: Record<string, unknown>): string {
 function composeAbort(
   timeoutMs: number,
   callerSignal: AbortSignal | undefined,
-): { signal: AbortSignal | undefined; cleanup: () => void; timedOut: () => boolean } {
+): {
+  signal: AbortSignal | undefined;
+  cleanup: () => void;
+  timedOut: () => boolean;
+} {
   const noTimeout = timeoutMs <= 0;
   if (noTimeout && !callerSignal) {
     return { signal: undefined, cleanup: () => {}, timedOut: () => false };
@@ -860,7 +870,9 @@ function composeAbort(
     if (callerSignal.aborted) {
       controller.abort();
     } else {
-      callerSignal.addEventListener("abort", () => controller.abort(), { once: true });
+      callerSignal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
     }
   }
 
@@ -931,13 +943,24 @@ async function request<T>(
     });
   }
 
-  const { signal, cleanup, timedOut } = composeAbort(timeoutMs, options?.signal);
+  const { signal, cleanup, timedOut } = composeAbort(
+    timeoutMs,
+    options?.signal,
+  );
 
   const headers: Record<string, string> = { accept: "application/json" };
-  let body: string | undefined;
+  let body: string | FormData | undefined;
   if (options?.body !== undefined) {
-    headers["content-type"] = "application/json";
-    body = JSON.stringify(options.body);
+    if (options.body instanceof FormData) {
+      // Multipart upload: leave `content-type` unset so fetch generates the
+      // header itself, including the boundary. Manually setting it here
+      // would emit a header without a boundary parameter and the server
+      // would reject the request as malformed.
+      body = options.body;
+    } else {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify(options.body);
+    }
   }
   if (options?.headers) {
     for (const [key, value] of Object.entries(options.headers)) {
@@ -1038,7 +1061,10 @@ async function request<T>(
 // ----------------------------------------------------------------------------
 
 export interface StorefrontProductsApi {
-  list(query?: ListProductsQuery, options?: RequestOptions): Promise<Paginated<Product>>;
+  list(
+    query?: ListProductsQuery,
+    options?: RequestOptions,
+  ): Promise<Paginated<Product>>;
   /**
    * `opts` is a unified bag — it carries both the optional translation
    * `locale` and the standard `RequestOptions` (timeout, signal). One
@@ -1053,9 +1079,18 @@ export interface StorefrontCategoriesApi {
 
 export interface StorefrontRegionsApi {
   provinsi(options?: RequestOptions): Promise<Province[]>;
-  kotaKabupaten(query: ListKotaKabupatenQuery, options?: RequestOptions): Promise<City[]>;
-  kecamatan(query: ListKecamatanQuery, options?: RequestOptions): Promise<District[]>;
-  kelurahan(query: ListKelurahanQuery, options?: RequestOptions): Promise<Subdistrict[]>;
+  kotaKabupaten(
+    query: ListKotaKabupatenQuery,
+    options?: RequestOptions,
+  ): Promise<City[]>;
+  kecamatan(
+    query: ListKecamatanQuery,
+    options?: RequestOptions,
+  ): Promise<District[]>;
+  kelurahan(
+    query: ListKelurahanQuery,
+    options?: RequestOptions,
+  ): Promise<Subdistrict[]>;
   postalCode(code: string, options?: RequestOptions): Promise<Subdistrict[]>;
 }
 
@@ -1131,10 +1166,7 @@ export interface StorefrontCustomerAddressesApi {
     options?: CustomerScopedOptions,
   ): Promise<CustomerAddress>;
   /** DELETE /storefront/v1/customer/me/addresses/{id} (soft-delete). */
-  remove(
-    addressId: string,
-    options?: CustomerScopedOptions,
-  ): Promise<void>;
+  remove(addressId: string, options?: CustomerScopedOptions): Promise<void>;
   /** PUT /storefront/v1/customer/me/addresses/{id}/default — set as default for kind. */
   setDefault(
     addressId: string,
@@ -1336,6 +1368,18 @@ export interface AdminProductsApi {
   ): Promise<Product>;
   /** Soft-delete a product. The row stays in the database with `deletedAt` set. */
   delete(id: string, options?: RequestOptions): Promise<void>;
+  /**
+   * Upload a JPEG/PNG/WebP image as the product's hero. Sends the file as
+   * multipart/form-data under field `file`; the API validates the magic
+   * bytes against the declared MIME type, writes to disk under
+   * `${UPLOAD_DIR}/<sha256-prefix>.<ext>`, and patches `imageUrl` on the
+   * product. Returns the updated product.
+   */
+  uploadImage(
+    productId: string,
+    file: Blob,
+    options?: RequestOptions,
+  ): Promise<Product>;
   /** Add a variant under an existing product. */
   createVariant(
     productId: string,
@@ -1354,7 +1398,10 @@ export interface AdminProductsApi {
 
 export interface AdminCategoriesApi {
   list(options?: RequestOptions): Promise<Category[]>;
-  create(input: CreateCategoryInput, options?: RequestOptions): Promise<Category>;
+  create(
+    input: CreateCategoryInput,
+    options?: RequestOptions,
+  ): Promise<Category>;
   update(
     id: string,
     patch: UpdateCategoryInput,
@@ -1419,10 +1466,7 @@ export interface AdminOrdersApi {
     query?: AdminListOrdersQuery,
     options?: RequestOptions,
   ): Promise<Paginated<Order>>;
-  byId(
-    id: string,
-    options?: RequestOptions & LocaleQuery,
-  ): Promise<Order>;
+  byId(id: string, options?: RequestOptions & LocaleQuery): Promise<Order>;
   byNumber(
     orderNumber: string,
     options?: RequestOptions & LocaleQuery,
@@ -1493,10 +1537,7 @@ export interface AdminPaymentsApi {
     options?: RequestOptions,
   ): Promise<Paginated<Payment>>;
   /** GET /admin/v1/payments/:id — payment row + attempt history. */
-  byId(
-    id: string,
-    options?: RequestOptions,
-  ): Promise<PaymentWithAttempts>;
+  byId(id: string, options?: RequestOptions): Promise<PaymentWithAttempts>;
   /**
    * POST /admin/v1/payments/:id/capture. Sends `Idempotency-Key`.
    * Capture-on-initiate providers do not need this — it exists for
@@ -1628,8 +1669,7 @@ export interface MtCommerceClient {
 
 export function createClient(options: ClientOptions): MtCommerceClient {
   const fetchImpl: FetchLike =
-    options.fetch ??
-    ((input, init) => globalThis.fetch(input, init));
+    options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const ctx: RequestContext = {
     fetchImpl,
     baseUrl: trimTrailingSlash(options.baseUrl),
@@ -1923,7 +1963,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
       profile: {
         async get(options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const wire = await request<WireCustomer>(
             customerCtx,
             "/storefront/v1/customer/me",
@@ -1936,7 +1978,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         },
         async update(patch, options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const wire = await request<WireCustomer>(
             customerCtx,
             "/storefront/v1/customer/me",
@@ -1959,7 +2003,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
       addresses: {
         async list(options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const wire = await request<WireListEnvelope<WireCustomerAddress>>(
             customerCtx,
             "/storefront/v1/customer/me/addresses",
@@ -1972,7 +2018,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         },
         async create(input, options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const wire = await request<WireCustomerAddress>(
             customerCtx,
             "/storefront/v1/customer/me/addresses",
@@ -2001,7 +2049,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         },
         async update(addressId, patch, options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const wire = await request<WireCustomerAddress>(
             customerCtx,
             `/storefront/v1/customer/me/addresses/${encodeURIComponent(addressId)}`,
@@ -2030,7 +2080,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         },
         async remove(addressId, options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           await request<unknown>(
             customerCtx,
             `/storefront/v1/customer/me/addresses/${encodeURIComponent(addressId)}`,
@@ -2043,7 +2095,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         },
         async setDefault(addressId, input, options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const wire = await request<WireCustomerAddress>(
             customerCtx,
             `/storefront/v1/customer/me/addresses/${encodeURIComponent(addressId)}/default`,
@@ -2060,7 +2114,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
       orders: {
         async list(query, options) {
           const { customerId, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const qs = buildQuery({
             page: query?.page,
             pageSize: query?.pageSize,
@@ -2083,7 +2139,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         },
         async byNumber(orderNumber, options) {
           const { customerId, locale, ...requestOptions } = options ?? {};
-          const headers = customerId ? { "x-customer-id": customerId } : undefined;
+          const headers = customerId
+            ? { "x-customer-id": customerId }
+            : undefined;
           const qs = buildQuery({ locale: resolveLocale(customerCtx, locale) });
           const wire = await request<WireOrder>(
             customerCtx,
@@ -2100,7 +2158,9 @@ export function createClient(options: ClientOptions): MtCommerceClient {
       // New code should call `addresses.list(...)` directly.
       async myAddresses(options) {
         const { customerId, ...requestOptions } = options ?? {};
-        const headers = customerId ? { "x-customer-id": customerId } : undefined;
+        const headers = customerId
+          ? { "x-customer-id": customerId }
+          : undefined;
         const wire = await request<WireListEnvelope<WireCustomerAddress>>(
           customerCtx,
           "/storefront/v1/customer/me/addresses",
@@ -2123,7 +2183,11 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         await request<unknown>(customerCtx, "/api/auth/sign-up/email", {
           ...(requestOptions ?? {}),
           method: "POST",
-          body: { email: input.email, password: input.password, name: input.name },
+          body: {
+            email: input.email,
+            password: input.password,
+            name: input.name,
+          },
         });
         const wire = await request<WireStorefrontMeResponse>(
           customerCtx,
@@ -2358,19 +2422,23 @@ export function createClient(options: ClientOptions): MtCommerceClient {
         return toProduct(wire);
       },
       async create(input, requestOptions) {
-        const wire = await request<WireProduct>(adminCtx, "/admin/v1/products", {
-          ...(requestOptions ?? {}),
-          method: "POST",
-          body: omitUndefined({
-            slug: input.slug,
-            translations: input.translations,
-            status: input.status,
-            defaultCurrency: input.defaultCurrency,
-            imageUrl: input.imageUrl,
-            imageAlt: input.imageAlt,
-            categoryIds: input.categoryIds,
-          }),
-        });
+        const wire = await request<WireProduct>(
+          adminCtx,
+          "/admin/v1/products",
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: omitUndefined({
+              slug: input.slug,
+              translations: input.translations,
+              status: input.status,
+              defaultCurrency: input.defaultCurrency,
+              imageUrl: input.imageUrl,
+              imageAlt: input.imageAlt,
+              categoryIds: input.categoryIds,
+            }),
+          },
+        );
         return toProduct(wire);
       },
       async update(id, patch, requestOptions) {
@@ -2399,6 +2467,20 @@ export function createClient(options: ClientOptions): MtCommerceClient {
           `/admin/v1/products/${encodeURIComponent(id)}`,
           { ...(requestOptions ?? {}), method: "DELETE" },
         );
+      },
+      async uploadImage(productId, file, requestOptions) {
+        const form = new FormData();
+        form.append("file", file);
+        const wire = await request<WireProduct>(
+          adminCtx,
+          `/admin/v1/products/${encodeURIComponent(productId)}/image`,
+          {
+            ...(requestOptions ?? {}),
+            method: "POST",
+            body: form,
+          },
+        );
+        return toProduct(wire);
       },
       async createVariant(productId, input, requestOptions) {
         const wire = await request<WireVariant>(
@@ -2964,7 +3046,8 @@ export function createClient(options: ClientOptions): MtCommerceClient {
               defaultLocale: patch.defaultLocale,
               defaultTaxRateId: patch.defaultTaxRateId,
               shippingOriginProvinsiId: patch.shippingOriginProvinsiId,
-              shippingOriginKotaKabupatenId: patch.shippingOriginKotaKabupatenId,
+              shippingOriginKotaKabupatenId:
+                patch.shippingOriginKotaKabupatenId,
               shippingOriginKecamatanId: patch.shippingOriginKecamatanId,
               shippingOriginKelurahanId: patch.shippingOriginKelurahanId,
               shippingOriginPostalCode: patch.shippingOriginPostalCode,

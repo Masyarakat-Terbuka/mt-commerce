@@ -78,6 +78,16 @@ services:
       BITESHIP_API_KEY: ${BITESHIP_API_KEY:-}
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      # Image uploads — see apps/api/src/modules/catalog/uploads.ts.
+      API_PUBLIC_URL: https://api.${DOMAIN}
+      UPLOAD_DIR: /var/lib/mt-commerce/uploads
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
+    volumes:
+      # Persist uploaded product images outside the container so they
+      # survive image rebuilds. The named volume is portable across
+      # docker contexts; mount a host path here if you back up via the
+      # filesystem rather than the docker volume driver.
+      - api-uploads:/var/lib/mt-commerce/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -139,6 +149,8 @@ volumes:
     name: mt-commerce-caddy-data
   caddy-config:
     name: mt-commerce-caddy-config
+  api-uploads:
+    name: mt-commerce-api-uploads
 
 networks:
   mt-commerce:

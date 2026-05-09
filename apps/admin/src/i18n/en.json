@@ -87,6 +87,13 @@
   "editor.field.status": "Status",
   "editor.field.imageUrl": "Image URL",
   "editor.field.imageAlt": "Image alt text",
+  "editor.field.imageUpload": "Upload image",
+  "editor.field.imageUpload_help": "JPEG, PNG, or WebP. Up to 5 MiB.",
+  "editor.field.imageUpload_unavailable": "Save the product first to enable uploads.",
+  "editor.field.imageUpload_choose": "Choose file",
+  "editor.field.imageUpload_replace": "Replace image",
+  "editor.field.imageUpload_uploading": "Uploading…",
+  "editor.field.imageUpload_failed": "Upload failed. Try again.",
 
   "editor.variant.title": "Variants",
   "editor.variant.empty": "Add at least one variant before saving.",

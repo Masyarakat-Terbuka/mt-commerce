@@ -83,12 +83,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError, type Product, type ProductStatus } from "@/lib/api";
 import { useTranslator } from "@/lib/i18n";
@@ -164,47 +159,40 @@ function buildSchema() {
     priceCurrency: z.enum(CURRENCY_OPTIONS),
     compareAtAmount: z
       .string()
-      .refine(
-        (value) => value === "" || integerRegex.test(value),
-        { message: "editor.error.price_format" },
-      ),
+      .refine((value) => value === "" || integerRegex.test(value), {
+        message: "editor.error.price_format",
+      }),
   });
 
-  return z
-    .object({
-      slug: z
-        .string()
-        .min(1, { message: "editor.error.required" })
-        .max(100)
-        .regex(slugRegex, { message: "editor.error.slug_format" }),
-      defaultCurrency: z.enum(CURRENCY_OPTIONS),
-      status: z.enum(STATUS_OPTIONS),
-      imageUrl: z
-        .string()
-        .refine(
-          (value) => {
-            if (value === "") return true;
-            try {
-              const u = new URL(value);
-              return u.protocol === "http:" || u.protocol === "https:";
-            } catch {
-              return false;
-            }
-          },
-          { message: "editor.error.url" },
-        ),
-      imageAlt: z.string().max(500),
-      titleId: z
-        .string()
-        .min(1, { message: "editor.error.required" })
-        .max(200),
-      descriptionId: z.string().max(10_000),
-      titleEn: z.string().max(200),
-      descriptionEn: z.string().max(10_000),
-      variants: z
-        .array(variantSchema)
-        .min(1, { message: "editor.error.variant_required" }),
-    });
+  return z.object({
+    slug: z
+      .string()
+      .min(1, { message: "editor.error.required" })
+      .max(100)
+      .regex(slugRegex, { message: "editor.error.slug_format" }),
+    defaultCurrency: z.enum(CURRENCY_OPTIONS),
+    status: z.enum(STATUS_OPTIONS),
+    imageUrl: z.string().refine(
+      (value) => {
+        if (value === "") return true;
+        try {
+          const u = new URL(value);
+          return u.protocol === "http:" || u.protocol === "https:";
+        } catch {
+          return false;
+        }
+      },
+      { message: "editor.error.url" },
+    ),
+    imageAlt: z.string().max(500),
+    titleId: z.string().min(1, { message: "editor.error.required" }).max(200),
+    descriptionId: z.string().max(10_000),
+    titleEn: z.string().max(200),
+    descriptionEn: z.string().max(10_000),
+    variants: z
+      .array(variantSchema)
+      .min(1, { message: "editor.error.variant_required" }),
+  });
 }
 
 const formSchema = buildSchema();
@@ -285,8 +273,7 @@ function formFromProduct(product: Product): EditorFormState {
               titleEn: "",
               priceAmount: v.price.amount.toString(),
               priceCurrency: currency,
-              compareAtAmount:
-                v.compareAtPrice?.amount.toString() ?? "",
+              compareAtAmount: v.compareAtPrice?.amount.toString() ?? "",
             };
           })
         : [emptyVariant(defaultCurrency)],
@@ -316,6 +303,12 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
   const [errors, setErrors] = React.useState<FieldErrors>({});
   const [serverError, setServerError] = React.useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  // Image-upload state. The hidden `<input type="file">` is triggered by a
+  // button below the URL field; on selection we POST to the upload endpoint
+  // and replace the URL with the absolute path the API returns. Disabled
+  // in `create` mode because the route requires an existing product id.
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = React.useState(false);
 
   // Stable updaters keep child callbacks from re-binding every render.
   const updateField = React.useCallback(
@@ -678,6 +671,72 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
               </Field>
             </div>
 
+            <Field>
+              <FieldLabel>{t("editor.field.imageUpload")}</FieldLabel>
+              <div className="flex items-center gap-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    // Always reset the input so picking the same file twice
+                    // re-triggers `change`. Done before the await so React
+                    // doesn't lose the reference if the component re-renders.
+                    e.target.value = "";
+                    if (!file || !productId) return;
+                    setUploading(true);
+                    setServerError(null);
+                    try {
+                      const updated = await api.admin.products.uploadImage(
+                        productId,
+                        file,
+                      );
+                      updateField("imageUrl", updated.imageUrl ?? "");
+                      toast.success(t("editor.field.imageUpload"));
+                    } catch (err) {
+                      setServerError(
+                        err instanceof Error
+                          ? err.message
+                          : t("editor.field.imageUpload_failed"),
+                      );
+                    } finally {
+                      setUploading(false);
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={submitting || uploading || mode === "create"}
+                >
+                  {uploading
+                    ? t("editor.field.imageUpload_uploading")
+                    : form.imageUrl
+                      ? t("editor.field.imageUpload_replace")
+                      : t("editor.field.imageUpload_choose")}
+                </Button>
+                {form.imageUrl ? (
+                  // Small thumbnail preview so the operator can confirm the
+                  // upload landed. The product detail page on the storefront
+                  // is the canonical render; this is a quick at-a-glance.
+                  <img
+                    src={form.imageUrl}
+                    alt=""
+                    className="size-12 rounded border border-border object-cover"
+                  />
+                ) : null}
+              </div>
+              <FieldDescription>
+                {mode === "create"
+                  ? t("editor.field.imageUpload_unavailable")
+                  : t("editor.field.imageUpload_help")}
+              </FieldDescription>
+            </Field>
+
             <Field data-invalid={errors["imageUrl"] ? true : undefined}>
               <FieldLabel htmlFor="editor-image-url">
                 {t("editor.field.imageUrl")}
@@ -850,9 +909,7 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
                         onChange={(e) =>
                           updateVariant(index, { sku: e.target.value })
                         }
-                        aria-invalid={
-                          errors[skuKey] ? true : undefined
-                        }
+                        aria-invalid={errors[skuKey] ? true : undefined}
                         disabled={submitting}
                         autoComplete="off"
                         spellCheck={false}
@@ -873,7 +930,9 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
                       </TabsList>
                       <TabsContent value="id" className="mt-3">
                         <Field>
-                          <FieldLabel htmlFor={`editor-variant-title-id-${index}`}>
+                          <FieldLabel
+                            htmlFor={`editor-variant-title-id-${index}`}
+                          >
                             {t("editor.variant.title_field")}
                           </FieldLabel>
                           <Input
@@ -888,7 +947,9 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
                       </TabsContent>
                       <TabsContent value="en" className="mt-3">
                         <Field>
-                          <FieldLabel htmlFor={`editor-variant-title-en-${index}`}>
+                          <FieldLabel
+                            htmlFor={`editor-variant-title-en-${index}`}
+                          >
                             {t("editor.variant.title_field")}
                           </FieldLabel>
                           <Input
@@ -904,9 +965,7 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
                     </Tabs>
 
                     <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                      <Field
-                        data-invalid={errors[priceKey] ? true : undefined}
-                      >
+                      <Field data-invalid={errors[priceKey] ? true : undefined}>
                         <FieldLabel htmlFor={`editor-variant-price-${index}`}>
                           {t("editor.variant.price")}
                         </FieldLabel>
@@ -918,9 +977,7 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
                               priceAmount: e.target.value.replace(/\D+/g, ""),
                             })
                           }
-                          aria-invalid={
-                            errors[priceKey] ? true : undefined
-                          }
+                          aria-invalid={errors[priceKey] ? true : undefined}
                           inputMode="numeric"
                           disabled={submitting}
                           autoComplete="off"
@@ -964,9 +1021,7 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
                       </Field>
                     </div>
 
-                    <Field
-                      data-invalid={errors[compareKey] ? true : undefined}
-                    >
+                    <Field data-invalid={errors[compareKey] ? true : undefined}>
                       <FieldLabel htmlFor={`editor-variant-compare-${index}`}>
                         {t("editor.variant.compareAt")}
                       </FieldLabel>
@@ -978,9 +1033,7 @@ function Editor({ mode, productId, initialForm, pristine }: EditorProps) {
                             compareAtAmount: e.target.value.replace(/\D+/g, ""),
                           })
                         }
-                        aria-invalid={
-                          errors[compareKey] ? true : undefined
-                        }
+                        aria-invalid={errors[compareKey] ? true : undefined}
                         inputMode="numeric"
                         disabled={submitting}
                         autoComplete="off"

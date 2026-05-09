@@ -23,13 +23,15 @@
  * standard `validation_error` envelope.
  */
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { NotFoundError } from "../../../lib/errors.js";
+import { NotFoundError, ValidationError } from "../../../lib/errors.js";
+import { env } from "../../../lib/env.js";
 import {
   defaultValidationHook,
   errorResponse,
 } from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import { getAuthedUser, requireAuth, requireRole } from "../../auth/index.js";
+import { storeProductImage } from "../uploads.js";
 import {
   toWireCategory,
   toWireInventoryAuditEntry,
@@ -333,7 +335,8 @@ export function buildCatalogAdminRoutes(
       path: "/categories",
       tags: [TAG],
       summary: "List categories",
-      description: "Flat list with `parentId`. Clients build a tree client-side.",
+      description:
+        "Flat list with `parentId`. Clients build a tree client-side.",
       responses: {
         200: {
           content: { "application/json": { schema: CategoryListEnvelope } },
@@ -346,7 +349,10 @@ export function buildCatalogAdminRoutes(
     async (c) => {
       const locale = localeFromRequest(c);
       const categories = await service.listCategories(locale);
-      return c.json({ data: categories.map((cat) => toWireCategory(cat)) }, 200);
+      return c.json(
+        { data: categories.map((cat) => toWireCategory(cat)) },
+        200,
+      );
     },
   );
 
@@ -553,6 +559,95 @@ export function buildCatalogAdminRoutes(
 
   router.openapi(
     createRoute({
+      method: "post",
+      path: "/products/{id}/image",
+      tags: [TAG],
+      summary: "Upload a product hero image",
+      description:
+        "Multipart upload of a JPEG/PNG/WebP image (max 5 MiB by default; controlled by `MAX_UPLOAD_BYTES`). The form must include a single field `file` containing the image bytes. The API validates the magic bytes against the declared MIME type, writes the file to `${UPLOAD_DIR}/<sha256-prefix>.<ext>`, and updates the product's `imageUrl` to the public URL of the stored file. Identical bytes deduplicate to the same filename.",
+      request: {
+        params: IdParam,
+        body: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              // Body is hand-parsed in the handler — zod-openapi cannot
+              // validate `File` instances reliably across runtimes, so we
+              // declare the OpenAPI shape here and trust the handler's
+              // checks (magic bytes, size, MIME) to fail loudly.
+              schema: z.object({
+                file: z.any().openapi({ type: "string", format: "binary" }),
+              }),
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          content: { "application/json": { schema: ProductWire } },
+          description: "Updated product, with the new `imageUrl`.",
+        },
+        400: errorResponse("Validation failed (missing/invalid file)."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden — staff role required."),
+        404: errorResponse("Product not found."),
+        413: errorResponse("Payload too large."),
+      },
+    }),
+    async (c) => {
+      const productId = c.req.param("id");
+      // Confirm the product exists before we accept the upload — saves
+      // writing a file that nothing references if the id is bogus.
+      const existing = await service.getProductById(productId);
+      if (!existing) {
+        throw new NotFoundError("Product not found.", { productId });
+      }
+
+      const formData = await c.req.formData();
+      const file = formData.get("file");
+      if (!(file instanceof File)) {
+        throw new ValidationError(
+          "Multipart field 'file' is required and must be a file.",
+          {},
+        );
+      }
+
+      // Refuse oversize before reading bytes. The multipart parser already
+      // surfaces `file.size` from the Content-Length on the part.
+      if (file.size > env.maxUploadBytes) {
+        return c.json(
+          {
+            error: {
+              code: "payload_too_large",
+              message: `Uploaded file is ${String(file.size)} bytes; the limit is ${String(env.maxUploadBytes)}.`,
+              details: { size: file.size, limit: env.maxUploadBytes },
+            },
+          },
+          413,
+        );
+      }
+
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const stored = await storeProductImage(
+        { bytes, contentType: file.type },
+        {
+          uploadDir: env.uploadDir,
+          apiPublicUrl: env.apiPublicUrl,
+          maxBytes: env.maxUploadBytes,
+        },
+      );
+
+      const updated = await service.updateProduct(
+        productId,
+        { imageUrl: stored.url },
+        localeFromRequest(c),
+      );
+      return c.json(toWireProduct(updated), 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
       method: "get",
       path: "/variants/{id}/inventory/audit",
       tags: [TAG],
@@ -579,10 +674,7 @@ export function buildCatalogAdminRoutes(
     }),
     async (c) => {
       const query = c.req.valid("query");
-      const result = await service.listInventoryAudit(
-        c.req.param("id"),
-        query,
-      );
+      const result = await service.listInventoryAudit(c.req.param("id"), query);
       return c.json(
         {
           data: result.data.map((event) => toWireInventoryAuditEntry(event)),

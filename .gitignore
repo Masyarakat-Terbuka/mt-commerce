@@ -55,5 +55,9 @@ Thumbs.db
 postgres-data/
 redis-data/
 
+# Local upload directory used by the API in development. Production
+# deployments mount a docker volume at the path configured by UPLOAD_DIR.
+apps/api/uploads/
+
 # Claude Code agent worktrees (transient, per-machine)
 .claude/

@@ -66,12 +66,10 @@ const baseSchema = z.object({
   // sufficient entropy). In `test` we provide a fixed dummy via vitest config.
   BETTER_AUTH_SECRET: isTestRun
     ? z.string().default("test-secret-test-secret-test-secret-test")
-    : z
-        .string()
-        .min(32, {
-          message:
-            "BETTER_AUTH_SECRET must be at least 32 characters. Generate one with `openssl rand -base64 32`.",
-        }),
+    : z.string().min(32, {
+        message:
+          "BETTER_AUTH_SECRET must be at least 32 characters. Generate one with `openssl rand -base64 32`.",
+      }),
   /**
    * Optional. Better Auth uses this to construct callback URLs and verify
    * origin headers. Leave unset in dev — env.ts derives a sensible default
@@ -160,6 +158,51 @@ const baseSchema = z.object({
    * by setting this to `smtp` along with the SMTP_* variables above.
    */
   NOTIFICATION_DEFAULT_CHANNEL: z.enum(["console", "smtp"]).optional(),
+  // ---- Uploads ------------------------------------------------------------
+  /**
+   * Local-disk directory for product image uploads. Resolved relative to
+   * `apps/api/` when the API is started from there (the typical case);
+   * absolute paths are honored as-is. The runner creates the directory on
+   * boot if it does not exist.
+   *
+   * In a containerised deploy this should be a host-mounted volume so
+   * uploads survive image rebuilds. The bundled `docker-compose.prod.yml`
+   * mounts a named volume.
+   */
+  UPLOAD_DIR: z.string().min(1).default("./uploads"),
+  /**
+   * Public origin of this API. Used to build absolute URLs for uploaded
+   * images so the storefront can render them without a path-resolve
+   * helper. Defaults to `http://localhost:${PORT}` in dev; production
+   * deployments MUST set this to the public URL of the API (e.g.
+   * `https://api.mystore.example.com`) — Caddy + the prod compose pair
+   * already terminate TLS at that subdomain.
+   */
+  API_PUBLIC_URL: z
+    .string()
+    .url({ message: "API_PUBLIC_URL must be a valid URL." })
+    .optional(),
+  /**
+   * Maximum upload size in bytes for product images. Default 5 MiB —
+   * generous for a JPEG/PNG/WebP under normal compression but not so
+   * large that one upload exhausts the API's request memory. The
+   * notification surface mirrors the limit in the route's 413 response.
+   */
+  MAX_UPLOAD_BYTES: z
+    .union([z.number(), z.string()])
+    .transform((value) =>
+      typeof value === "number" ? value : Number.parseInt(value, 10),
+    )
+    .pipe(
+      z
+        .number()
+        .int({ message: "MAX_UPLOAD_BYTES must be an integer." })
+        .min(1024, { message: "MAX_UPLOAD_BYTES must be >= 1024 (1 KiB)." })
+        .max(50 * 1024 * 1024, {
+          message: "MAX_UPLOAD_BYTES must be <= 50 MiB.",
+        }),
+    )
+    .default(5 * 1024 * 1024),
 });
 
 const envSchema = baseSchema.extend({
@@ -245,6 +288,19 @@ export const env = {
    */
   notificationDefaultChannel:
     data.NOTIFICATION_DEFAULT_CHANNEL ?? (isProd ? "smtp" : "console"),
+  /**
+   * Directory product image uploads are written to. Absolute paths are
+   * honored; relative paths resolve from the API's working directory.
+   */
+  uploadDir: data.UPLOAD_DIR,
+  /**
+   * Public origin used to construct absolute URLs for uploaded images.
+   * Falls back to `http://localhost:${PORT}` when unset, which is correct
+   * for local development; production deployments are expected to pin
+   * this to their api subdomain.
+   */
+  apiPublicUrl: data.API_PUBLIC_URL ?? `http://localhost:${String(data.PORT)}`,
+  maxUploadBytes: data.MAX_UPLOAD_BYTES,
 } as const;
 
 export type Env = typeof env;
