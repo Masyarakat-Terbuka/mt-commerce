@@ -18,6 +18,7 @@
  *   - The typed event bus (`events`) and the event payload map. Future
  *     modules (notifications) emit/listen via this bus.
  */
+import { customerService } from "../customer/index.js";
 import { buildOrdersAdminRoutes } from "./routes/admin.js";
 import { buildOrdersStorefrontRoutes } from "./routes/storefront.js";
 import { orderService } from "./service.js";
@@ -59,4 +60,7 @@ export { orderService };
 export { buildOrdersAdminRoutes, buildOrdersStorefrontRoutes };
 
 export const adminRoutes = buildOrdersAdminRoutes(orderService);
-export const storefrontRoutes = buildOrdersStorefrontRoutes(orderService);
+export const storefrontRoutes = buildOrdersStorefrontRoutes(
+  orderService,
+  customerService,
+);

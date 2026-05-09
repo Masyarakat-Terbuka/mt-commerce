@@ -5,12 +5,12 @@
  *
  * Auth — TWO categories:
  *
- *   1. `/customer/me/*` requires an authenticated customer.
- *      TODO requireAuth(): the auth module will populate `c.var.authUser`,
- *      from which we will resolve the customer via `getCustomerByAuthUserId`.
- *      Until that lands, these routes accept a stand-in `x-customer-id`
- *      header (development-only). Production builds MUST replace this with
- *      the auth-derived resolution.
+ *   1. `/customer/me/*` requires an authenticated customer. The auth
+ *      middleware populates `c.var.authUser`; this module resolves the
+ *      domain `Customer` row via `getCustomerByAuthUserId`. A request whose
+ *      auth_user has no corresponding customer row gets a 404 with the
+ *      `customer_not_provisioned` code so the storefront can prompt the
+ *      buyer to complete their profile.
  *
  *   2. `/regions/*` is public (anyone building a checkout autofill needs
  *      these without an account). No auth gate now or later.
@@ -20,13 +20,15 @@
  * the same Zod schemas exported from `types.ts`; failures throw `ZodError`.
  */
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { NotFoundError, UnauthorizedError } from "../../../lib/errors.js";
+import { NotFoundError } from "../../../lib/errors.js";
 import {
   defaultValidationHook,
   errorResponse,
 } from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
 import type { Context } from "hono";
+import { getAuthedUser, requireAuth } from "../../auth/index.js";
+import type { Customer } from "../types.js";
 import type { CustomerService } from "../service.js";
 import {
   createAddressSchema,
@@ -59,25 +61,35 @@ const TAG = "customer (storefront)";
 
 const IdParam = z.object({ id: z.string().min(1) });
 const PostalCodeParam = z.object({
-  code: z.string().regex(/^\d{5}$/, "postal code must be a 5-digit numeric string."),
+  code: z
+    .string()
+    .regex(/^\d{5}$/, "postal code must be a 5-digit numeric string."),
 });
 
 /**
- * TEMPORARY: resolve the current customer from the `x-customer-id` request
- * header. Replaced by `c.var.authUser`-driven lookup once the auth module is
- * wired. Throws 401 when the header is missing so the contract matches the
- * eventual auth-gated behavior.
+ * Resolve the `Customer` row for the authenticated request. Assumes
+ * `requireAuth()` has already run (so `c.var.authUser` is populated).
+ *
+ * A signed-in `auth_user` without a matching `customers.auth_user_id`
+ * row is a v0.1 edge case: a Better Auth account can exist before the
+ * customer profile is provisioned (sign-up flow that hasn't completed,
+ * a staff user trying to use the storefront). We surface a 404 with a
+ * stable code so the storefront can render a "complete your profile"
+ * prompt rather than a generic error.
  */
-async function resolveCurrentCustomerId(
+async function resolveCurrentCustomer(
   c: Context<AppBindings>,
-): Promise<string> {
-  const headerId = c.req.header("x-customer-id");
-  if (!headerId) {
-    throw new UnauthorizedError(
-      "Missing customer context. (Stand-in `x-customer-id` header expected until auth lands.)",
-    );
+  service: CustomerService,
+): Promise<Customer> {
+  const user = getAuthedUser(c);
+  const customer = await service.getCustomerByAuthUserId(user.id);
+  if (!customer) {
+    throw new NotFoundError("Customer profile not found.", {
+      code: "customer_not_provisioned",
+      authUserId: user.id,
+    });
   }
-  return headerId;
+  return customer;
 }
 
 export function buildCustomerStorefrontRoutes(
@@ -88,8 +100,11 @@ export function buildCustomerStorefrontRoutes(
   });
 
   // -------------------------------------------------------------------
-  // /customer/me — TODO requireAuth()
+  // /customer/me — requires an authenticated customer
   // -------------------------------------------------------------------
+
+  router.use("/customer/me", requireAuth());
+  router.use("/customer/me/*", requireAuth());
 
   router.openapi(
     createRoute({
@@ -98,20 +113,18 @@ export function buildCustomerStorefrontRoutes(
       tags: [TAG],
       summary: "Get the current customer",
       description:
-        "Returns the authenticated customer's profile. Until customer-auth lands the resolver reads the `x-customer-id` header.",
+        "Returns the authenticated customer's profile. The customer is resolved from the session cookie's auth_user via `customers.auth_user_id`.",
       responses: {
         200: {
           content: { "application/json": { schema: CustomerWire } },
           description: "Customer.",
         },
         401: errorResponse("Authentication required."),
-        404: errorResponse("Customer not found."),
+        404: errorResponse("Customer profile not provisioned for this user."),
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
-      const customer = await service.getCustomerById(customerId);
-      if (!customer) throw new NotFoundError("Customer not found.");
+      const customer = await resolveCurrentCustomer(c, service);
       return c.json(toWireCustomer(customer), 200);
     },
   );
@@ -138,9 +151,9 @@ export function buildCustomerStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
+      const current = await resolveCurrentCustomer(c, service);
       const patch = c.req.valid("json");
-      const customer = await service.updateCustomer(customerId, patch);
+      const customer = await service.updateCustomer(current.id, patch);
       return c.json(toWireCustomer(customer), 200);
     },
   );
@@ -160,8 +173,8 @@ export function buildCustomerStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
-      const addresses = await service.listAddresses(customerId);
+      const current = await resolveCurrentCustomer(c, service);
+      const addresses = await service.listAddresses(current.id);
       return c.json({ data: addresses.map((a) => toWireAddress(a)) }, 200);
     },
   );
@@ -187,9 +200,9 @@ export function buildCustomerStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
+      const current = await resolveCurrentCustomer(c, service);
       const input = c.req.valid("json");
-      const address = await service.createAddress(customerId, input);
+      const address = await service.createAddress(current.id, input);
       return c.json(toWireAddress(address), 201);
     },
   );
@@ -217,10 +230,10 @@ export function buildCustomerStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
+      const current = await resolveCurrentCustomer(c, service);
       const addressId = c.req.param("id");
       const patch = c.req.valid("json");
-      const address = await service.updateAddress(addressId, customerId, patch);
+      const address = await service.updateAddress(addressId, current.id, patch);
       return c.json(toWireAddress(address), 200);
     },
   );
@@ -239,9 +252,9 @@ export function buildCustomerStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
+      const current = await resolveCurrentCustomer(c, service);
       const addressId = c.req.param("id");
-      await service.deleteAddress(addressId, customerId);
+      await service.deleteAddress(addressId, current.id);
       return c.body(null, 204);
     },
   );
@@ -271,11 +284,11 @@ export function buildCustomerStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
+      const current = await resolveCurrentCustomer(c, service);
       const addressId = c.req.param("id");
       const { kind } = c.req.valid("json");
       const address = await service.setDefaultAddress(
-        customerId,
+        current.id,
         addressId,
         kind,
       );

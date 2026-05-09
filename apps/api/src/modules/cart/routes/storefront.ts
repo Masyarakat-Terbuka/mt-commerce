@@ -11,11 +11,9 @@
  *      When auth lands, an authenticated cart will additionally be
  *      ownership-checked against `c.var.authUser`-derived customer id.
  *
- *   2. `/customer/me/cart` — requires an authenticated customer.
- *      TODO requireAuth(): the auth module will populate `c.var.authUser`,
- *      from which we will resolve the customer via `getCustomerByAuthUserId`.
- *      Until that lands, these routes accept a stand-in `x-customer-id`
- *      header (development-only).
+ *   2. `/customer/me/cart` — requires an authenticated customer. The auth
+ *      middleware populates `c.var.authUser`; the cart router resolves the
+ *      domain customer via `customerService.getCustomerByAuthUserId`.
  *
  * OpenAPI: each route is declared via `createRoute`/`router.openapi(...)`.
  * Bodies are validated with the Zod schemas exported from `types.ts`;
@@ -23,12 +21,14 @@
  */
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
-import { NotFoundError, UnauthorizedError } from "../../../lib/errors.js";
+import { NotFoundError } from "../../../lib/errors.js";
 import {
   defaultValidationHook,
   errorResponse,
 } from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
+import { getAuthedUser, requireAuth } from "../../auth/index.js";
+import type { CustomerService } from "../../customer/index.js";
 import type { Cart } from "../types.js";
 import type { CartService, GetTotalsOptions } from "../service.js";
 import {
@@ -67,24 +67,32 @@ const IdItemParam = z.object({
 });
 
 /**
- * TEMPORARY: resolve the current customer id from the `x-customer-id`
- * request header. Replaced by `c.var.authUser`-driven lookup once auth
- * lands. Same pattern as the customer storefront router.
+ * Resolve the customer id for an authenticated `/customer/me/cart` request.
+ * Assumes `requireAuth()` has already populated `c.var.authUser`.
+ *
+ * A signed-in `auth_user` without a corresponding `customers` row gets a
+ * 404 with the same `customer_not_provisioned` code the customer module
+ * uses, so the storefront can render a "complete your profile" prompt
+ * instead of a generic error.
  */
 async function resolveCurrentCustomerId(
   c: Context<AppBindings>,
+  customers: CustomerService,
 ): Promise<string> {
-  const headerId = c.req.header("x-customer-id");
-  if (!headerId) {
-    throw new UnauthorizedError(
-      "Missing customer context. (Stand-in `x-customer-id` header expected until auth lands.)",
-    );
+  const user = getAuthedUser(c);
+  const customer = await customers.getCustomerByAuthUserId(user.id);
+  if (!customer) {
+    throw new NotFoundError("Customer profile not found.", {
+      code: "customer_not_provisioned",
+      authUserId: user.id,
+    });
   }
-  return headerId;
+  return customer.id;
 }
 
 export function buildCartStorefrontRoutes(
   service: CartService,
+  customers: CustomerService,
   resolveTaxRate: TaxRateResolver = noTaxResolver,
 ): OpenAPIHono<AppBindings> {
   const router = new OpenAPIHono<AppBindings>({
@@ -115,7 +123,8 @@ export function buildCartStorefrontRoutes(
       path: "/carts",
       tags: [TAG],
       summary: "Create a guest cart",
-      description: "Currency is locked at create-time and may not change later.",
+      description:
+        "Currency is locked at create-time and may not change later.",
       request: {
         body: { content: { "application/json": { schema: createCartSchema } } },
       },
@@ -265,8 +274,11 @@ export function buildCartStorefrontRoutes(
   );
 
   // -------------------------------------------------------------------
-  // /customer/me/cart — TODO requireAuth()
+  // /customer/me/cart — requires an authenticated customer
   // -------------------------------------------------------------------
+
+  router.use("/customer/me/cart", requireAuth());
+  router.use("/customer/me/cart/*", requireAuth());
 
   router.openapi(
     createRoute({
@@ -284,7 +296,7 @@ export function buildCartStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
+      const customerId = await resolveCurrentCustomerId(c, customers);
       const cart = await service.getActiveCartForCustomer(customerId);
       if (!cart) throw new NotFoundError("No active cart for this customer.");
       return c.json(toWireCart(cart, await totalsFor(cart)), 200);
@@ -326,7 +338,7 @@ export function buildCartStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = await resolveCurrentCustomerId(c);
+      const customerId = await resolveCurrentCustomerId(c, customers);
       const input = c.req.valid("json");
       const existing = await service.getActiveCartForCustomer(customerId);
       if (existing) {

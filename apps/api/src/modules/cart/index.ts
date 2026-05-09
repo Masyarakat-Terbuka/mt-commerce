@@ -13,6 +13,7 @@
  *   - Route builders (`buildCartAdminRoutes`, `buildCartStorefrontRoutes`)
  *     plus pre-built singletons (`adminRoutes`, `storefrontRoutes`).
  */
+import { customerService } from "../customer/index.js";
 import { taxService } from "../tax/index.js";
 import { buildCartAdminRoutes } from "./routes/admin.js";
 import {
@@ -61,5 +62,6 @@ export const adminRoutes = buildCartAdminRoutes(
 );
 export const storefrontRoutes = buildCartStorefrontRoutes(
   cartService,
+  customerService,
   defaultTaxRateResolver,
 );

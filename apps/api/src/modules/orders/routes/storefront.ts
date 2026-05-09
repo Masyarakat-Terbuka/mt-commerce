@@ -3,15 +3,13 @@
  *
  * Mounted at `/storefront/v1` from the top-level router.
  *
- * Auth model (v0.1, transitional):
- *   - Customer auth integration is still landing. Until then, the
- *     storefront identifies the caller via an `x-customer-id` header
- *     stand-in. This is INTENTIONALLY a header (not a cookie) so it is
- *     obvious in test traffic and in logs that the binding is provisional.
- *     A 401 is returned when the header is missing — never a 200 with
- *     someone else's orders. The future customer-auth middleware will
- *     replace the header read with a session lookup; the route shapes
- *     do not change.
+ * Auth model:
+ *   - Every `/customer/me/orders/*` route is gated by `requireAuth()`.
+ *     The auth middleware populates `c.var.authUser`; this router
+ *     resolves the domain customer via
+ *     `customerService.getCustomerByAuthUserId`. A signed-in auth_user
+ *     without a customer profile gets a 404 with the
+ *     `customer_not_provisioned` code.
  *
  *   - Cross-tenant safety: every read scopes by the resolved customer id.
  *     A customer cannot reach another customer's order even if they
@@ -19,12 +17,15 @@
  *     lookups verify ownership before returning.
  */
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { NotFoundError, UnauthorizedError } from "../../../lib/errors.js";
+import type { Context } from "hono";
+import { NotFoundError } from "../../../lib/errors.js";
 import {
   defaultValidationHook,
   errorResponse,
 } from "../../../lib/openapi-shared.js";
 import type { AppBindings } from "../../../lib/types.js";
+import { getAuthedUser, requireAuth } from "../../auth/index.js";
+import type { CustomerService } from "../../customer/index.js";
 import type { OrderService } from "../service.js";
 import { listMyOrdersQuerySchema } from "../types.js";
 import { parseLocale } from "../../catalog/i18n.js";
@@ -35,22 +36,34 @@ const TAG = "orders (storefront)";
 
 const OrderNumberParam = z.object({ orderNumber: z.string().min(1) });
 
-const CUSTOMER_HEADER = "x-customer-id";
-
-function requireCustomerId(c: {
-  req: { header: (k: string) => string | undefined };
-}): string {
-  const value = c.req.header(CUSTOMER_HEADER);
-  if (!value || value.trim().length === 0) {
-    throw new UnauthorizedError(
-      "Customer authentication is required for this endpoint.",
-    );
+/**
+ * Resolve the domain customer id for an authenticated `/customer/me`
+ * request. Assumes `requireAuth()` has populated `c.var.authUser`.
+ *
+ * Returns the customer id directly. A signed-in auth_user without a
+ * matching customer row triggers a 404 with the same
+ * `customer_not_provisioned` code the customer module uses.
+ */
+async function resolveCurrentCustomerId(
+  c: Context<AppBindings>,
+  customers: CustomerService,
+): Promise<string> {
+  const user = getAuthedUser(c);
+  const customer = await customers.getCustomerByAuthUserId(user.id);
+  if (!customer) {
+    throw new NotFoundError("Customer profile not found.", {
+      code: "customer_not_provisioned",
+      authUserId: user.id,
+    });
   }
-  return value.trim();
+  return customer.id;
 }
 
 function readLocale(c: {
-  req: { query: (k: string) => string | undefined; header: (k: string) => string | undefined };
+  req: {
+    query: (k: string) => string | undefined;
+    header: (k: string) => string | undefined;
+  };
 }): string {
   const fromQuery = c.req.query("locale");
   if (fromQuery) return parseLocale(fromQuery);
@@ -59,10 +72,14 @@ function readLocale(c: {
 
 export function buildOrdersStorefrontRoutes(
   service: OrderService,
+  customers: CustomerService,
 ): OpenAPIHono<AppBindings> {
   const router = new OpenAPIHono<AppBindings>({
     defaultHook: defaultValidationHook,
   });
+
+  router.use("/customer/me/orders", requireAuth());
+  router.use("/customer/me/orders/*", requireAuth());
 
   router.openapi(
     createRoute({
@@ -71,7 +88,7 @@ export function buildOrdersStorefrontRoutes(
       tags: [TAG],
       summary: "List my orders",
       description:
-        "Returns the current customer's orders, newest first. Identifies the caller via the `x-customer-id` header until customer-auth integration lands.",
+        "Returns the current customer's orders, newest first. Identifies the caller via the session cookie's auth_user (resolved via `customers.auth_user_id`).",
       request: { query: listMyOrdersQuerySchema },
       responses: {
         200: {
@@ -80,10 +97,11 @@ export function buildOrdersStorefrontRoutes(
         },
         400: errorResponse("Invalid query."),
         401: errorResponse("Customer authentication required."),
+        404: errorResponse("Customer profile not provisioned for this user."),
       },
     }),
     async (c) => {
-      const customerId = requireCustomerId(c);
+      const customerId = await resolveCurrentCustomerId(c, customers);
       const query = c.req.valid("query");
       const locale = readLocale(c);
       const result = await service.listCustomerOrders(customerId, query, {
@@ -120,12 +138,11 @@ export function buildOrdersStorefrontRoutes(
       },
     }),
     async (c) => {
-      const customerId = requireCustomerId(c);
+      const customerId = await resolveCurrentCustomerId(c, customers);
       const locale = readLocale(c);
-      const order = await service.getOrderByNumber(
-        c.req.param("orderNumber"),
-        { locale },
-      );
+      const order = await service.getOrderByNumber(c.req.param("orderNumber"), {
+        locale,
+      });
       // Refuse the read with 404 (not 403) when the order belongs to a
       // different customer — surfacing 403 would leak existence of
       // foreign-customer orders to a probing client.

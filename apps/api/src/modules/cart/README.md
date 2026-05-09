@@ -8,10 +8,10 @@ cross-module callers go through `cartService`.
 
 All under `apps/api/src/db/schema/`:
 
-| Table        | Purpose                                          | ID prefix |
-| ------------ | ------------------------------------------------ | --------- |
-| `carts`      | Cart header (currency lock, status, expiry)      | `cart_`   |
-| `cart_items` | Line items: `(cart, variant) → quantity, price`  | `ci_`     |
+| Table        | Purpose                                         | ID prefix |
+| ------------ | ----------------------------------------------- | --------- |
+| `carts`      | Cart header (currency lock, status, expiry)     | `cart_`   |
+| `cart_items` | Line items: `(cart, variant) → quantity, price` | `ci_`     |
 
 ### Currency lock
 
@@ -83,7 +83,7 @@ interface CartService {
 
   // Items
   addItem(cartId, { variantId, quantity }): Promise<Cart>;
-  updateItemQuantity(cartId, itemId, quantity): Promise<Cart>;  // 0 ⇒ remove
+  updateItemQuantity(cartId, itemId, quantity): Promise<Cart>; // 0 ⇒ remove
   removeItem(cartId, itemId): Promise<Cart>;
   clear(cartId): Promise<Cart>;
 
@@ -102,45 +102,46 @@ interface CartService {
 
 ### Admin (`/admin/v1`) — `requireRole("owner", "admin", "staff")`
 
-| Method | Path                       | Purpose                       |
-| ------ | -------------------------- | ----------------------------- |
-| GET    | `/carts`                   | List + filter + paginate      |
-| GET    | `/carts/:id`               | Detail (with totals)          |
-| POST   | `/carts/:id/abandon`       | Mark abandoned (override)     |
+| Method | Path                 | Purpose                   |
+| ------ | -------------------- | ------------------------- |
+| GET    | `/carts`             | List + filter + paginate  |
+| GET    | `/carts/:id`         | Detail (with totals)      |
+| POST   | `/carts/:id/abandon` | Mark abandoned (override) |
 
 ### Storefront (`/storefront/v1`)
 
-| Method | Path                                | Auth      |
-| ------ | ----------------------------------- | --------- |
-| POST   | `/carts`                            | public    |
-| GET    | `/carts/:id`                        | public    |
-| POST   | `/carts/:id/items`                  | public    |
-| PATCH  | `/carts/:id/items/:itemId`          | public    |
-| DELETE | `/carts/:id/items/:itemId`          | public    |
-| POST   | `/carts/:id/clear`                  | public    |
-| GET    | `/customer/me/cart`                 | TODO auth |
-| POST   | `/customer/me/cart`                 | TODO auth |
+| Method | Path                       | Auth        |
+| ------ | -------------------------- | ----------- |
+| POST   | `/carts`                   | public      |
+| GET    | `/carts/:id`               | public      |
+| POST   | `/carts/:id/items`         | public      |
+| PATCH  | `/carts/:id/items/:itemId` | public      |
+| DELETE | `/carts/:id/items/:itemId` | public      |
+| POST   | `/carts/:id/clear`         | public      |
+| GET    | `/customer/me/cart`        | requireAuth |
+| POST   | `/customer/me/cart`        | requireAuth |
 
-#### Auth gating — TODO
+#### Auth gating
 
-The `/customer/me/cart` endpoints accept a stand-in `x-customer-id` header
-while the auth integration on the storefront side is finalized. The customer
-module uses the same pattern; both will switch to `c.var.authUser`-derived
-resolution once the storefront's auth wiring lands. The public cart routes
-treat the cart's ULID as the bearer — anyone with the id can act on the
-cart, which mirrors the typical guest-cart flow shoppers expect.
+The `/customer/me/cart` endpoints are gated by `requireAuth()`. The
+domain customer is resolved from the session cookie's auth_user via
+`customerService.getCustomerByAuthUserId(authUser.id)`. A signed-in
+auth_user without a customer profile gets a 404 with `details.code =
+"customer_not_provisioned"`. The public cart routes treat the cart's
+ULID as the bearer — anyone with the id can act on the cart, which
+mirrors the typical guest-cart flow shoppers expect.
 
 ## Totals semantics
 
 `getTotals(cart, opts?)` is pure (no DB I/O). It computes:
 
-| Field    | Computation                                                                |
-| -------- | -------------------------------------------------------------------------- |
-| subtotal | Σ (`unit_price * quantity`) across line items                              |
+| Field    | Computation                                                                                                                        |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| subtotal | Σ (`unit_price * quantity`) across line items                                                                                      |
 | tax      | `subtotal * (basisPoints / 10000)` (halfEven) when `opts.taxRate` provided; otherwise `subtotal * TAX_PPN_RATE` (env-var fallback) |
-| shipping | `opts.shipping` when provided (currency-checked); otherwise `zero(currency)` |
-| total    | `subtotal + tax + shipping`                                                |
-| taxRate  | `{ code, basisPoints }` echo of the applied rate, or null on the env-var fallback path |
+| shipping | `opts.shipping` when provided (currency-checked); otherwise `zero(currency)`                                                       |
+| total    | `subtotal + tax + shipping`                                                                                                        |
+| taxRate  | `{ code, basisPoints }` echo of the applied rate, or null on the env-var fallback path                                             |
 
 The cart module no longer reaches for the tax or shipping modules
 directly. Callers fetch the rate (`taxService.getDefaultRate(cart.currency)`)
@@ -201,8 +202,6 @@ across two transactions.
   per-region / per-exemption selection.
 - Shipping calculation — the shipping module plugs into the `shipping`
   slot in `CartTotals`.
-- Auth-derived current customer (drop the `x-customer-id` storefront
-  stand-in header).
 - Cart sweep job — delete or mark abandoned carts past `expires_at`. The
   index is already in place; the BullMQ job lands later.
 - Discount / promotion lines — `CartTotals` will gain a `discount` field

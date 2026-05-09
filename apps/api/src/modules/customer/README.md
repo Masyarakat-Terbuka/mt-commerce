@@ -9,14 +9,14 @@ cross-module callers go through `customerService`.
 
 All under `apps/api/src/db/schema/`:
 
-| Table                | Purpose                                                | ID prefix |
-| -------------------- | ------------------------------------------------------ | --------- |
-| `customers`          | Customer header (email, optional auth link, profile)   | `cust_`   |
-| `customer_addresses` | Shipping/billing addresses, default flags, region FKs  | `addr_`   |
-| `provinsi`           | Province (BPS code as PK)                              | BPS code  |
-| `kota_kabupaten`     | City/regency, FK to provinsi                           | BPS code  |
-| `kecamatan`          | District, FK to kota_kabupaten                         | BPS code  |
-| `kelurahan`          | Sub-district, FK to kecamatan, carries `postal_code`   | BPS code  |
+| Table                | Purpose                                               | ID prefix |
+| -------------------- | ----------------------------------------------------- | --------- |
+| `customers`          | Customer header (email, optional auth link, profile)  | `cust_`   |
+| `customer_addresses` | Shipping/billing addresses, default flags, region FKs | `addr_`   |
+| `provinsi`           | Province (BPS code as PK)                             | BPS code  |
+| `kota_kabupaten`     | City/regency, FK to provinsi                          | BPS code  |
+| `kecamatan`          | District, FK to kota_kabupaten                        | BPS code  |
+| `kelurahan`          | Sub-district, FK to kecamatan, carries `postal_code`  | BPS code  |
 
 ### Auth FK contract
 
@@ -96,47 +96,45 @@ match. Admin callers pre-resolve the owner via `getAddressById`; storefront
 
 ### Admin (`/admin/v1`) — `// TODO requireRole("owner", "admin", "staff")`
 
-| Method | Path                                  | Purpose                       |
-| ------ | ------------------------------------- | ----------------------------- |
-| GET    | `/customers`                          | List + filter + paginate      |
-| POST   | `/customers`                          | Create                        |
-| GET    | `/customers/:id`                      | Detail incl. addresses        |
-| PATCH  | `/customers/:id`                      | Update                        |
-| DELETE | `/customers/:id`                      | Soft delete                   |
-| GET    | `/customers/:id/addresses`            | List addresses for customer   |
-| POST   | `/customers/:id/addresses`            | Create address                |
-| PATCH  | `/addresses/:addressId`               | Update address                |
-| DELETE | `/addresses/:addressId`               | Soft delete address           |
+| Method | Path                       | Purpose                     |
+| ------ | -------------------------- | --------------------------- |
+| GET    | `/customers`               | List + filter + paginate    |
+| POST   | `/customers`               | Create                      |
+| GET    | `/customers/:id`           | Detail incl. addresses      |
+| PATCH  | `/customers/:id`           | Update                      |
+| DELETE | `/customers/:id`           | Soft delete                 |
+| GET    | `/customers/:id/addresses` | List addresses for customer |
+| POST   | `/customers/:id/addresses` | Create address              |
+| PATCH  | `/addresses/:addressId`    | Update address              |
+| DELETE | `/addresses/:addressId`    | Soft delete address         |
 
 ### Storefront (`/storefront/v1`)
 
-| Method | Path                                              | Auth      |
-| ------ | ------------------------------------------------- | --------- |
-| GET    | `/customer/me`                                    | TODO auth |
-| PATCH  | `/customer/me`                                    | TODO auth |
-| GET    | `/customer/me/addresses`                          | TODO auth |
-| POST   | `/customer/me/addresses`                          | TODO auth |
-| PATCH  | `/customer/me/addresses/:id`                      | TODO auth |
-| DELETE | `/customer/me/addresses/:id`                      | TODO auth |
-| PUT    | `/customer/me/addresses/:id/default`              | TODO auth |
-| GET    | `/regions/provinsi`                               | public    |
-| GET    | `/regions/kota-kabupaten?provinsiId=...`          | public    |
-| GET    | `/regions/kecamatan?kotaKabupatenId=...`          | public    |
-| GET    | `/regions/kelurahan?kecamatanId=...`              | public    |
-| GET    | `/regions/postal-code/:code`                      | public    |
+| Method | Path                                     | Auth      |
+| ------ | ---------------------------------------- | --------- |
+| GET    | `/customer/me`                           | TODO auth |
+| PATCH  | `/customer/me`                           | TODO auth |
+| GET    | `/customer/me/addresses`                 | TODO auth |
+| POST   | `/customer/me/addresses`                 | TODO auth |
+| PATCH  | `/customer/me/addresses/:id`             | TODO auth |
+| DELETE | `/customer/me/addresses/:id`             | TODO auth |
+| PUT    | `/customer/me/addresses/:id/default`     | TODO auth |
+| GET    | `/regions/provinsi`                      | public    |
+| GET    | `/regions/kota-kabupaten?provinsiId=...` | public    |
+| GET    | `/regions/kecamatan?kotaKabupatenId=...` | public    |
+| GET    | `/regions/kelurahan?kecamatanId=...`     | public    |
+| GET    | `/regions/postal-code/:code`             | public    |
 
-#### Auth gating — TODO
+#### Auth gating
 
-Both admin and storefront routers skip the auth middleware while the auth
-module is on a parallel track. Storefront `/customer/me/*` currently
-accepts a stand-in `x-customer-id` request header to identify the caller.
-Once auth lands:
-
-- Admin router: enable `requireAuth()` + `requireRole("owner", "admin", "staff")`.
-- Storefront `/customer/me/*`: enable `requireAuth()` and replace the
-  `x-customer-id` lookup with `c.var.authUser`-driven
-  `getCustomerByAuthUserId(authUser.id)`.
-- Storefront `/regions/*` stays public.
+- Admin router: gated by `requireAuth()` + `requireRole("owner", "admin", "staff")`.
+- Storefront `/customer/me/*`: gated by `requireAuth()`. The route resolves
+  the domain customer via `getCustomerByAuthUserId(authUser.id)`. A
+  signed-in `auth_user` without a corresponding `customers` row gets a
+  404 with `details.code = "customer_not_provisioned"` so the storefront
+  can render a "complete your profile" prompt.
+- Storefront `/regions/*` is public — required for guest-checkout
+  address autofill.
 
 ### Postal-code lookup
 
@@ -195,8 +193,6 @@ seed exists to unblock interactive dev work, not to replace it.
 
 ## Follow-ups (out of scope this round)
 
-- Auth integration: import `requireAuth` / `requireRole` from
-  `modules/auth`, drop the `x-customer-id` storefront stand-in header.
 - Add the deferred `customers.auth_user_id` FK to `auth_users.id` in a
   follow-up migration.
 - Full BPS regions data import — bulk loader + admin UI for region updates.

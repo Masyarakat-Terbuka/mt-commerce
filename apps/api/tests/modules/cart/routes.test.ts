@@ -6,7 +6,8 @@
  *   1. The standard JSON envelope (success + error)
  *   2. Money serialization per ADR-0007 (string amount, ISO 4217 currency)
  *   3. Auth gating on the admin router (anonymous → 401, staff → 200)
- *   4. The `x-customer-id` stand-in on `/customer/me/cart`
+ *   4. The customer auth path on `/customer/me/cart` — bearer token resolves
+ *      to a customer through `customerService.getCustomerByAuthUserId`.
  *   5. `currency_mismatch` error shape from the service surfaces unchanged
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +25,10 @@ import type {
   CartTotals,
   Paginated,
 } from "../../../src/modules/cart/index.js";
+import type {
+  Customer,
+  CustomerService,
+} from "../../../src/modules/customer/index.js";
 import { ValidationError } from "../../../src/lib/errors.js";
 
 installBigIntJsonSerializer();
@@ -38,22 +43,50 @@ const STAFF_USER = {
   createdAt: NOW,
   updatedAt: NOW,
 };
+const CUSTOMER_USER = {
+  id: "usr_customer",
+  email: "buyer@example.com",
+  emailVerified: true,
+  name: "Buyer",
+  image: null,
+  createdAt: NOW,
+  updatedAt: NOW,
+};
 
 beforeEach(() => {
   vi.spyOn(authService, "verifyApiKey").mockImplementation(async (bearer) => {
-    if (bearer !== "staff-key") return null;
-    return {
-      apiKey: {
-        id: "apik_staff",
-        userId: STAFF_USER.id,
-        name: "test",
-        scopes: ["catalog:read"],
-        lastUsedAt: null,
-        createdAt: NOW,
-        revokedAt: null,
-      },
-      user: STAFF_USER,
-    };
+    if (bearer === "staff-key") {
+      return {
+        apiKey: {
+          id: "apik_staff",
+          userId: STAFF_USER.id,
+          name: "test",
+          scopes: ["catalog:read"],
+          lastUsedAt: null,
+          createdAt: NOW,
+          revokedAt: null,
+        },
+        user: STAFF_USER,
+      };
+    }
+    // Customer-side test bearer: maps to a non-staff auth_user. The
+    // domain customer is resolved separately via
+    // `customerService.getCustomerByAuthUserId` (mocked per-test).
+    if (bearer === "customer-key") {
+      return {
+        apiKey: {
+          id: "apik_customer",
+          userId: CUSTOMER_USER.id,
+          name: "test-customer",
+          scopes: [],
+          lastUsedAt: null,
+          createdAt: NOW,
+          revokedAt: null,
+        },
+        user: CUSTOMER_USER,
+      };
+    }
+    return null;
   });
   vi.spyOn(authService, "getStaffProfile").mockImplementation(async (id) => {
     if (id !== STAFF_USER.id) return null;
@@ -168,6 +201,76 @@ type TaxRateResolver = (
   currency: string,
 ) => Promise<{ code: string; rateBasisPoints: number } | null>;
 
+/**
+ * Build a minimal `CustomerService` stub for storefront tests. Only
+ * `getCustomerByAuthUserId` is exercised by the cart routes — every
+ * other method throws if called so a regression that adds a new
+ * dependency surfaces loudly.
+ */
+function createFakeCustomerService(
+  customers: Customer[] = [],
+): CustomerService {
+  const fail = (): never => {
+    throw new Error("not implemented in this test");
+  };
+  return {
+    async createCustomer(): Promise<Customer> {
+      return fail();
+    },
+    async getCustomerById() {
+      return null;
+    },
+    async getCustomerByAuthUserId(authUserId) {
+      return customers.find((c) => c.authUserId === authUserId) ?? null;
+    },
+    async getCustomerByEmail() {
+      return null;
+    },
+    async listCustomers() {
+      return { data: [], total: 0, page: 1, pageSize: 20 };
+    },
+    async updateCustomer(): Promise<Customer> {
+      return fail();
+    },
+    async softDeleteCustomer() {
+      return;
+    },
+    async getAddressById() {
+      return null;
+    },
+    async listAddresses() {
+      return [];
+    },
+    async createAddress(): Promise<never> {
+      return fail();
+    },
+    async updateAddress(): Promise<never> {
+      return fail();
+    },
+    async deleteAddress() {
+      return;
+    },
+    async setDefaultAddress(): Promise<never> {
+      return fail();
+    },
+    async listProvinsi() {
+      return [];
+    },
+    async listKotaKabupaten() {
+      return [];
+    },
+    async listKecamatan() {
+      return [];
+    },
+    async listKelurahan() {
+      return [];
+    },
+    async searchPostalCode() {
+      return [];
+    },
+  };
+}
+
 function buildAdminApp(
   service: CartService,
   resolveTaxRate?: TaxRateResolver,
@@ -180,10 +283,17 @@ function buildAdminApp(
 
 function buildStorefrontApp(
   service: CartService,
-  resolveTaxRate?: TaxRateResolver,
+  options: {
+    customers?: CustomerService;
+    resolveTaxRate?: TaxRateResolver;
+  } = {},
 ): Hono<AppBindings> {
+  const customers = options.customers ?? createFakeCustomerService();
   const app = new Hono<AppBindings>();
-  app.route("/storefront/v1", buildCartStorefrontRoutes(service, resolveTaxRate));
+  app.route(
+    "/storefront/v1",
+    buildCartStorefrontRoutes(service, customers, options.resolveTaxRate),
+  );
   app.onError(errorHandler);
   return app;
 }
@@ -296,14 +406,28 @@ describe("storefront cart routes", () => {
     expect(body.error.details.code).toBe("currency_mismatch");
   });
 
-  it("returns the customer's active cart via the x-customer-id stand-in", async () => {
+  it("returns the customer's active cart for the authenticated buyer", async () => {
     const cart = makeCart({
       id: "cart_for_cust",
       customerId: "cust_xyz",
     });
-    const app = buildStorefrontApp(createFakeService({ initial: [cart] }));
+    const customer: Customer = {
+      id: "cust_xyz",
+      authUserId: CUSTOMER_USER.id,
+      email: CUSTOMER_USER.email,
+      displayName: CUSTOMER_USER.name,
+      phone: null,
+      taxIdentifier: null,
+      companyName: null,
+      deletedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const app = buildStorefrontApp(createFakeService({ initial: [cart] }), {
+      customers: createFakeCustomerService([customer]),
+    });
     const res = await app.request("/storefront/v1/customer/me/cart", {
-      headers: { "x-customer-id": "cust_xyz" },
+      headers: { authorization: "Bearer customer-key" },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { id: string; customerId: string };
@@ -311,12 +435,25 @@ describe("storefront cart routes", () => {
     expect(body.customerId).toBe("cust_xyz");
   });
 
-  it("rejects /customer/me/cart without the x-customer-id stand-in (401)", async () => {
+  it("rejects /customer/me/cart with no auth (401)", async () => {
     const app = buildStorefrontApp(createFakeService());
     const res = await app.request("/storefront/v1/customer/me/cart");
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("unauthorized");
+  });
+
+  it("returns 404 customer_not_provisioned when the auth_user has no customer row", async () => {
+    const app = buildStorefrontApp(createFakeService(), {
+      // no customer for CUSTOMER_USER.id
+      customers: createFakeCustomerService([]),
+    });
+    const res = await app.request("/storefront/v1/customer/me/cart", {
+      headers: { authorization: "Bearer customer-key" },
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { details: { code: string } } };
+    expect(body.error.details.code).toBe("customer_not_provisioned");
   });
 
   it("populates the new tax fields on the wire shape when the resolver returns a rate", async () => {
@@ -344,10 +481,14 @@ describe("storefront cart routes", () => {
       ...createFakeService({ initial: [cart] }),
       getTotals: realService.getTotals.bind(realService),
     };
-    const app = buildStorefrontApp(service, async (currency) => {
-      // Simulate the production resolver bound to taxService.getDefaultRate.
-      if (currency === "IDR") return { code: "PPN_11", rateBasisPoints: 1100 };
-      return null;
+    const app = buildStorefrontApp(service, {
+      resolveTaxRate: async (currency) => {
+        // Simulate the production resolver bound to
+        // taxService.getDefaultRate.
+        if (currency === "IDR")
+          return { code: "PPN_11", rateBasisPoints: 1100 };
+        return null;
+      },
     });
 
     const res = await app.request("/storefront/v1/carts/cart_with_items");
@@ -401,7 +542,9 @@ describe("storefront cart routes", () => {
     // Resolver returns null → cart falls back to env.taxPpnRate (0.11
     // in the vitest environment) but reports `taxRate: null` on the wire
     // since no module-supplied rate was actually applied.
-    const app = buildStorefrontApp(service, async () => null);
+    const app = buildStorefrontApp(service, {
+      resolveTaxRate: async () => null,
+    });
 
     const res = await app.request("/storefront/v1/carts/cart_no_rate");
     expect(res.status).toBe(200);

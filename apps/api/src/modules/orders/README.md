@@ -12,11 +12,11 @@ cross-module callers go through `orderService`.
 
 All under `apps/api/src/db/schema/`:
 
-| Table                  | Purpose                                                  | ID prefix |
-| ---------------------- | -------------------------------------------------------- | --------- |
-| `orders`               | Canonical order record (one per checkout completion)     | `ord_`    |
-| `order_items`          | Line-item snapshots (price, sku, title translations)     | `oi_`     |
-| `order_status_history` | Append-only audit log of state transitions               | `osh_`    |
+| Table                  | Purpose                                              | ID prefix |
+| ---------------------- | ---------------------------------------------------- | --------- |
+| `orders`               | Canonical order record (one per checkout completion) | `ord_`    |
+| `order_items`          | Line-item snapshots (price, sku, title translations) | `oi_`     |
+| `order_status_history` | Append-only audit log of state transitions           | `osh_`    |
 
 `orders.order_number` is allocated from the Postgres sequence
 `order_number_seq` (start 100000) and formatted at the application
@@ -54,12 +54,12 @@ carry `actor_id = auth_user.id` from the session.
 
 Allowed transitions (also pinned in `state.ts` and exhaustively tested):
 
-- `pending_payment → paid`            (payment captured)
-- `pending_payment → cancelled`       (e.g. unpaid expiration)
-- `paid → fulfilled`                  (handed off to shipping)
-- `paid → cancelled`                  (rare; refund track follows)
-- `paid → refunded`                   (direct refund)
-- `fulfilled → refunded`              (post-shipment refund)
+- `pending_payment → paid` (payment captured)
+- `pending_payment → cancelled` (e.g. unpaid expiration)
+- `paid → fulfilled` (handed off to shipping)
+- `paid → cancelled` (rare; refund track follows)
+- `paid → refunded` (direct refund)
+- `fulfilled → refunded` (post-shipment refund)
 
 Terminal states: `cancelled`, `refunded`. Refunds cannot be undone via
 the state machine — operators issue a new order if the buyer reorders.
@@ -97,37 +97,39 @@ interface OrderService {
 
 Emitted events:
 
-| Event                  | Payload                                                                      |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `order.placed`         | `{ orderId, orderNumber, customerId, email, totalAmount, currency }`         |
-| `order.paid`           | `{ orderId, orderNumber, actorKind }`                                        |
-| `order.fulfilled`      | `{ orderId, orderNumber, actorKind }`                                        |
-| `order.cancelled`      | `{ orderId, orderNumber, reason, actorKind }`                                |
-| `order.refunded`       | `{ orderId, orderNumber, actorKind }`                                        |
-| `order.status_changed` | `{ orderId, orderNumber, fromStatus, toStatus, actorKind }` (every change)   |
+| Event                  | Payload                                                                    |
+| ---------------------- | -------------------------------------------------------------------------- |
+| `order.placed`         | `{ orderId, orderNumber, customerId, email, totalAmount, currency }`       |
+| `order.paid`           | `{ orderId, orderNumber, actorKind }`                                      |
+| `order.fulfilled`      | `{ orderId, orderNumber, actorKind }`                                      |
+| `order.cancelled`      | `{ orderId, orderNumber, reason, actorKind }`                              |
+| `order.refunded`       | `{ orderId, orderNumber, actorKind }`                                      |
+| `order.status_changed` | `{ orderId, orderNumber, fromStatus, toStatus, actorKind }` (every change) |
 
 ## Routes
 
 ### Admin (`/admin/v1`) — `requireRole("owner", "admin", "staff")`
 
-| Method | Path                              | Purpose                                            |
-| ------ | --------------------------------- | -------------------------------------------------- |
-| GET    | `/orders`                         | List + filter (status, customer, email, orderNumber, date) |
-| GET    | `/orders/:id`                     | Detail with full status history                    |
-| GET    | `/orders/:id/events`              | Audit-trail events                                 |
-| POST   | `/orders/:id/transition`          | `{ toStatus, details? }` — staff actor captured    |
-| POST   | `/orders/:id/cancel`              | `{ reason }` — convenience wrapper for cancelled   |
+| Method | Path                     | Purpose                                                    |
+| ------ | ------------------------ | ---------------------------------------------------------- |
+| GET    | `/orders`                | List + filter (status, customer, email, orderNumber, date) |
+| GET    | `/orders/:id`            | Detail with full status history                            |
+| GET    | `/orders/:id/events`     | Audit-trail events                                         |
+| POST   | `/orders/:id/transition` | `{ toStatus, details? }` — staff actor captured            |
+| POST   | `/orders/:id/cancel`     | `{ reason }` — convenience wrapper for cancelled           |
 
 ### Storefront (`/storefront/v1`)
 
-Customer auth integration is still landing. Until then, the storefront
-identifies the caller via the `x-customer-id` header. A 401 is returned
-when the header is missing — never a 200 with someone else's orders.
+`/customer/me/orders/*` is gated by `requireAuth()`. The route resolves
+the domain customer via `customerService.getCustomerByAuthUserId(authUser.id)`.
+A signed-in auth_user without a customer row gets a 404 with
+`details.code = "customer_not_provisioned"`; an unauthenticated request
+gets a 401 — never a 200 with someone else's orders.
 
-| Method | Path                                  | Purpose                              |
-| ------ | ------------------------------------- | ------------------------------------ |
-| GET    | `/customer/me/orders`                 | Paginated list of caller's orders    |
-| GET    | `/customer/me/orders/:orderNumber`    | Detail by `order_number`             |
+| Method | Path                               | Purpose                           |
+| ------ | ---------------------------------- | --------------------------------- |
+| GET    | `/customer/me/orders`              | Paginated list of caller's orders |
+| GET    | `/customer/me/orders/:orderNumber` | Detail by `order_number`          |
 
 ## Checkout integration
 
@@ -165,7 +167,7 @@ programming error caught in tests.
 - **Real fulfillment flow.** `paid → fulfilled` is also manual; the
   shipping module (Biteship plugin) will create the fulfillment, attach
   tracking, and call `transitionStatus(..., 'fulfilled', { details: {
-  trackingCode } })`.
+trackingCode } })`.
 - **Refunds.** The state machine permits `paid → refunded` and
   `fulfilled → refunded`, but refund processing itself (provider
   callout, partial refunds) is the payment module's territory.
@@ -174,10 +176,9 @@ programming error caught in tests.
   carries only money values. The tax module's next round will snapshot
   the rate row too; the orders service will backfill these columns at
   that point.
-- **Customer auth integration.** Storefront routes use the
-  `x-customer-id` header stand-in. The auth module's next round
-  replaces the header read with a session lookup; route shapes do not
-  change.
+- **Refund partials.** The state machine accepts only full refunds at
+  the order level; partial refunds against a captured payment route
+  through the payment module without changing the order's status.
 - **Event-bus persistence.** The bus is in-process; a crash between
   commit and emit drops the in-memory event. Persistent BullMQ-backed
   emission lands when the notification module needs it.

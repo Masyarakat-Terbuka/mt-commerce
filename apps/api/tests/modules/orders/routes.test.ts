@@ -23,6 +23,10 @@ import { buildOrdersAdminRoutes } from "../../../src/modules/orders/routes/admin
 import { buildOrdersStorefrontRoutes } from "../../../src/modules/orders/routes/storefront.js";
 import type { AppBindings } from "../../../src/lib/types.js";
 import type {
+  Customer,
+  CustomerService,
+} from "../../../src/modules/customer/index.js";
+import type {
   Order,
   OrderService,
   OrderStatusEvent,
@@ -42,22 +46,47 @@ const STAFF_USER = {
   createdAt: NOW,
   updatedAt: NOW,
 };
+const CUSTOMER_USER = {
+  id: "usr_customer",
+  email: "buyer@example.com",
+  emailVerified: true,
+  name: "Buyer",
+  image: null,
+  createdAt: NOW,
+  updatedAt: NOW,
+};
 
 beforeEach(() => {
   vi.spyOn(authService, "verifyApiKey").mockImplementation(async (bearer) => {
-    if (bearer !== "staff-key") return null;
-    return {
-      apiKey: {
-        id: "apik_staff",
-        userId: STAFF_USER.id,
-        name: "test",
-        scopes: [],
-        lastUsedAt: null,
-        createdAt: NOW,
-        revokedAt: null,
-      },
-      user: STAFF_USER,
-    };
+    if (bearer === "staff-key") {
+      return {
+        apiKey: {
+          id: "apik_staff",
+          userId: STAFF_USER.id,
+          name: "test",
+          scopes: [],
+          lastUsedAt: null,
+          createdAt: NOW,
+          revokedAt: null,
+        },
+        user: STAFF_USER,
+      };
+    }
+    if (bearer === "customer-key") {
+      return {
+        apiKey: {
+          id: "apik_customer",
+          userId: CUSTOMER_USER.id,
+          name: "test-customer",
+          scopes: [],
+          lastUsedAt: null,
+          createdAt: NOW,
+          revokedAt: null,
+        },
+        user: CUSTOMER_USER,
+      };
+    }
+    return null;
   });
   vi.spyOn(authService, "getStaffProfile").mockImplementation(
     async (userId) => {
@@ -129,8 +158,16 @@ interface FakeOpts {
 
 function createFakeService(opts: FakeOpts = {}): {
   service: OrderService;
-  cancelCalls: Array<{ id: string; reason: string | null; actorId: string | null }>;
-  transitionCalls: Array<{ id: string; toStatus: string; actorId: string | null }>;
+  cancelCalls: Array<{
+    id: string;
+    reason: string | null;
+    actorId: string | null;
+  }>;
+  transitionCalls: Array<{
+    id: string;
+    toStatus: string;
+    actorId: string | null;
+  }>;
 } {
   const orders = new Map<string, Order>();
   for (const o of opts.orders ?? []) orders.set(o.id, o);
@@ -241,9 +278,80 @@ function buildAdminApp(service: OrderService): Hono<AppBindings> {
   return app;
 }
 
-function buildStorefrontApp(service: OrderService): Hono<AppBindings> {
+/**
+ * Minimal `CustomerService` stub. Only `getCustomerByAuthUserId` is
+ * called from the orders router; the rest fail loudly if called.
+ */
+function createFakeCustomerService(
+  customers: Customer[] = [],
+): CustomerService {
+  const fail = (): never => {
+    throw new Error("not implemented in this test");
+  };
+  return {
+    async createCustomer(): Promise<Customer> {
+      return fail();
+    },
+    async getCustomerById() {
+      return null;
+    },
+    async getCustomerByAuthUserId(authUserId) {
+      return customers.find((c) => c.authUserId === authUserId) ?? null;
+    },
+    async getCustomerByEmail() {
+      return null;
+    },
+    async listCustomers() {
+      return { data: [], total: 0, page: 1, pageSize: 20 };
+    },
+    async updateCustomer(): Promise<Customer> {
+      return fail();
+    },
+    async softDeleteCustomer() {
+      return;
+    },
+    async getAddressById() {
+      return null;
+    },
+    async listAddresses() {
+      return [];
+    },
+    async createAddress(): Promise<never> {
+      return fail();
+    },
+    async updateAddress(): Promise<never> {
+      return fail();
+    },
+    async deleteAddress() {
+      return;
+    },
+    async setDefaultAddress(): Promise<never> {
+      return fail();
+    },
+    async listProvinsi() {
+      return [];
+    },
+    async listKotaKabupaten() {
+      return [];
+    },
+    async listKecamatan() {
+      return [];
+    },
+    async listKelurahan() {
+      return [];
+    },
+    async searchPostalCode() {
+      return [];
+    },
+  };
+}
+
+function buildStorefrontApp(
+  service: OrderService,
+  customers: CustomerService = createFakeCustomerService(),
+): Hono<AppBindings> {
   const app = new Hono<AppBindings>();
-  app.route("/storefront/v1", buildOrdersStorefrontRoutes(service));
+  app.route("/storefront/v1", buildOrdersStorefrontRoutes(service, customers));
   app.onError(errorHandler);
   return app;
 }
@@ -458,11 +566,39 @@ describe("admin orders — detail and transitions", () => {
 // ---------------------------------------------------------------------------
 
 describe("storefront orders — me/orders", () => {
-  it("rejects a request without the x-customer-id header", async () => {
+  function makeStrangerCustomer(): Customer {
+    return {
+      id: "cust_stranger",
+      authUserId: CUSTOMER_USER.id,
+      email: CUSTOMER_USER.email,
+      displayName: CUSTOMER_USER.name,
+      phone: null,
+      taxIdentifier: null,
+      companyName: null,
+      deletedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+  }
+
+  it("rejects an unauthenticated request with 401", async () => {
     const fake = createFakeService();
     const app = buildStorefrontApp(fake.service);
     const res = await app.request("/storefront/v1/customer/me/orders");
     expect(res.status).toBe(401);
+  });
+
+  it("returns 404 customer_not_provisioned when the auth_user has no customer row", async () => {
+    const fake = createFakeService();
+    const app = buildStorefrontApp(fake.service); // no customers
+    const res = await app.request("/storefront/v1/customer/me/orders", {
+      headers: { authorization: "Bearer customer-key" },
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as {
+      error: { details: { code: string } };
+    };
+    expect(body.error.details.code).toBe("customer_not_provisioned");
   });
 
   it("returns 404 for an order that belongs to a different customer (no existence leak)", async () => {
@@ -475,10 +611,13 @@ describe("storefront orders — me/orders", () => {
         }),
       ],
     });
-    const app = buildStorefrontApp(fake.service);
+    const app = buildStorefrontApp(
+      fake.service,
+      createFakeCustomerService([makeStrangerCustomer()]),
+    );
     const res = await app.request(
       "/storefront/v1/customer/me/orders/ORD-2026-000100",
-      { headers: { "x-customer-id": "cust_stranger" } },
+      { headers: { authorization: "Bearer customer-key" } },
     );
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
