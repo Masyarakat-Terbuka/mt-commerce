@@ -1,0 +1,20 @@
+---
+title: API explorer
+description: Browse every endpoint, try requests, and inspect responses inline.
+template: splash
+---
+
+import ScalarApiReference from "../../../../components/ScalarApiReference.astro";
+
+The explorer below renders the same OpenAPI document the API serves at
+`/openapi.json`. It's built from Zod schemas via `@hono/zod-openapi`,
+so the surface here always matches the runtime validation.
+
+The vendored spec under `apps/docs/public/openapi.json` is committed
+to the repo. Refresh it after every API change with:
+
+```bash
+bun --filter @mt-commerce/api dump:openapi
+```
+
+<ScalarApiReference />

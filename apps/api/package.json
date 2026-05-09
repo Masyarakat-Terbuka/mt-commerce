@@ -17,7 +17,8 @@
     "db:seed:regions": "bun run src/scripts/seed-regions.ts",
     "db:seed:demo-catalog": "bun run src/scripts/seed-demo-catalog.ts",
     "provision-owner": "bun run src/scripts/provision-owner.ts",
-    "seed:demo-owner": "bun run src/scripts/seed-demo-owner.ts"
+    "seed:demo-owner": "bun run src/scripts/seed-demo-owner.ts",
+    "dump:openapi": "bun run src/scripts/dump-openapi.ts"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.5.0",

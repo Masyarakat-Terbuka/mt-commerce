@@ -1,0 +1,21 @@
+---
+title: Penjelajah API
+description: Menjelajahi setiap endpoint, mencoba request, dan memeriksa response langsung di tempat.
+template: splash
+---
+
+import ScalarApiReference from "../../../components/ScalarApiReference.astro";
+
+Penjelajah di bawah ini merender dokumen OpenAPI yang sama dengan yang
+disajikan API di `/openapi.json`. Dokumen ini dibangun dari skema Zod
+melalui `@hono/zod-openapi`, jadi permukaannya selalu cocok dengan
+validasi runtime.
+
+Spec yang di-vendor di `apps/docs/public/openapi.json` di-commit ke
+repo. Refresh setelah setiap perubahan API dengan:
+
+```bash
+bun --filter @mt-commerce/api dump:openapi
+```
+
+<ScalarApiReference />

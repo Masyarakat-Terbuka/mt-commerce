@@ -1,0 +1,62 @@
+---
+/**
+ * Scalar API reference embed.
+ *
+ * Renders an interactive OpenAPI explorer (Scalar) backed by a vendored
+ * spec at `/openapi.json`. The spec is committed under
+ * `apps/docs/public/openapi.json` so the docs site is self-contained
+ * and survives without a live API in front of it. Refresh it with:
+ *
+ *     bun --filter @mt-commerce/api dump:openapi
+ *
+ * Scalar's standalone bundle creates the explorer at the location of
+ * the `<script id="api-reference">` tag — we host an empty `<div>` so
+ * the explorer has a stable mount point inside Starlight's content
+ * column. The bundle is loaded from jsdelivr's CDN; vendoring it as a
+ * dependency would buy a minor reliability win at the cost of a build-
+ * time bump and is a follow-up.
+ */
+interface Props {
+  /**
+   * URL of the OpenAPI document. Defaults to the vendored spec at
+   * `/openapi.json`. Override to point at a live API endpoint when the
+   * docs site is co-located with one.
+   */
+  url?: string;
+}
+
+const { url = "/openapi.json" } = Astro.props;
+---
+
+{
+  /*
+  data-proxy-url proxies "Try it out" requests through Scalar's CORS
+  proxy — without it, the browser blocks fetches against an API that
+  doesn't whitelist the docs origin. The proxy adds latency and runs
+  through Scalar's infrastructure; remove it once your API serves CORS
+  headers that allow the docs origin directly.
+*/
+}
+<div class="scalar-wrapper">
+  <script
+    id="api-reference"
+    data-url={url}
+    data-proxy-url="https://proxy.scalar.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</div>
+
+<style>
+  /*
+   * Scalar measures the viewport against its own container; let it use
+   * the full content column. The default Starlight content has a max
+   * width that we relax for this page only, so the request/response
+   * panes have room.
+   */
+  .scalar-wrapper {
+    margin-inline: calc(50% - 50vw);
+    max-width: 100vw;
+  }
+  .scalar-wrapper :global(.scalar-app) {
+    min-height: calc(100vh - 6rem);
+  }
+</style>
