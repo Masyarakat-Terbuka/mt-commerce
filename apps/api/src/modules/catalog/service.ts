@@ -29,7 +29,12 @@ import {
   createCatalogRepository,
   type CatalogRepository,
 } from "./repository.js";
-import { toCategory, toInventoryLevel, toProduct, toVariant } from "./mappers.js";
+import {
+  toCategory,
+  toInventoryLevel,
+  toProduct,
+  toVariant,
+} from "./mappers.js";
 import { DEFAULT_LOCALE } from "./i18n.js";
 import {
   DEFAULT_PAGE_SIZE,
@@ -114,9 +119,11 @@ export interface CatalogService {
    * variants; without it, every variant in the system is paginated. Soft-
    * deleted variants are excluded.
    */
-  listInventoryLevels(
-    query: { productId?: string; page?: number; pageSize?: number },
-  ): Promise<Paginated<InventoryLevel>>;
+  listInventoryLevels(query: {
+    productId?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<Paginated<InventoryLevel>>;
   /**
    * Apply a signed delta to a variant's available stock and append an
    * `audit_log` row in the same transaction. The actor (resolved from
@@ -218,9 +225,11 @@ export class CatalogServiceImpl implements CatalogService {
     const locale = query.locale ?? DEFAULT_LOCALE;
 
     const { rows, total } = await this.repo.listProducts({
-      ...(query.activeOnly ? { status: "active", excludeDeleted: true } : {
-        ...(query.status ? { status: query.status } : {}),
-      }),
+      ...(query.activeOnly
+        ? { status: "active", excludeDeleted: true }
+        : {
+            ...(query.status ? { status: query.status } : {}),
+          }),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.categorySlug ? { categorySlug: query.categorySlug } : {}),
       ...(query.search ? { search: query.search } : {}),
@@ -233,10 +242,6 @@ export class CatalogServiceImpl implements CatalogService {
       page,
       pageSize,
       sort: query.sort,
-      // The repository's search ILIKE runs against the resolved-locale title;
-      // forward the locale so a search in `?locale=en` matches English titles
-      // rather than the default's.
-      locale: locale === "en" ? "en" : "id",
     });
 
     const productIds = rows.map((row) => row.id);

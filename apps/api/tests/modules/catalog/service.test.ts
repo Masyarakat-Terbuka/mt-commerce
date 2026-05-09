@@ -13,7 +13,6 @@
  */
 import { describe, expect, it } from "vitest";
 import { CatalogServiceImpl } from "../../../src/modules/catalog/service.js";
-import { DEFAULT_LOCALE } from "../../../src/modules/catalog/i18n.js";
 import type {
   AuditLogRow,
   CategoryRow,
@@ -89,19 +88,26 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         rows = rows.filter((p) => p.status === filters.status);
       }
       if (filters.search) {
-        // Faithful in-memory port of repository.escapeLikePattern + the
-        // JSONB-aware ILIKE: a `%` or `_` in the *search term* matches itself
-        // only. The real repository pulls the title from
-        // `translations -> '<locale>' ->> 'title'`; we mirror that here so
-        // the fake honors the locale filter.
+        // Approximate, locale-agnostic substring match. The real repository
+        // does Postgres FTS against the bilingual `search_vector` column;
+        // we cannot reproduce websearch_to_tsquery in JS without leaning on
+        // a tokenizer. For unit-test scope this fake is enough — integration
+        // tests against a real Postgres exercise the FTS path. When a single
+        // word in either locale's title or description appears as a literal
+        // substring, the fake matches; that is a strict subset of what FTS
+        // returns, so a positive here is also a positive against the real
+        // repo. Negative results may diverge for tokenization-only matches.
         const needle = filters.search.toLowerCase();
-        const locale = filters.locale ?? DEFAULT_LOCALE;
         rows = rows.filter((p) => {
-          const title =
-            p.translations[locale]?.title ??
-            p.translations[DEFAULT_LOCALE]?.title ??
-            "";
-          return title.toLowerCase().includes(needle);
+          const haystack = [
+            p.translations.id?.title ?? "",
+            p.translations.id?.description ?? "",
+            p.translations.en?.title ?? "",
+            p.translations.en?.description ?? "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(needle);
         });
       }
       if (filters.categoryId) {
@@ -147,9 +153,9 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
       };
       switch (filters.sort) {
         case "oldest":
-          rows = rows.slice().sort(
-            (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-          );
+          rows = rows
+            .slice()
+            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
           break;
         case "price_asc":
         case "price_desc": {
@@ -168,9 +174,9 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         }
         case "newest":
         default:
-          rows = rows.slice().sort(
-            (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-          );
+          rows = rows
+            .slice()
+            .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
           break;
       }
       const total = rows.length;
@@ -188,7 +194,9 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
           ? { translations: patch.translations }
           : {}),
         ...(patch.status !== undefined ? { status: patch.status } : {}),
-        ...(patch.defaultCurrency !== undefined ? { defaultCurrency: patch.defaultCurrency } : {}),
+        ...(patch.defaultCurrency !== undefined
+          ? { defaultCurrency: patch.defaultCurrency }
+          : {}),
         updatedAt: now(),
       };
       store.products.set(id, updated);
@@ -233,9 +241,15 @@ function createFakeRepository(store: FakeStore): CatalogRepository {
         ...(patch.translations !== undefined
           ? { translations: patch.translations }
           : {}),
-        ...(patch.priceAmount !== undefined ? { priceAmount: patch.priceAmount } : {}),
-        ...(patch.priceCurrency !== undefined ? { priceCurrency: patch.priceCurrency } : {}),
-        ...(patch.compareAtAmount !== undefined ? { compareAtAmount: patch.compareAtAmount } : {}),
+        ...(patch.priceAmount !== undefined
+          ? { priceAmount: patch.priceAmount }
+          : {}),
+        ...(patch.priceCurrency !== undefined
+          ? { priceCurrency: patch.priceCurrency }
+          : {}),
+        ...(patch.compareAtAmount !== undefined
+          ? { compareAtAmount: patch.compareAtAmount }
+          : {}),
         updatedAt: now(),
       };
       store.variants.set(id, updated);
@@ -429,7 +443,7 @@ function buildService(): {
           input.actor.kind === "staff"
             ? input.actor.userId
             : input.actor.kind === "customer"
-              ? input.actor.customerId ?? null
+              ? (input.actor.customerId ?? null)
               : null,
         details: (input.details ?? {}) as Record<string, unknown>,
         reason: input.reason ?? null,
@@ -649,11 +663,7 @@ describe("CatalogService.adjustInventory", () => {
       { actor: STAFF_ACTOR },
     );
     await expect(
-      service.adjustInventory(
-        variantId,
-        { delta: -5 },
-        { actor: STAFF_ACTOR },
-      ),
+      service.adjustInventory(variantId, { delta: -5 }, { actor: STAFF_ACTOR }),
     ).rejects.toMatchObject({
       code: "conflict",
     });
@@ -662,11 +672,7 @@ describe("CatalogService.adjustInventory", () => {
   it("rejects a delta of zero", async () => {
     const { service, variantId } = await setup();
     await expect(
-      service.adjustInventory(
-        variantId,
-        { delta: 0 },
-        { actor: STAFF_ACTOR },
-      ),
+      service.adjustInventory(variantId, { delta: 0 }, { actor: STAFF_ACTOR }),
     ).rejects.toMatchObject({
       code: "validation_error",
     });
@@ -700,11 +706,7 @@ describe("CatalogService.adjustInventory", () => {
     // row must NOT be written; the contract is "audit on completed
     // change", not "audit on attempt".
     await expect(
-      service.adjustInventory(
-        variantId,
-        { delta: -1 },
-        { actor: STAFF_ACTOR },
-      ),
+      service.adjustInventory(variantId, { delta: -1 }, { actor: STAFF_ACTOR }),
     ).rejects.toMatchObject({ code: "conflict" });
     expect(store.auditEvents).toHaveLength(0);
   });

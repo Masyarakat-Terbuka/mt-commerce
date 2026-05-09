@@ -13,8 +13,16 @@
  * Every method accepts an optional `tx` so callers can run multi-statement
  * work in a single transaction. The default uses the module-level `db`.
  */
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as defaultDb } from "../../db/client.js";
 import {
@@ -37,21 +45,8 @@ import {
   type AuditRepository,
 } from "../audit/repository.js";
 import type * as schema from "../../db/schema/index.js";
-import { DEFAULT_LOCALE, type KnownLocale } from "./i18n.js";
+import type { KnownLocale } from "./i18n.js";
 import type { ProductSort, ProductStatus } from "./types.js";
-
-/**
- * Escape characters that have special meaning to a Postgres `ILIKE` pattern.
- * Without escaping, a search term that legitimately contains `%` or `_` (e.g.
- * `"100%"`, `"foo_bar"`) silently turns into a wildcard. Backslash is escaped
- * first so we do not double-escape the escapes we add for `%` and `_`.
- */
-export function escapeLikePattern(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/%/g, "\\%")
-    .replace(/_/g, "\\_");
-}
 
 type Schema = typeof schema;
 type Db = PostgresJsDatabase<Schema>;
@@ -69,31 +64,13 @@ export interface ProductListFilters {
   pageSize: number;
   sort: ProductSort;
   /**
-   * Locale used for any translated-field predicate (search ILIKE on title).
-   * Defaults to `DEFAULT_LOCALE` ("id"). The repository never resolves the
-   * full translation blob — that's the mapper's job — but search must know
-   * which locale's title to ILIKE against.
+   * Retained for binary compatibility with callers that still pass the
+   * viewing locale. Search no longer reads this field — full-text lookup
+   * runs against the bilingual `search_vector` generated column (migration
+   * 0017). The mapper layer continues to use the locale, sourced from the
+   * service input rather than this filter.
    */
   locale?: KnownLocale;
-}
-
-/**
- * Build a JSONB ->> expression for a translated text field. Postgres
- * `translations->>'<locale>'` returns the locale blob as text — but we want
- * a *field* inside that blob, so we chain `->` (JSON) then `->>` (text):
- *
- *     translations -> 'id' ->> 'title'
- *
- * The locale and field names are bound as parameters via the sql template,
- * not interpolated as raw SQL — so there is no injection surface even if
- * a future caller passes user input.
- */
-function translatedField(
-  column: AnyPgColumn,
-  locale: KnownLocale,
-  field: string,
-): SQL<string | null> {
-  return sql<string | null>`${column} -> ${locale} ->> ${field}`;
 }
 
 export interface ProductListResult {
@@ -134,9 +111,7 @@ export interface CatalogRepository {
   // Variants
   insertVariant(row: NewProductVariantRow): Promise<ProductVariantRow>;
   getVariantById(id: string): Promise<ProductVariantRow | null>;
-  listVariantsForProducts(
-    productIds: string[],
-  ): Promise<ProductVariantRow[]>;
+  listVariantsForProducts(productIds: string[]): Promise<ProductVariantRow[]>;
   updateVariant(
     id: string,
     patch: Partial<NewProductVariantRow>,
@@ -152,21 +127,14 @@ export interface CatalogRepository {
     patch: Partial<NewCategoryRow>,
   ): Promise<CategoryRow | null>;
   deleteCategory(id: string): Promise<void>;
-  setProductCategories(
-    productId: string,
-    categoryIds: string[],
-  ): Promise<void>;
+  setProductCategories(productId: string, categoryIds: string[]): Promise<void>;
   listCategoryIdsForProducts(
     productIds: string[],
   ): Promise<Map<string, string[]>>;
 
   // Inventory
-  insertInventoryLevel(
-    row: NewInventoryLevelRow,
-  ): Promise<InventoryLevelRow>;
-  getInventoryByVariant(
-    variantId: string,
-  ): Promise<InventoryLevelRow | null>;
+  insertInventoryLevel(row: NewInventoryLevelRow): Promise<InventoryLevelRow>;
+  getInventoryByVariant(variantId: string): Promise<InventoryLevelRow | null>;
   adjustInventoryAtomic(
     variantId: string,
     delta: number,
@@ -196,7 +164,8 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
     // -------------------------------------------------------------------
     async insertProduct(row: NewProductRow): Promise<ProductRow> {
       const [inserted] = await db.insert(products).values(row).returning();
-      if (!inserted) throw new Error("insertProduct: returning() yielded no rows");
+      if (!inserted)
+        throw new Error("insertProduct: returning() yielded no rows");
       return inserted;
     },
 
@@ -227,7 +196,9 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
      * Price filtering joins the variants table — we filter by the cheapest
      * variant's amount, which matches the storefront's "from Rp X" semantics.
      */
-    async listProducts(filters: ProductListFilters): Promise<ProductListResult> {
+    async listProducts(
+      filters: ProductListFilters,
+    ): Promise<ProductListResult> {
       const conditions: SQL[] = [];
       if (filters.excludeDeleted) {
         conditions.push(isNull(products.deletedAt));
@@ -236,23 +207,14 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
         conditions.push(eq(products.status, filters.status));
       }
       if (filters.search) {
-        // ILIKE on the resolved-locale title in the JSONB column. Per ADR-0010
-        // we do not search across locales for v0.1 — the user is searching in
-        // their viewing locale, which is what they see on screen.
-        //
-        // We escape `%`, `_`, and `\` so the user-supplied term cannot smuggle
-        // wildcards into the pattern. The JSONB extraction uses parameters
-        // for both the locale key and the field name (no string concat into
-        // SQL), so even though the locale comes from a typed enum today, the
-        // expression remains safe if a future caller passes user input.
-        //
-        // TODO (v0.2): a `tsvector` generated column or a partial GIN over
-        // `translations` would let us search across locales without a per-row
-        // table scan. Recorded in ADR-0010 ("Negative consequences").
-        const safe = escapeLikePattern(filters.search);
-        const locale = filters.locale ?? DEFAULT_LOCALE;
+        // Full-text lookup on the `search_vector` generated column added by
+        // migration 0017. The vector concatenates id+en titles (weight A)
+        // and descriptions (weight B), built with the `simple` config so
+        // neither locale's stemmer mangles the other. websearch_to_tsquery
+        // handles user-supplied syntax safely (quoted phrases, OR, leading
+        // minus); no manual escape is needed.
         conditions.push(
-          sql`lower(${translatedField(products.translations, locale, "title")}) LIKE lower(${`%${safe}%`})`,
+          sql`search_vector @@ websearch_to_tsquery('simple', ${filters.search})`,
         );
       }
       if (filters.categoryId) {
@@ -266,7 +228,10 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
         const productIds = db
           .select({ pid: productCategories.productId })
           .from(productCategories)
-          .innerJoin(categories, eq(productCategories.categoryId, categories.id))
+          .innerJoin(
+            categories,
+            eq(productCategories.categoryId, categories.id),
+          )
           .where(eq(categories.slug, filters.categorySlug));
         conditions.push(inArray(products.id, productIds));
       }
@@ -276,10 +241,7 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
       // visibility predicates. Defense in depth: even if the outer WHERE were
       // ever bypassed, the variant subquery alone cannot match a variant
       // belonging to a draft/archived/soft-deleted product.
-      const buildPriceExists = (
-        cmp: "min" | "max",
-        amount: bigint,
-      ): SQL => {
+      const buildPriceExists = (cmp: "min" | "max", amount: bigint): SQL => {
         const op = cmp === "min" ? sql`>=` : sql`<=`;
         const statusGuard = filters.status
           ? sql`AND p.status = ${filters.status}`
@@ -377,7 +339,8 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
         .insert(productVariants)
         .values(row)
         .returning();
-      if (!inserted) throw new Error("insertVariant: returning() yielded no rows");
+      if (!inserted)
+        throw new Error("insertVariant: returning() yielded no rows");
       return inserted;
     },
 
@@ -429,7 +392,8 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
     // -------------------------------------------------------------------
     async insertCategory(row: NewCategoryRow): Promise<CategoryRow> {
       const [inserted] = await db.insert(categories).values(row).returning();
-      if (!inserted) throw new Error("insertCategory: returning() yielded no rows");
+      if (!inserted)
+        throw new Error("insertCategory: returning() yielded no rows");
       return inserted;
     },
 
@@ -514,7 +478,8 @@ export function createCatalogRepository(db: Db = defaultDb): CatalogRepository {
         .insert(inventoryLevels)
         .values(row)
         .returning();
-      if (!inserted) throw new Error("insertInventoryLevel: returning() yielded no rows");
+      if (!inserted)
+        throw new Error("insertInventoryLevel: returning() yielded no rows");
       return inserted;
     },
 

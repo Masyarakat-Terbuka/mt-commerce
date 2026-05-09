@@ -127,10 +127,13 @@ JSONB is a typed column in Drizzle; the schema declarations carry a
 
 ### Negative
 
-JSONB queries cannot use simple b-tree indexes. If a future feature needs
-to filter products by translated title (full-text search across locales,
-admin search-by-localized-title), we will need a generated column or a
-`tsvector`. Not a v0.1 concern; recorded as a follow-up.
+JSONB queries cannot use simple b-tree indexes. Migration 0017 addresses
+this for product search: it adds a generated `tsvector` column on
+`products` that concatenates titles (weight A) and descriptions
+(weight B) for both locales, indexed by GIN. The catalog repository
+now uses `websearch_to_tsquery('simple', ...)` against that column
+instead of the original ILIKE-on-JSONB predicate, lifting the
+single-locale and per-row-scan limitations originally recorded here.
 
 Updating one locale is a read-merge-write. The admin's "edit product"
 endpoint loads the row, merges the patch into the existing JSONB, and
@@ -244,12 +247,11 @@ sequence:
 3. Drops the now-redundant single-string columns: `products.title`,
    `products.description`, `product_variants.title`, `categories.name`.
 
-A GIN index on the `translations` column is not added in v0.1. The
-catalog's reads do not filter by translated content; the admin's listing
-filter is on `title` (now resolved server-side from the JSONB) and uses
-ILIKE rather than JSONB containment. Adding a GIN index — or a generated
-`tsvector` column — is recorded as a follow-up if and when search needs
-it.
+A GIN index on the raw `translations` JSONB column is not added: catalog
+reads still resolve translations row-by-row, and the bulk-of-the-volume
+predicates (status, deleted_at, category) are b-tree friendly. Search
+moved to a separate `search_vector` generated column with its own GIN
+index in migration 0017 — see the "Negative" section for the rationale.
 
 Service helpers live in
 `apps/api/src/modules/catalog/i18n.ts`:
@@ -275,7 +277,7 @@ The cart and checkout modules are not changed by this ADR. Cart line
 items already resolve titles at read time (the cart repository captures
 only `variantId` and price); checkout's order_intent snapshot did not
 capture titles in the first place. The follow-up captured above is
-about whether order_intents *should* capture the full `translations`
+about whether order_intents _should_ capture the full `translations`
 blob when the Order module ships.
 
 ---
