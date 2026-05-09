@@ -7,43 +7,27 @@ import { createTranslator, localePath } from "@/lib/i18n";
 
 const locale = "en" as const;
 const t = createTranslator(locale);
-const url = Astro.url;
-const search = url.searchParams.get("q") ?? undefined;
-const category = url.searchParams.get("category") || undefined;
-const minRaw = url.searchParams.get("min");
-const maxRaw = url.searchParams.get("max");
-const sortRaw = url.searchParams.get("sort");
-const pageRaw = url.searchParams.get("page");
 
-type SortKey = "newest" | "price_asc" | "price_desc";
-const sort: SortKey =
-  sortRaw === "price_asc" || sortRaw === "price_desc" || sortRaw === "newest"
-    ? sortRaw
-    : "newest";
-const page = pageRaw ? Math.max(1, Number.parseInt(pageRaw, 10) || 1) : 1;
-const minPrice = minRaw && /^\d+$/.test(minRaw) ? minRaw : undefined;
-const maxPrice = maxRaw && /^\d+$/.test(maxRaw) ? maxRaw : undefined;
-
+// See `pages/products/index.astro` for the rationale: under
+// `output: "static"` the URL params are unobservable at build time, so the
+// island owns URL parsing (`urlDriven`) and this page fetches the
+// unfiltered canonical first page for SEO + initialData.
 const title = `${t("products.list.title")} — mt-commerce`;
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
 
 const activeFilters = {
-  category,
-  search,
-  minPrice: minRaw ?? undefined,
-  maxPrice: maxRaw ?? undefined,
-  sort: sortRaw ?? undefined,
+  category: undefined,
+  search: undefined,
+  minPrice: undefined,
+  maxPrice: undefined,
+  sort: undefined,
 };
 
 // Mirrors `pages/products/index.astro` — see comments there.
 const seoListing = await listProducts(locale, {
-  ...(category ? { category } : {}),
-  ...(search ? { search } : {}),
-  ...(minPrice ? { minPrice: BigInt(minPrice) } : {}),
-  ...(maxPrice ? { maxPrice: BigInt(maxPrice) } : {}),
-  page,
-  sort,
+  page: 1,
+  sort: "newest",
 });
 const seoCards = toProductCardListing(seoListing, locale);
 const initialGridData = seoCards.items.length > 0 ? seoCards : undefined;
@@ -124,14 +108,8 @@ if (seoListing.items.length > 0) {
       errorLabel={t("products.list.error")}
       skeletonLabel={t("products.list.skeleton_aria")}
       photoComingSoonLabel={t("products.card.photo_coming_soon")}
-      query={{
-        ...(category ? { categorySlug: category } : {}),
-        ...(search ? { search } : {}),
-        ...(minPrice ? { minPriceAmount: minPrice } : {}),
-        ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
-        page,
-        sort,
-      }}
+      query={{ page: 1, sort: "newest" }}
+      urlDriven
       skeletonCount={9}
       showCount
       showingCountTemplate={t("products.list.showing_count")}

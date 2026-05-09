@@ -16,13 +16,19 @@
  *      ↳ Filter expanded:  Min ___  —  Max ___  Terapkan
  *
  * Each interaction is a navigation (GET submit). With JS, the radios and
- * select auto-submit on change; without JS the explicit "Terapkan" button
- * stays as the fallback path. Search and price inputs debounce 600ms.
+ * select auto-submit on change; the explicit "Terapkan" button is always
+ * visible so it works during the SSR-to-hydration window and as the no-JS
+ * fallback. Search and price inputs debounce 600ms.
  *
  * Counts beside category names rendered when the small-catalog SDK call
  * succeeds; absent otherwise (degrade silently to plain category names).
  */
-import { createTranslator, resolveLocale, localePath, type Locale } from "@/lib/i18n";
+import {
+  createTranslator,
+  resolveLocale,
+  localePath,
+  type Locale,
+} from "@/lib/i18n";
 import { listCategories, listProducts } from "@/lib/api";
 
 export interface Props {
@@ -66,22 +72,20 @@ const sortOptions = [
   { value: "price_desc", label: t("products.sort.price_desc") },
 ] as const;
 
-const activeSort = active.sort && ["newest", "price_asc", "price_desc"].includes(active.sort)
-  ? active.sort
-  : "newest";
+const activeSort =
+  active.sort && ["newest", "price_asc", "price_desc"].includes(active.sort)
+    ? active.sort
+    : "newest";
 
 const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
 ---
 
-<form
-  method="get"
-  action={formAction}
-  data-filters-form
-  class="t-body"
->
+<form method="get" action={formAction} data-filters-form class="t-body">
   {/* Search bar — single thin input, full width. */}
-  <div class="flex items-center border-b border-line pb-3">
-    <label for="filter-search" class="sr-only">{t("products.filters.search")}</label>
+  <div class="border-line flex items-center border-b pb-3">
+    <label for="filter-search" class="sr-only"
+      >{t("products.filters.search")}</label
+    >
     <input
       id="filter-search"
       type="search"
@@ -89,29 +93,33 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
       value={active.search ?? ""}
       placeholder={t("products.filters.search_placeholder")}
       autocomplete="off"
-      class="flex-1 bg-transparent t-body text-fg placeholder:text-faint outline-none"
+      class="t-body text-fg placeholder:text-faint flex-1 bg-transparent outline-none"
     />
-    {/*
+    {
+      /*
       Search submit. `min-h-9 px-3` gives a ≥36 px tap target so Lighthouse's
       mobile target-size audit passes; the arrow stays visually quiet.
-    */}
+    */
+    }
     <button
       type="submit"
-      class="inline-flex min-h-9 items-center px-3 t-body text-fg transition-colors duration-150 hover:text-accent"
+      class="t-body text-fg hover:text-accent inline-flex min-h-9 items-center px-3 transition-colors duration-150"
       aria-label={t("products.filters.apply")}
     >
       &rarr;
     </button>
   </div>
 
-  {/* Category — horizontal middot-separated text links (rendered as radios for no-JS). */}
+  {
+    /* Category — horizontal middot-separated text links (rendered as radios for no-JS). */
+  }
   <fieldset class="mt-8">
     <legend class="sr-only">{t("products.filters.category")}</legend>
     <ul class="flex flex-wrap items-center gap-x-3 gap-y-2">
       <li class="flex items-center gap-x-3">
         <label
           class:list={[
-            "cursor-pointer t-body transition-colors duration-150 hover:text-accent",
+            "t-body hover:text-accent cursor-pointer transition-colors duration-150",
             !active.category ? "text-accent" : "text-fg",
           ]}
         >
@@ -124,9 +132,11 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
           />
           <span>
             {t("products.filters.category_all")}
-            {!inline && totalCount > 0 && (
-              <span class="ml-1 t-caption text-faint">({totalCount})</span>
-            )}
+            {
+              !inline && totalCount > 0 && (
+                <span class="t-caption text-faint ml-1">({totalCount})</span>
+              )
+            }
           </span>
         </label>
       </li>
@@ -136,10 +146,12 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
           const isActive = active.category === c.slug;
           return (
             <li class="flex items-center gap-x-3">
-              <span class="text-faint" aria-hidden="true">·</span>
+              <span class="text-faint" aria-hidden="true">
+                ·
+              </span>
               <label
                 class:list={[
-                  "cursor-pointer t-body transition-colors duration-150 hover:text-accent",
+                  "t-body hover:text-accent cursor-pointer transition-colors duration-150",
                   isActive ? "text-accent" : "text-fg",
                 ]}
               >
@@ -153,7 +165,7 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
                 <span>
                   {c.name[locale]}
                   {!inline && typeof count === "number" && (
-                    <span class="ml-1 t-caption text-faint">({count})</span>
+                    <span class="t-caption text-faint ml-1">({count})</span>
                   )}
                 </span>
               </label>
@@ -166,11 +178,11 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
 
   {/* Sort + price-range disclosure row. Inline, sits left-aligned. */}
   <div class="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-    <label class="flex items-center gap-2 t-caption text-muted">
+    <label class="t-caption text-muted flex items-center gap-2">
       <span>{t("products.filters.sort")}:</span>
       <select
         name="sort"
-        class="cursor-pointer border-0 bg-transparent t-body text-fg outline-none transition-colors duration-150 hover:text-accent focus:text-fg"
+        class="t-body text-fg hover:text-accent focus:text-fg cursor-pointer border-0 bg-transparent transition-colors duration-150 outline-none"
       >
         {
           sortOptions.map((opt) => (
@@ -184,7 +196,7 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
 
     <details class="group" data-filters-price-disclosure open={hasPriceFilter}>
       <summary
-        class="flex cursor-pointer list-none items-center gap-1.5 t-caption text-muted transition-colors duration-150 hover:text-fg [&::-webkit-details-marker]:hidden"
+        class="t-caption text-muted hover:text-fg flex cursor-pointer list-none items-center gap-1.5 transition-colors duration-150 [&::-webkit-details-marker]:hidden"
       >
         <span>{t("products.filters.price")}</span>
         <span aria-hidden="true" class="t-body">+</span>
@@ -199,7 +211,7 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
             min="0"
             placeholder={t("products.filters.price_min")}
             value={active.minPrice ?? ""}
-            class="price-figure w-28 border-b border-line bg-transparent py-1 t-body text-fg placeholder:text-faint outline-none transition-colors duration-150 focus:border-fg"
+            class="price-figure border-line t-body text-fg placeholder:text-faint focus:border-fg w-28 border-b bg-transparent py-1 transition-colors duration-150 outline-none"
           />
         </label>
         <span class="text-faint" aria-hidden="true">—</span>
@@ -212,25 +224,28 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
             min="0"
             placeholder={t("products.filters.price_max")}
             value={active.maxPrice ?? ""}
-            class="price-figure w-28 border-b border-line bg-transparent py-1 t-body text-fg placeholder:text-faint outline-none transition-colors duration-150 focus:border-fg"
+            class="price-figure border-line t-body text-fg placeholder:text-faint focus:border-fg w-28 border-b bg-transparent py-1 transition-colors duration-150 outline-none"
           />
         </label>
       </div>
     </details>
 
-    {/*
-      No-JS fallback — the inline script below hides this once auto-submit
-      listeners attach. With JS, every change in the form auto-submits.
-    */}
-    {/*
-      No-JS fallback button. `min-h-9 px-2` gives the tap target the 36×?
-      footprint Lighthouse expects on mobile (it was failing the 24×24 floor
-      previously), without growing the visual weight of the link-style label.
-    */}
+    {
+      /*
+      Always-visible Apply button. With JS, every change in the form
+      auto-submits and pressing Apply just fires a redundant submit
+      (idempotent under view transitions). Keeping it visible avoids a
+      stranded state in the SSR-to-hydration window where a user could
+      change a control before the auto-submit listener attaches.
+      `min-h-9 px-2` keeps the tap target ≥36px so Lighthouse's mobile
+      target-size audit passes, without growing the visual weight of
+      the link-style label.
+    */
+    }
     <button
       type="submit"
       data-filters-apply
-      class="inline-flex min-h-9 items-center px-2 t-caption text-fg underline-offset-4 transition-colors duration-150 hover:text-accent hover:underline"
+      class="t-caption text-fg hover:text-accent inline-flex min-h-9 items-center px-2 underline-offset-4 transition-colors duration-150 hover:underline"
     >
       {t("products.filters.apply")}
     </button>
@@ -245,7 +260,7 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
    * and the mobile sheet). Each gets its own debounce timer keyed off the
    * element itself.
    */
-  const DEBOUNCE_MS = 600;
+  const DEBOUNCE_MS = 300;
 
   function wire(form: HTMLFormElement) {
     let priceTimer: number | undefined;
@@ -286,11 +301,6 @@ const hasPriceFilter = Boolean(active.minPrice || active.maxPrice);
         priceTimer = undefined;
       }
     });
-
-    const applyBtn = form.querySelector<HTMLButtonElement>("[data-filters-apply]");
-    if (applyBtn) {
-      applyBtn.hidden = true;
-    }
   }
 
   document
