@@ -10,21 +10,23 @@ import {
 } from "@/lib/api";
 import { createTranslator, localePath } from "@/lib/i18n";
 
+// Mirrors `src/pages/index.astro` with the locale pinned to `en`. See that
+// file for layout rationale and structural comments — this one only deviates
+// in the locale handling.
 const locale = "en" as const;
 const t = createTranslator(locale);
 
 const title = `${t("home.hero.headline")} — mt-commerce`;
 const description = t("home.hero.subhead");
-
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath("en", "/products");
-const productsHref = localePath(locale, "/products");
+const productsHref = localePath("en", "/products");
+const intlLocale = "en-US";
 
-// Mirrors `pages/index.astro` — see comments there for rationale.
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
-const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
+const homeUrl = new URL(localePath("en", "/"), siteUrl).toString();
 const searchUrl = new URL(
-  localePath(locale, "/search?q={search_term_string}"),
+  localePath("en", "/search?q={search_term_string}"),
   siteUrl,
 ).toString();
 const jsonLd = [
@@ -43,114 +45,366 @@ const jsonLd = [
     inLanguage: "en-US",
     potentialAction: {
       "@type": "SearchAction",
-      target: {
-        "@type": "EntryPoint",
-        urlTemplate: searchUrl,
-      },
+      target: { "@type": "EntryPoint", urlTemplate: searchUrl },
       "query-input": "required name=search_term_string",
     },
   },
 ];
 
-// Three Unsplash widths so a 360 px mobile doesn't pay for a 2400 px image.
-// See `src/pages/index.astro` for the rationale.
-const heroBase = "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9";
-const heroSrcset = [
-  `${heroBase}?w=800&q=70&auto=format&fit=crop 800w`,
-  `${heroBase}?w=1200&q=72&auto=format&fit=crop 1200w`,
-  `${heroBase}?w=1600&q=75&auto=format&fit=crop 1600w`,
-  `${heroBase}?w=2400&q=80&auto=format&fit=crop 2400w`,
-].join(", ");
-const heroSrc1200 = `${heroBase}?w=1200&q=72&auto=format&fit=crop`;
-const heroImageAlt =
-  "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
-
-// Mirrors `pages/index.astro` — five strips fetched in parallel plus
-// the category list. Each strip skips itself when its fetch returns
-// zero items. See the id home for the full rationale.
-const HOME_CATEGORY_SLUGS = ["kopi", "batik", "kerajinan"] as const;
-
-const [categories, newest, bestPrice, kopi, batik, kerajinan] =
-  await Promise.all([
-    listCategories(locale),
-    listProducts(locale, { pageSize: 6, sort: "newest" }),
-    listProducts(locale, { pageSize: 6, sort: "price_asc" }),
-    listProducts(locale, {
-      pageSize: 4,
-      sort: "newest",
-      category: HOME_CATEGORY_SLUGS[0],
-    }),
-    listProducts(locale, {
-      pageSize: 4,
-      sort: "newest",
-      category: HOME_CATEGORY_SLUGS[1],
-    }),
-    listProducts(locale, {
-      pageSize: 4,
-      sort: "newest",
-      category: HOME_CATEGORY_SLUGS[2],
-    }),
-  ]);
-
-function seedFor(result: typeof newest): StoreProductCardListing | undefined {
-  if (result.items.length === 0) return undefined;
-  return toProductCardListing(result, locale);
+function unsplash(
+  id: string,
+  fallbackWidth = 1200,
+): { src: string; srcset: string } {
+  const at = (w: number, q: number) =>
+    `https://images.unsplash.com/${id}?w=${w}&q=${q}&auto=format&fit=crop`;
+  return {
+    src: at(fallbackWidth, 75),
+    srcset: [
+      `${at(560, 70)} 560w`,
+      `${at(900, 75)} 900w`,
+      `${at(1400, 78)} 1400w`,
+      `${at(1920, 80)} 1920w`,
+    ].join(", "),
+  };
 }
 
-const newestSeed = seedFor(newest);
-const bestPriceSeed = seedFor(bestPrice);
-const kopiSeed = seedFor(kopi);
-const batikSeed = seedFor(batik);
-const kerajinanSeed = seedFor(kerajinan);
+const banners = [
+  {
+    img: unsplash("photo-1493106641515-6b5631de4bb9"),
+    title: t("home.banner.1.title"),
+    cta: t("home.banner.1.cta"),
+    alt: t("home.banner.1.alt"),
+    href: `${productsHref}?sort=newest`,
+  },
+  {
+    img: unsplash("photo-1606760227091-3dd870d97f1d"),
+    title: t("home.banner.3.title"),
+    cta: t("home.banner.3.cta"),
+    alt: t("home.banner.3.alt"),
+    href: `${productsHref}?category=batik`,
+  },
+] as const;
 
+const categoryTiles = [
+  {
+    slug: "kopi",
+    label: t("home.tiles.kopi"),
+    alt: t("home.tiles.alt.kopi"),
+    img: unsplash("photo-1495474472287-4d71bcdd2085", 600),
+  },
+  {
+    slug: "batik",
+    label: t("home.tiles.batik"),
+    alt: t("home.tiles.alt.batik"),
+    img: unsplash("photo-1530092285049-1c42085fd395", 600),
+  },
+  {
+    slug: "kerajinan",
+    label: t("home.tiles.kerajinan"),
+    alt: t("home.tiles.alt.kerajinan"),
+    img: unsplash("photo-1565193566173-7a0ee3dbe261", 600),
+  },
+  {
+    slug: "kuliner",
+    label: t("home.tiles.kuliner"),
+    alt: t("home.tiles.alt.kuliner"),
+    img: unsplash("photo-1565299624946-b28f40a0ae38", 600),
+  },
+  {
+    slug: "fashion",
+    label: t("home.tiles.fashion"),
+    alt: t("home.tiles.alt.fashion"),
+    img: unsplash("photo-1490481651871-ab68de25d43d", 600),
+  },
+] as const;
+
+const pickupTiles = [
+  {
+    label: t("home.pickup.1.label"),
+    alt: t("home.pickup.1.alt"),
+    img: unsplash("photo-1559056199-641a0ac8b55e", 600),
+    href: `${productsHref}?category=kopi`,
+  },
+  {
+    label: t("home.pickup.2.label"),
+    alt: t("home.pickup.2.alt"),
+    img: unsplash("photo-1583846783214-7229a91b20ed", 600),
+    href: `${productsHref}?category=batik`,
+  },
+  {
+    label: t("home.pickup.3.label"),
+    alt: t("home.pickup.3.alt"),
+    img: unsplash("photo-1493225457124-a3eb161ffa5f", 600),
+    href: `${productsHref}?category=kerajinan`,
+  },
+  {
+    label: t("home.pickup.4.label"),
+    alt: t("home.pickup.4.alt"),
+    img: unsplash("photo-1583394838336-acd977736f90", 600),
+    href: `${productsHref}?sort=newest`,
+  },
+  {
+    label: t("home.pickup.5.label"),
+    alt: t("home.pickup.5.alt"),
+    img: unsplash("photo-1556228720-195a672e8a03", 600),
+    href: `${productsHref}?category=fashion`,
+  },
+  {
+    label: t("home.pickup.6.label"),
+    alt: t("home.pickup.6.alt"),
+    img: unsplash("photo-1556909114-f6e7ad7d3136", 600),
+    href: productsHref,
+  },
+  {
+    label: t("home.pickup.7.label"),
+    alt: t("home.pickup.7.alt"),
+    img: unsplash("photo-1545239351-1141bd82e8a6", 600),
+    href: `${productsHref}?category=kuliner`,
+  },
+  {
+    label: t("home.pickup.8.label"),
+    alt: t("home.pickup.8.alt"),
+    img: unsplash("photo-1551782450-a2132b4ba21d", 600),
+    href: `${productsHref}?category=kuliner`,
+  },
+] as const;
+
+const featureGroups = [
+  {
+    title: t("home.features.tab1.title"),
+    href: `${productsHref}?category=kerajinan`,
+    items: [
+      {
+        title: t("home.features.tab1.1.title"),
+        alt: t("home.features.tab1.1.alt"),
+        img: unsplash("photo-1556760544-74068565f05c"),
+      },
+      {
+        title: t("home.features.tab1.2.title"),
+        alt: t("home.features.tab1.2.alt"),
+        img: unsplash("photo-1517248135467-4c7edcad34c4"),
+      },
+    ],
+  },
+  {
+    title: t("home.features.tab2.title"),
+    href: `${productsHref}?sort=newest`,
+    items: [
+      {
+        title: t("home.features.tab2.1.title"),
+        alt: t("home.features.tab2.1.alt"),
+        img: unsplash("photo-1601412436009-d964bd02edbc"),
+      },
+      {
+        title: t("home.features.tab2.2.title"),
+        alt: t("home.features.tab2.2.alt"),
+        img: unsplash("photo-1607082348824-0a96f2a4b9da"),
+      },
+    ],
+  },
+  {
+    title: t("home.features.tab3.title"),
+    href: `${productsHref}?category=kuliner`,
+    items: [
+      {
+        title: t("home.features.tab3.1.title"),
+        alt: t("home.features.tab3.1.alt"),
+        img: unsplash("photo-1542838132-92c53300491e"),
+      },
+      {
+        title: t("home.features.tab3.2.title"),
+        alt: t("home.features.tab3.2.alt"),
+        img: unsplash("photo-1568901346375-23c9450c58cd"),
+      },
+    ],
+  },
+] as const;
+
+const activities = [
+  {
+    title: t("home.activities.1.title"),
+    alt: t("home.activities.1.alt"),
+    img: unsplash("photo-1517760444937-f6397edcbbcd", 800),
+    href: localePath("en", "/help"),
+  },
+  {
+    title: t("home.activities.2.title"),
+    alt: t("home.activities.2.alt"),
+    img: unsplash("photo-1503602642458-232111445657", 800),
+    href: localePath("en", "/about"),
+  },
+  {
+    title: t("home.activities.3.title"),
+    alt: t("home.activities.3.alt"),
+    img: unsplash("photo-1473093295043-cdd812d0e601", 800),
+    href: "https://github.com/masyarakat-terbuka/mt-commerce/discussions",
+  },
+  {
+    title: t("home.activities.4.title"),
+    alt: t("home.activities.4.alt"),
+    img: unsplash("photo-1542838686-37da4a9fd1b3", 800),
+    href: "https://github.com/masyarakat-terbuka/mt-commerce",
+  },
+] as const;
+
+const journalCards = [
+  {
+    tag: t("home.journal.brewing.tag"),
+    title: t("home.journal.brewing.title"),
+    alt: t("home.journal.brewing.alt"),
+    img: unsplash("photo-1506372023823-741c83b836fe", 600),
+    href: `${productsHref}?category=kopi`,
+  },
+  {
+    tag: t("home.journal.batik.tag"),
+    title: t("home.journal.batik.title"),
+    alt: t("home.journal.batik.alt"),
+    img: unsplash("photo-1567620905732-2d1ec7ab7445", 600),
+    href: `${productsHref}?category=batik`,
+  },
+  {
+    tag: t("home.journal.craft.tag"),
+    title: t("home.journal.craft.title"),
+    alt: t("home.journal.craft.alt"),
+    img: unsplash("photo-1550583724-b2692b85b150", 600),
+    href: `${productsHref}?category=kerajinan`,
+  },
+  {
+    tag: t("home.journal.kuliner.tag"),
+    title: t("home.journal.kuliner.title"),
+    alt: t("home.journal.kuliner.alt"),
+    img: unsplash("photo-1551717743-49959800b1f6", 600),
+    href: `${productsHref}?category=kuliner`,
+  },
+] as const;
+
+const [categories, newest] = await Promise.all([
+  listCategories(locale),
+  listProducts(locale, { pageSize: 6, sort: "newest" }),
+]);
+
+const newestSeed: StoreProductCardListing | undefined =
+  newest.items.length === 0 ? undefined : toProductCardListing(newest, locale);
 const showNewest = newest.items.length > 0;
-const showBestPrice = bestPrice.items.length > 0;
-const showKopi = kopi.items.length > 0;
-const showBatik = batik.items.length > 0;
-const showKerajinan = kerajinan.items.length > 0;
 ---
 
 <BaseLayout title={title} description={description} jsonLd={jsonLd}>
-  {/* Mirrors id/index.astro — see comments there. */}
-  <section class="relative" aria-labelledby="home-hero">
-    <div
-      class="relative h-[50vh] min-h-[420px] w-full overflow-hidden md:h-[70vh] md:min-h-[560px]"
+  <section
+    class="relative pt-0 md:pt-2"
+    aria-label={t("home.banner.region_label")}
+  >
+    <ul
+      class="hide-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-4 md:gap-5 md:px-8 md:pb-6"
     >
-      <img
-        src={heroSrc1200}
-        srcset={heroSrcset}
-        sizes="100vw"
-        alt={heroImageAlt}
-        loading="eager"
-        decoding="async"
-        fetchpriority="high"
-        class="absolute inset-0 h-full w-full object-cover"
-      />
-      <div class="bg-cream/35 absolute inset-0" aria-hidden="true"></div>
+      {
+        banners.map((b, i) => (
+          <li class="shrink-0 basis-[88%] snap-start md:basis-[58%] lg:basis-[48%]">
+            <a href={b.href} class="group block">
+              <div class="img-frame bg-cream relative aspect-[3/2] w-full overflow-hidden md:aspect-[16/9]">
+                <img
+                  src={b.img.src}
+                  srcset={b.img.srcset}
+                  sizes="(min-width: 1024px) 48vw, (min-width: 768px) 58vw, 88vw"
+                  alt={b.alt}
+                  loading={i === 0 ? "eager" : "lazy"}
+                  decoding="async"
+                  fetchpriority={i === 0 ? "high" : "auto"}
+                  width="1400"
+                  height="788"
+                  onerror="this.parentElement.dataset.broken='true'"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+                <span
+                  class="img-fallback absolute inset-0 items-center justify-center px-6 text-center"
+                  aria-hidden="true"
+                >
+                  <span class="t-body text-fg line-clamp-2">{b.title}</span>
+                </span>
+              </div>
+              <div class="mt-4">
+                <p class="t-h1 text-fg group-hover:text-accent max-w-[28ch] transition-colors duration-200">
+                  {b.title}
+                </p>
+                <span class="t-body text-fg mt-2 inline-flex items-center gap-2 underline-offset-[6px] group-hover:underline">
+                  {b.cta}
+                  <span aria-hidden="true">&rarr;</span>
+                </span>
+              </div>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
 
-      <div class="absolute inset-0 flex items-end">
-        <div class="mx-auto w-full max-w-[1280px] px-5 pb-12 md:px-8 md:pb-20">
-          <h1 id="home-hero" class="t-display text-fg max-w-[20ch]">
-            {t("home.hero.headline")}
-          </h1>
-          <p class="t-body text-fg/85 mt-4 max-w-[44ch]">
-            {t("home.hero.subhead")}
-          </p>
-          <a
-            href={localePath(locale, "/products")}
-            class="t-body text-fg hover:text-accent mt-8 inline-flex items-center gap-2 underline-offset-[6px] transition-colors duration-200 hover:underline"
-          >
-            {t("home.hero.cta")}
-            <span aria-hidden="true">&rarr;</span>
-          </a>
-        </div>
-      </div>
-    </div>
+  <section
+    class="border-line mx-auto max-w-[1280px] border-y px-5 py-5 md:px-8 md:py-6"
+    aria-labelledby="home-trust"
+  >
+    <h2 id="home-trust" class="sr-only">{t("home.trust.title")}</h2>
+    <ul class="grid grid-cols-1 gap-y-3 md:grid-cols-3 md:gap-x-6 md:gap-y-0">
+      <li class="t-caption text-fg md:text-center">
+        {t("home.trust.shipping")}
+      </li>
+      <li class="t-caption text-fg md:text-center">
+        {t("home.trust.payment")}
+      </li>
+      <li class="t-caption text-fg md:text-center">
+        {t("home.trust.artisans")}
+      </li>
+    </ul>
+  </section>
+
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-tiles"
+  >
+    <h2 id="home-tiles" class="t-overline text-muted">
+      {t("home.tiles.title")}
+    </h2>
+    <ul class="mt-5 grid grid-cols-5 gap-x-2 gap-y-5 md:mt-8 md:gap-x-6">
+      {
+        categoryTiles.map((tile) => (
+          <li>
+            <a
+              href={`${productsHref}?category=${tile.slug}`}
+              class="group flex flex-col items-center"
+            >
+              <div class="img-frame bg-cream relative aspect-square w-full overflow-hidden rounded-full">
+                <img
+                  src={tile.img.src}
+                  srcset={tile.img.srcset}
+                  sizes="(min-width: 768px) 18vw, 18vw"
+                  alt={tile.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="600"
+                  height="600"
+                  onerror="this.parentElement.dataset.broken='true'"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+                <span
+                  class="img-fallback absolute inset-0 items-center justify-center px-3 text-center"
+                  aria-hidden="true"
+                >
+                  <span class="t-caption text-fg line-clamp-2">
+                    {tile.label}
+                  </span>
+                </span>
+              </div>
+              <span class="t-caption text-fg group-hover:text-accent mt-3 text-center transition-colors duration-200 md:mt-4">
+                {tile.label}
+              </span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
   </section>
 
   {
     showNewest && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
+      <section class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12">
         <div class="flex items-baseline justify-between gap-4">
           <h2 class="t-overline text-muted">{t("home.strips.newest")}</h2>
           <a
@@ -160,11 +414,11 @@ const showKerajinan = kerajinan.items.length > 0;
             {t("home.strips.newest_link")}
           </a>
         </div>
-        <div class="mt-10 md:mt-14">
+        <div class="mt-5 md:mt-8">
           <ProductGrid
             client:load
             apiUrl={apiUrl}
-            locale="en-US"
+            locale={intlLocale}
             apiLocale={locale}
             detailHrefBase={detailHrefBase}
             emptyLabel={t("products.list.empty")}
@@ -181,154 +435,197 @@ const showKerajinan = kerajinan.items.length > 0;
     )
   }
 
-  {
-    showBestPrice && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">{t("home.strips.best_price")}</h2>
-          <a
-            href={`${productsHref}?sort=price_asc`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.best_price_link")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale="en-US"
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 6, sort: "price_asc" }}
-            limit={6}
-            skeletonCount={6}
-            initialData={bestPriceSeed}
-          />
-        </div>
-      </section>
-    )
-  }
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-pickup"
+  >
+    <h2 id="home-pickup" class="t-overline text-muted">
+      {t("home.pickup.title")}
+    </h2>
+    <ul
+      class="mt-5 grid grid-cols-2 gap-x-3 gap-y-7 md:mt-8 md:grid-cols-4 md:gap-x-4 md:gap-y-8"
+    >
+      {
+        pickupTiles.map((tile) => (
+          <li>
+            <a href={tile.href} class="group block">
+              <div class="bg-cream relative aspect-[4/5] w-full overflow-hidden">
+                <img
+                  src={tile.img.src}
+                  srcset={tile.img.srcset}
+                  sizes="(min-width: 768px) 22vw, 50vw"
+                  alt={tile.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="600"
+                  height="750"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+              </div>
+              <p class="t-body text-fg group-hover:text-accent mt-3 transition-colors duration-200">
+                {tile.label}
+              </p>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
 
-  {
-    showKopi && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">
-            {t("home.strips.by_category.kopi")}
-          </h2>
-          <a
-            href={`${productsHref}?category=kopi`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.by_category.see_all")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale="en-US"
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 4, sort: "newest", categorySlug: "kopi" }}
-            limit={4}
-            skeletonCount={4}
-            initialData={kopiSeed}
-          />
-        </div>
-      </section>
-    )
-  }
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-features"
+  >
+    <h2 id="home-features" class="t-overline text-muted">
+      {t("home.features.title")}
+    </h2>
 
-  {
-    showBatik && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">
-            {t("home.strips.by_category.batik")}
-          </h2>
-          <a
-            href={`${productsHref}?category=batik`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.by_category.see_all")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale="en-US"
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 4, sort: "newest", categorySlug: "batik" }}
-            limit={4}
-            skeletonCount={4}
-            initialData={batikSeed}
-          />
-        </div>
-      </section>
-    )
-  }
+    <div class="mt-6 space-y-10 md:mt-8 md:space-y-14">
+      {
+        featureGroups.map((group) => (
+          <div>
+            <div class="flex items-baseline justify-between gap-4">
+              <h3 class="t-h1 text-fg">{group.title}</h3>
+              <a
+                href={group.href}
+                class="t-body text-muted hover:text-accent transition-colors duration-150"
+              >
+                {t("home.features.see_all")}
+              </a>
+            </div>
+            <ul class="mt-5 grid grid-cols-1 gap-x-6 gap-y-7 md:mt-6 md:grid-cols-2">
+              {group.items.map((item) => (
+                <li>
+                  <a href={group.href} class="group block">
+                    <div class="bg-cream relative aspect-[3/2] w-full overflow-hidden">
+                      <img
+                        src={item.img.src}
+                        srcset={item.img.srcset}
+                        sizes="(min-width: 768px) 50vw, 100vw"
+                        alt={item.alt}
+                        loading="lazy"
+                        decoding="async"
+                        width="1200"
+                        height="800"
+                        class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                      />
+                    </div>
+                    <p class="t-body text-fg group-hover:text-accent mt-4 max-w-[44ch] transition-colors duration-200">
+                      {item.title}
+                    </p>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+  </section>
 
-  {
-    showKerajinan && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">
-            {t("home.strips.by_category.kerajinan")}
-          </h2>
-          <a
-            href={`${productsHref}?category=kerajinan`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.by_category.see_all")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale="en-US"
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 4, sort: "newest", categorySlug: "kerajinan" }}
-            limit={4}
-            skeletonCount={4}
-            initialData={kerajinanSeed}
-          />
-        </div>
-      </section>
-    )
-  }
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-activities"
+  >
+    <h2 id="home-activities" class="t-overline text-muted">
+      {t("home.activities.title")}
+    </h2>
+    <ul
+      class="mt-5 grid grid-cols-2 gap-x-4 gap-y-7 md:mt-8 md:grid-cols-4 md:gap-x-6"
+    >
+      {
+        activities.map((item) => (
+          <li>
+            <a href={item.href} class="group block">
+              <div class="bg-cream relative aspect-[3/2] w-full overflow-hidden">
+                <img
+                  src={item.img.src}
+                  srcset={item.img.srcset}
+                  sizes="(min-width: 768px) 22vw, 50vw"
+                  alt={item.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="800"
+                  height="533"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+              </div>
+              <p class="t-body text-fg group-hover:text-accent mt-3 transition-colors duration-200">
+                {item.title}
+              </p>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
 
-  {
-    categories.length > 0 && (
-      <section class="border-line border-t">
-        <div class="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16">
-          <p class="t-overline text-muted">{t("home.categories.title")}</p>
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-journal"
+  >
+    <div class="flex items-baseline justify-between gap-4">
+      <h2 id="home-journal" class="t-overline text-muted">
+        {t("home.journal.title")}
+      </h2>
+      <a
+        href={localePath("en", "/products")}
+        class="t-body text-muted hover:text-accent transition-colors duration-150"
+      >
+        {t("home.journal.see_all")}
+      </a>
+    </div>
+    <ul
+      class="mt-5 grid grid-cols-2 gap-x-4 gap-y-7 md:mt-8 md:grid-cols-4 md:gap-x-6"
+    >
+      {
+        journalCards.map((card) => (
+          <li>
+            <a href={card.href} class="group block">
+              <div class="bg-cream relative aspect-square w-full overflow-hidden">
+                <img
+                  src={card.img.src}
+                  srcset={card.img.srcset}
+                  sizes="(min-width: 768px) 22vw, 50vw"
+                  alt={card.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="600"
+                  height="600"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+              </div>
+              <p class="t-overline text-muted mt-4">{card.tag}</p>
+              <p class="t-body text-fg group-hover:text-accent mt-2 transition-colors duration-200">
+                {card.title}
+              </p>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <section aria-labelledby="home-browse">
+    <div class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-10">
+      <div class="flex items-baseline justify-between gap-4">
+        <h2 id="home-browse" class="t-overline text-muted">
+          {t("home.browse.title")}
+        </h2>
+        <a
+          href={productsHref}
+          class="t-body text-fg hover:text-accent transition-colors duration-150"
+        >
+          {t("home.browse.cta")}
+        </a>
+      </div>
+      {
+        categories.length > 0 && (
           <ul class="t-body mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
             {categories.map((c, idx) => (
               <li class="flex items-center gap-x-3">
                 <a
-                  href={`${localePath(locale, "/products")}?category=${c.slug}`}
+                  href={`${productsHref}?category=${c.slug}`}
                   class="text-fg hover:text-accent transition-colors duration-150"
                 >
                   {c.name[locale]}
@@ -341,8 +638,27 @@ const showKerajinan = kerajinan.items.length > 0;
               </li>
             ))}
           </ul>
-        </div>
-      </section>
-    )
-  }
+        )
+      }
+    </div>
+  </section>
 </BaseLayout>
+
+<style>
+  .hide-scrollbar {
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .img-fallback {
+    display: none;
+  }
+  .img-frame[data-broken="true"] > img {
+    display: none;
+  }
+  .img-frame[data-broken="true"] > .img-fallback {
+    display: flex;
+  }
+</style>

@@ -41,7 +41,9 @@ const t = createTranslator(locale);
 
 const homeHref = localePath(locale, "/");
 const productsHref = localePath(locale, "/products");
+const collectionsHref = localePath(locale, "/collections");
 const aboutHref = localePath(locale, "/about");
+const helpHref = localePath(locale, "/help");
 const cartHref = localePath(locale, "/cart");
 const accountHref = localePath(locale, "/account");
 
@@ -85,10 +87,11 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
   >
     {/* Left cluster: mobile menu + lowercase wordmark */}
     <div class="flex items-center gap-3">
-      <details class="relative md:hidden">
+      <details class="relative md:hidden" data-mobile-nav>
         <summary
-          class="text-fg flex h-9 w-9 cursor-pointer list-none items-center justify-center [&::-webkit-details-marker]:hidden"
+          class="text-fg flex h-11 w-11 cursor-pointer list-none items-center justify-center [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.menu")}
+          data-mobile-nav-summary
         >
           {/* Two thin lines — calmer than the usual three. */}
           <span
@@ -98,6 +101,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         <nav
           class="border-line bg-cream absolute top-full left-0 z-30 mt-px w-[calc(100vw-2.5rem)] border-b px-5 py-6"
           aria-label="Mobile"
+          data-mobile-nav-panel
         >
           <ul class="t-body flex flex-col gap-4">
             <li>
@@ -111,8 +115,18 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
               >
             </li>
             <li>
+              <a class="hover:text-accent block" href={collectionsHref}
+                >{t("nav.collections")}</a
+              >
+            </li>
+            <li>
               <a class="hover:text-accent block" href={aboutHref}
                 >{t("nav.about")}</a
+              >
+            </li>
+            <li>
+              <a class="hover:text-accent block" href={helpHref}
+                >{t("nav.help")}</a
               >
             </li>
             <li>
@@ -121,6 +135,34 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
               >
             </li>
           </ul>
+          {/* Locale toggle — same `id · en` pattern as the desktop cluster. */}
+          <div
+            class="border-line t-caption mt-6 flex items-center gap-1 border-t pt-4"
+            role="group"
+            aria-label={t("nav.language")}
+          >
+            <a
+              href={idHref}
+              aria-current={locale === "id" ? "page" : undefined}
+              class:list={[
+                "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
+                locale === "id" ? "text-fg" : "text-faint hover:text-fg",
+              ]}
+            >
+              id
+            </a>
+            <span class="text-faint" aria-hidden="true">·</span>
+            <a
+              href={enHref}
+              aria-current={locale === "en" ? "page" : undefined}
+              class:list={[
+                "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
+                locale === "en" ? "text-fg" : "text-faint hover:text-fg",
+              ]}
+            >
+              en
+            </a>
+          </div>
         </nav>
       </details>
 
@@ -252,7 +294,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
       <details class="group relative md:hidden">
         <summary
-          class="text-fg hover:text-accent flex h-9 w-9 cursor-pointer list-none items-center justify-center transition-colors duration-150 [&::-webkit-details-marker]:hidden"
+          class="text-fg hover:text-accent flex h-11 w-11 cursor-pointer list-none items-center justify-center transition-colors duration-150 [&::-webkit-details-marker]:hidden"
           aria-label={t("nav.search")}
         >
           {
@@ -285,7 +327,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
       <a
         href={cartHref}
-        class="text-fg hover:text-accent relative flex h-9 w-9 items-center justify-center transition-colors duration-150"
+        class="text-fg hover:text-accent relative flex h-11 w-11 items-center justify-center transition-colors duration-150"
         aria-label={t("nav.cart")}
         style="view-transition-name: header-cart;"
       >
@@ -332,7 +374,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
       <div class="t-caption hidden items-center gap-1 pl-2 md:flex">
         <a
           href={idHref}
-          aria-current={locale === "id" ? "true" : undefined}
+          aria-current={locale === "id" ? "page" : undefined}
           class:list={[
             "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
             locale === "id" ? "text-fg" : "text-faint hover:text-fg",
@@ -343,7 +385,7 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
         <span class="text-faint" aria-hidden="true">·</span>
         <a
           href={enHref}
-          aria-current={locale === "en" ? "true" : undefined}
+          aria-current={locale === "en" ? "page" : undefined}
           class:list={[
             "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
             locale === "en" ? "text-fg" : "text-faint hover:text-fg",
@@ -656,4 +698,68 @@ const intlLocale = locale === "id" ? "id-ID" : "en-US";
   // ClientRouter swap. Re-running init on each swap re-binds listeners
   // against the freshly rendered header.
   document.addEventListener("astro:page-load", initMegaMenu);
+
+  /**
+   * Mobile nav — tap-outside-to-close.
+   *
+   * The mobile menu is a native `<details>`, so the burger toggles `open`
+   * for free. The gap is that nothing closes it once a user scrolls past:
+   * the panel stays mounted and they lose track that it's open. Listening
+   * for `pointerdown` on the document and clearing `open` when the click
+   * lands outside both the summary and the panel covers that case without
+   * locking body scroll.
+   *
+   * Why pointerdown (not click): fires before the link's click and before
+   * focus shifts, so closing the panel can't race a tap on a link inside
+   * it (the `contains()` guard would catch that anyway, but pointerdown
+   * is also faster perceptually).
+   *
+   * Why exclude the summary: the browser's native toggle handles open/close
+   * on summary itself — if we also closed here, a tap on the burger while
+   * open would close (browser) then re-open (browser default) in some
+   * pointer-event orderings, or close twice. Letting the browser own
+   * summary clicks keeps the toggle behavior intact.
+   *
+   * Same teardown shape as the ESC handler above: stash on `window`,
+   * remove the prior listener before re-adding, so ClientRouter swaps
+   * don't accumulate dead listeners.
+   */
+  function initMobileNavOutsideClick() {
+    const w = window as Window & { __mtMobileNavOutsideClick?: EventListener };
+    if (w.__mtMobileNavOutsideClick) {
+      document.removeEventListener("pointerdown", w.__mtMobileNavOutsideClick);
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      const details = document.querySelector<HTMLDetailsElement>(
+        "details[data-mobile-nav]",
+      );
+      if (!details || !details.open) return;
+      const target = event.target as Node | null;
+      if (!target) return;
+      const summary = details.querySelector<HTMLElement>(
+        "[data-mobile-nav-summary]",
+      );
+      if (summary && summary.contains(target)) return;
+      const panel = details.querySelector<HTMLElement>(
+        "[data-mobile-nav-panel]",
+      );
+      if (panel && panel.contains(target)) return;
+      details.open = false;
+    };
+    w.__mtMobileNavOutsideClick = onPointerDown as EventListener;
+    document.addEventListener("pointerdown", onPointerDown);
+  }
+
+  document.addEventListener("astro:page-load", initMobileNavOutsideClick);
+
+  // After every ClientRouter swap the previous header is replaced, so any
+  // <details open> state is gone with it — but explicitly closing here
+  // mirrors the mega-menu's `astro:after-swap` discipline and guards
+  // against future rendering paths that preserve state.
+  document.addEventListener("astro:after-swap", () => {
+    const details = document.querySelector<HTMLDetailsElement>(
+      "details[data-mobile-nav]",
+    );
+    if (details) details.open = false;
+  });
 </script>

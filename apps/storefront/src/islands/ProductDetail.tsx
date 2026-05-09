@@ -98,6 +98,21 @@ export type ProductDetailProps = {
   /** Path prefix for sibling product links — locale-aware, page builds it. */
   detailHrefBase: string;
   /**
+   * Resolved, localized name of the product's first category (e.g. "Kerajinan").
+   * Looked up server-side against `listCategories(locale)`; absent when the
+   * lookup failed or the product has no category. The overline is hidden
+   * rather than falling back to the raw slug/id.
+   */
+  categoryName?: string;
+  /** Href for the category overline — built by the page, locale-aware. */
+  categoryHref?: string;
+  /** Localized leading text of the inline contact line, e.g. "Ada pertanyaan tentang produk ini?". */
+  contactInlineText: string;
+  /** Localized CTA portion of the inline contact line, e.g. "Hubungi kami.". */
+  contactInlineCta: string;
+  /** Locale-aware href the inline contact link points at. */
+  contactHref: string;
+  /**
    * Optional request-time payload. When present, the island renders the
    * product synchronously on first mount. `slug` must match the product's
    * slug (the page builds them together). When absent, the island falls
@@ -198,6 +213,11 @@ export default function ProductDetail(props: ProductDetailProps) {
     cartErrorLabel,
     relatedTitle,
     detailHrefBase,
+    categoryName,
+    categoryHref,
+    contactInlineText,
+    contactInlineCta,
+    contactHref,
     initialProduct,
   } = props;
 
@@ -365,13 +385,11 @@ export default function ProductDetail(props: ProductDetailProps) {
   const base = lowestPrice(product);
   const altText = product.imageAlt ?? product.title;
 
-  // First category id used as the slug-shaped overline link. The catalog
-  // currently exposes the id as the slug-equivalent; when the SDK exposes
-  // a real slug field we can swap it without touching the layout.
-  const categorySlug = product.categoryIds[0];
-  const categoryHref = categorySlug
-    ? `${detailHrefBase}?category=${categorySlug}`
-    : detailHrefBase;
+  // The page resolves the localized category name server-side via
+  // `listCategories(locale)` and forwards it as `categoryName`. We never
+  // render the raw slug/id as the visible label — when the lookup fails
+  // (or the product has no category) the overline is hidden instead.
+  const overlineHref = categoryHref ?? detailHrefBase;
 
   return (
     <article>
@@ -411,13 +429,16 @@ export default function ProductDetail(props: ProductDetailProps) {
 
       {/* Body — single centered narrow column, generous vertical room. */}
       <section className="mx-auto max-w-[640px] px-5 pt-12 pb-32 md:px-8 md:pt-20 md:pb-24">
-        {/* Overline category — replaces the breadcrumb trail. */}
-        <a
-          href={categoryHref}
-          className="t-overline text-muted hover:text-accent transition-colors duration-150"
-        >
-          {categorySlug ?? ""}
-        </a>
+        {/* Overline category — replaces the breadcrumb trail. Hidden when
+            the server-side category lookup didn't resolve a name. */}
+        {categoryName && (
+          <a
+            href={overlineHref}
+            className="t-overline text-muted hover:text-accent transition-colors duration-150"
+          >
+            {categoryName}
+          </a>
+        )}
 
         {/* Title + price — generous spacing between, no horizontal rule. */}
         <header className="mt-4">
@@ -447,8 +468,21 @@ export default function ProductDetail(props: ProductDetailProps) {
               />
             </div>
 
+            {/* Inline de-risking line — sits between variants and the CTA so
+                the reassurance lands at the moment of decision. Outside the
+                sticky CTA wrapper so it doesn't pin to the viewport on mobile. */}
+            <p className="t-caption text-faint mt-8">
+              {contactInlineText}{" "}
+              <a
+                href={contactHref}
+                className="text-faint hover:text-accent underline-offset-[4px] transition-colors duration-150 hover:underline"
+              >
+                {contactInlineCta}
+              </a>
+            </p>
+
             <div
-              className="border-line bg-cream sticky bottom-0 -mx-5 mt-10 border-t px-5 py-4 md:static md:m-0 md:mt-12 md:border-0 md:bg-transparent md:p-0"
+              className="border-line bg-cream sticky bottom-0 -mx-5 mt-6 border-t px-5 py-4 md:static md:m-0 md:mt-10 md:border-0 md:bg-transparent md:p-0"
               // env(safe-area-inset-bottom) keeps the sticky CTA above the
               // iPhone home indicator on mobile. The 1rem (16px) constant
               // matches the existing py-4 padding so the visual height
@@ -460,6 +494,9 @@ export default function ProductDetail(props: ProductDetailProps) {
               <AddToCartButton
                 productId={product.id}
                 variantId={firstVariant.id}
+                productTitle={product.title}
+                productImageUrl={product.imageUrl}
+                productImageAlt={altText}
                 label={addToCartLabel}
                 soldOutLabel={outOfStockLabel}
                 addedLabel={addedLabel}
