@@ -204,13 +204,7 @@ Permissions are checked at the route level via Hono middleware, and at the servi
 
 ## Background jobs and events
 
-Long-running or deferred work runs in BullMQ, a Redis-backed job queue. The API enqueues jobs; a separate worker process consumes them.
-
-Examples include sending a notification after an order is placed, processing a payment webhook, generating an invoice PDF, and syncing inventory to a marketplace.
-
-Jobs are idempotent, retryable, and observable. Failed jobs land in a dead-letter queue for inspection.
-
-For lightweight cross-module reactions inside the same process, modules use a typed event bus. Events are named with dot notation: `order.placed`, `payment.captured`, `inventory.adjusted`.
+v0.1 ships without a queue. Cross-module reactions go through a typed in-process event bus, run synchronously on the request that emitted the event. Events are named with dot notation: `order.placed`, `payment.captured`, `inventory.adjusted`.
 
 ```typescript
 await events.emit("order.placed", { orderId: order.id });
@@ -220,9 +214,11 @@ events.on("order.placed", async ({ orderId }) => {
 });
 ```
 
-Critical workflows that must not be lost (such as payment capture triggering fulfillment) use jobs. The trade-off between events and jobs is made deliberately, case by case.
+Catch-up work — recovering from missed payment webhooks, mostly — runs as a bulk-reconciliation HTTP endpoint the operator's host cron hits every few minutes. The api is stateless about the schedule.
 
-Operators can also subscribe to events from outside through outgoing webhooks. The webhook system signs every request with HMAC, retries with exponential backoff, and tracks delivery status per subscription.
+A queue (BullMQ on the Redis we already run for sessions, or a Postgres-backed alternative) returns when one of these is true: a side-effect listener regularly costs more than ~200ms p95 of user-facing latency, a deployment scales beyond a single api process and needs exactly-once semantics across them, or operator-subscribed outgoing webhooks become a v0.x feature. ADR-0018 records the reasoning and the trigger conditions.
+
+Operator-subscribed outgoing webhooks are not in v0.1.
 
 ---
 
@@ -238,7 +234,9 @@ export default definePlugin({
   paymentProviders: [FooPaymentProvider],
 
   events: {
-    "order.placed": async ({ orderId }) => { /* ... */ },
+    "order.placed": async ({ orderId }) => {
+      /* ... */
+    },
   },
 
   adminPanels: [{ slug: "foo-settings", component: FooSettings }],
@@ -311,12 +309,12 @@ Deployment guides are provided for common Indonesian and international hosts. Th
 
 In production:
 
-- One or more API processes behind a load balancer
-- One or more worker processes for background jobs
+- One API process (v0.1 is single-process; multiple processes wait for the queue — see ADR-0018)
 - A PostgreSQL instance, managed or self-hosted
-- A Redis instance
+- A Redis instance for sessions and rate-limit state
 - The admin built to static files, served from any web server or CDN
 - The storefront either run as a Node process for SSR, or built to static files for fully cacheable stores
+- A host cron (or systemd timer) hitting `POST /admin/v1/payments/reconcile-pending` every few minutes to recover from missed payment webhooks
 
 ---
 
@@ -366,8 +364,9 @@ mt-commerce handles money and personal data. A few commitments:
 Some decisions are still ahead of us. They will be resolved as the project encounters them:
 
 - The full admin design system (shadcn/ui is the lean; alternatives may be considered)
-- The search backend (Postgres full-text first; a dedicated search engine as a plugin later)
-- File storage (local disk for the first releases; an S3-compatible adapter later)
+- A dedicated search engine as an optional plugin once Postgres FTS hits its limits (Meilisearch and Typesense are the leading candidates)
+- An S3-compatible image upload adapter for multi-process deployments (ADR-0021 captures the v0.1 local-disk decision and the seam)
+- A background-job queue when synchronous listeners stop being the right shape (ADR-0018 captures the v0.1 no-queue decision and the trigger conditions)
 - Multi-tenancy patterns, when relevant
 
 ---
@@ -387,5 +386,17 @@ Accepted:
 - [ADR-0007](./docs/adr/0007-money-as-integers.md): Money as integers
 - [ADR-0008](./docs/adr/0008-plugins-as-npm-packages.md): Plugins as npm packages
 - [ADR-0009](./docs/adr/0009-shadcn-preset.md): shadcn/ui preset for the admin
+- [ADR-0010](./docs/adr/0010-product-content-translations.md): Product content translations as JSONB
+- [ADR-0011](./docs/adr/0011-audit-log.md): Single audit_log table for cross-module mutations
+- [ADR-0012](./docs/adr/0012-payment-provider-interface.md): Payment provider interface
+- [ADR-0013](./docs/adr/0013-shipping-fulfillment-lifecycle.md): Shipping fulfillment lifecycle
+- [ADR-0014](./docs/adr/0014-notification-listeners.md): Notification listeners on the event bus
+- [ADR-0015](./docs/adr/0015-plugin-loader-extension-points.md): Plugin loader and the v0.1 extension points
+- [ADR-0016](./docs/adr/0016-store-settings-singleton.md): store_settings as a singleton row
+- [ADR-0017](./docs/adr/0017-better-auth.md): Better Auth for authentication
+- [ADR-0018](./docs/adr/0018-no-queue-in-v0.1.md): No background-job queue in v0.1
+- [ADR-0019](./docs/adr/0019-idempotency-key.md): Idempotency-Key middleware paired with row-level dedup
+- [ADR-0020](./docs/adr/0020-indonesian-regions-as-own-tables.md): Indonesian regions as four owned tables
+- [ADR-0021](./docs/adr/0021-local-disk-image-upload.md): Local-disk product image upload for v0.1
 
 Future contributors can read the ADRs to understand how the system arrived at its current shape.
