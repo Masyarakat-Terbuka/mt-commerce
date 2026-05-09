@@ -13,7 +13,7 @@ This document explains how to report a security issue, what happens after you re
 The preferred way to report a vulnerability is through GitHub's private vulnerability reporting feature, which keeps the discussion private until a fix is ready:
 
 - Open the [Security tab](https://github.com/masyarakat-terbuka/mt-commerce/security) of the repository
-- Click *Report a vulnerability*
+- Click _Report a vulnerability_
 - Fill in the form
 
 If you cannot use GitHub's private reporting, send an email to:
@@ -124,7 +124,7 @@ For visibility, here is a summary of the security practices the project follows.
 - Dependencies are reviewed and updated regularly
 - CI runs lint, typecheck, and tests on every change
 
-The full architecture is described in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+The full architecture is described in [`ARCHITECTURE.md`](./ARCHITECTURE.md). The v0.1 launch security review is recorded in [`docs/v0.1-security-review.md`](./docs/v0.1-security-review.md).
 
 ---
 
