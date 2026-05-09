@@ -120,15 +120,36 @@ function createFakeRepo(store: Store): PaymentsRepository {
       }
       return null;
     },
-    async listPayments(filters: PaymentListFilters): Promise<PaymentListResult> {
+    async listPayments(
+      filters: PaymentListFilters,
+    ): Promise<PaymentListResult> {
       let rows = [...store.payments.values()];
-      if (filters.orderId) rows = rows.filter((p) => p.orderId === filters.orderId);
-      if (filters.status) rows = rows.filter((p) => p.status === filters.status);
-      if (filters.provider) rows = rows.filter((p) => p.provider === filters.provider);
+      if (filters.orderId)
+        rows = rows.filter((p) => p.orderId === filters.orderId);
+      if (filters.status)
+        rows = rows.filter((p) => p.status === filters.status);
+      if (filters.provider)
+        rows = rows.filter((p) => p.provider === filters.provider);
       const total = rows.length;
       rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       const start = (filters.page - 1) * filters.pageSize;
       return { rows: rows.slice(start, start + filters.pageSize), total };
+    },
+    async listPaymentsForReconcile({
+      olderThan,
+      limit,
+    }: {
+      olderThan: Date;
+      limit: number;
+    }): Promise<PaymentRow[]> {
+      return [...store.payments.values()]
+        .filter(
+          (p) =>
+            (p.status === "pending" || p.status === "authorized") &&
+            p.providerRef !== null &&
+            p.updatedAt < olderThan,
+        )
+        .slice(0, limit);
     },
     async updatePayment(id, patch: PaymentUpdatePatch) {
       const existing = store.payments.get(id);
@@ -136,7 +157,9 @@ function createFakeRepo(store: Store): PaymentsRepository {
       const updated: PaymentRow = {
         ...existing,
         ...(patch.status !== undefined ? { status: patch.status } : {}),
-        ...(patch.providerRef !== undefined ? { providerRef: patch.providerRef } : {}),
+        ...(patch.providerRef !== undefined
+          ? { providerRef: patch.providerRef }
+          : {}),
         updatedAt: tick(store),
       };
       store.payments.set(id, updated);
@@ -312,7 +335,9 @@ function createFakeAuditService(): {
   return { service, events };
 }
 
-function buildHarness(opts: { initialOrderStatus?: FakeOrderState["status"] } = {}) {
+function buildHarness(
+  opts: { initialOrderStatus?: FakeOrderState["status"] } = {},
+) {
   const store = createStore();
   const repo = createFakeRepo(store);
   const orderState: FakeOrderState = {
@@ -400,13 +425,23 @@ describe("initiate", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-replay",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
     const second = await h.service.initiate({
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-replay",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
 
     expect(second.paymentId).toBe(first.paymentId);
@@ -421,7 +456,12 @@ describe("initiate", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-cross",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
 
     await expect(
@@ -447,7 +487,12 @@ describe("initiate", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-pending",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_offline" },
     });
     expect(outcome.status).toBe("pending");
@@ -506,7 +551,12 @@ describe("capture", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-cap",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_x" },
     });
     expect(h.orderState.status).toBe("pending_payment");
@@ -517,7 +567,9 @@ describe("capture", () => {
     expect(captured.status).toBe("captured");
     expect(h.orderState.status).toBe("paid");
 
-    const captureAttempts = h.store.attempts.filter((a) => a.kind === "capture");
+    const captureAttempts = h.store.attempts.filter(
+      (a) => a.kind === "capture",
+    );
     expect(captureAttempts).toHaveLength(1);
     expect(captureAttempts[0]!.status).toBe("success");
   });
@@ -528,7 +580,12 @@ describe("capture", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-cap-2",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_y" },
     });
     await h.service.capture({ paymentId: initiated.paymentId });
@@ -536,7 +593,9 @@ describe("capture", () => {
     expect(second.status).toBe("captured");
     // Two attempt rows for capture (one real success, one no-op
     // success), so the audit trail records both invocations.
-    const captureAttempts = h.store.attempts.filter((a) => a.kind === "capture");
+    const captureAttempts = h.store.attempts.filter(
+      (a) => a.kind === "capture",
+    );
     expect(captureAttempts).toHaveLength(2);
   });
 });
@@ -552,7 +611,12 @@ describe("refund", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-ref",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
 
     const refunded = await h.service.refund({
@@ -583,7 +647,12 @@ describe("handleWebhook", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-wh",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_wh" },
     });
     const stored = h.store.payments.get(initiated.paymentId)!;
@@ -611,7 +680,12 @@ describe("handleWebhook", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-wh-bad",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_z" },
     });
     const body = JSON.stringify({
@@ -636,7 +710,12 @@ describe("handleWebhook", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-wh-dup",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_dup" },
     });
     const stored = h.store.payments.get(initiated.paymentId)!;
@@ -666,7 +745,9 @@ describe("handleWebhook", () => {
     // No additional order transition.
     expect(h.orderTransitions).toHaveLength(transitionsAfterFirst);
     // A duplicate webhook attempt row WAS recorded for the audit trail.
-    const webhookAttempts = h.store.attempts.filter((a) => a.kind === "webhook");
+    const webhookAttempts = h.store.attempts.filter(
+      (a) => a.kind === "webhook",
+    );
     expect(webhookAttempts.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -690,6 +771,285 @@ describe("handleWebhook", () => {
 });
 
 // ---------------------------------------------------------------------------
+// reconcilePayment
+// ---------------------------------------------------------------------------
+
+describe("reconcilePayment", () => {
+  it("transitions a still-pending payment when the provider reports captured", async () => {
+    const h = buildHarness();
+    const initiated = await h.service.initiate({
+      orderId: ORDER_ID,
+      providerCode: "in_memory_test",
+      idempotencyKey: "key-rec-1",
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
+      metadata: { code: "TEST_PENDING_a" },
+    });
+
+    // Simulate the upstream provider settling the payment without a
+    // webhook ever arriving (e.g. a VA transfer that we missed the
+    // notification for).
+    const stored = h.store.payments.get(initiated.paymentId)!;
+    h.provider.forceState(initiated.paymentId, {
+      status: "captured",
+      providerRef: stored.providerRef!,
+      amount: stored.amount,
+    });
+
+    const result = await h.service.reconcilePayment(initiated.paymentId);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind === "applied") {
+      expect(result.from).toBe("pending");
+      expect(result.to).toBe("captured");
+    }
+    expect(h.orderState.status).toBe("paid");
+    const reconcileAttempts = h.store.attempts.filter(
+      (a) => a.kind === "reconcile",
+    );
+    expect(reconcileAttempts.length).toBeGreaterThanOrEqual(1);
+    expect(reconcileAttempts[0]?.status).toBe("success");
+  });
+
+  it("returns still_pending without a transition when the provider has not settled", async () => {
+    const h = buildHarness();
+    const initiated = await h.service.initiate({
+      orderId: ORDER_ID,
+      providerCode: "in_memory_test",
+      idempotencyKey: "key-rec-pend",
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
+      metadata: { code: "TEST_PENDING_b" },
+    });
+
+    const result = await h.service.reconcilePayment(initiated.paymentId);
+
+    expect(result.kind).toBe("still_pending");
+    const stored = h.store.payments.get(initiated.paymentId)!;
+    expect(stored.status).toBe("pending");
+    expect(h.orderState.status).toBe("pending_payment");
+    // The "still pending" attempt is recorded as success so an operator
+    // tail-ing the audit trail can see the reconciler's heartbeat.
+    const reconcileAttempts = h.store.attempts.filter(
+      (a) => a.kind === "reconcile",
+    );
+    expect(reconcileAttempts).toHaveLength(1);
+    expect(reconcileAttempts[0]?.status).toBe("success");
+  });
+
+  it("returns terminal without contacting the provider when the row is already terminal", async () => {
+    const h = buildHarness();
+    const initiated = await h.service.initiate({
+      orderId: ORDER_ID,
+      providerCode: "in_memory_test",
+      idempotencyKey: "key-rec-term",
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
+      // No TEST_PENDING_ prefix → captured-on-initiate.
+    });
+
+    const result = await h.service.reconcilePayment(initiated.paymentId);
+
+    expect(result.kind).toBe("terminal");
+    if (result.kind === "terminal") {
+      expect(result.current).toBe("captured");
+    }
+    // No reconcile attempt is recorded — terminal short-circuits before
+    // the provider call.
+    const reconcileAttempts = h.store.attempts.filter(
+      (a) => a.kind === "reconcile",
+    );
+    expect(reconcileAttempts).toHaveLength(0);
+  });
+
+  it("returns unknown_to_provider when fetchStatus returns null", async () => {
+    const h = buildHarness();
+    const initiated = await h.service.initiate({
+      orderId: ORDER_ID,
+      providerCode: "in_memory_test",
+      idempotencyKey: "key-rec-unk",
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
+      metadata: { code: "TEST_PENDING_c" },
+    });
+    // Swap in a fresh provider that has no state for this paymentId —
+    // mirrors a Snap session that expired without the buyer paying, so
+    // Midtrans's GET /v2/{orderId}/status returns 404.
+    h.registry.reset();
+    h.registry.register(createInMemoryTestPaymentProvider());
+
+    const result = await h.service.reconcilePayment(initiated.paymentId);
+    expect(result.kind).toBe("unknown_to_provider");
+    const reconcileAttempts = h.store.attempts.filter(
+      (a) => a.kind === "reconcile",
+    );
+    expect(reconcileAttempts).toHaveLength(1);
+    expect(reconcileAttempts[0]?.status).toBe("failure");
+  });
+
+  it("returns provider_unsupported when the registered provider has no fetchStatus", async () => {
+    const h = buildHarness();
+    const initiated = await h.service.initiate({
+      orderId: ORDER_ID,
+      providerCode: "in_memory_test",
+      idempotencyKey: "key-rec-noop",
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
+      metadata: { code: "TEST_PENDING_d" },
+    });
+    // Replace with a provider that does not implement fetchStatus.
+    const stub = {
+      ...h.provider,
+      fetchStatus: undefined,
+    };
+    h.registry.reset();
+    h.registry.register(stub);
+
+    const result = await h.service.reconcilePayment(initiated.paymentId);
+    expect(result.kind).toBe("provider_unsupported");
+  });
+
+  it("records a failure attempt when fetchStatus throws", async () => {
+    const h = buildHarness();
+    const initiated = await h.service.initiate({
+      orderId: ORDER_ID,
+      providerCode: "in_memory_test",
+      idempotencyKey: "key-rec-err",
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
+      metadata: { code: "TEST_PENDING_e" },
+    });
+    // Replace with a provider whose fetchStatus throws.
+    const broken = {
+      ...h.provider,
+      async fetchStatus() {
+        throw new Error("network unreachable");
+      },
+    };
+    h.registry.reset();
+    h.registry.register(broken);
+
+    const result = await h.service.reconcilePayment(initiated.paymentId);
+    expect(result.kind).toBe("error");
+    const reconcileAttempts = h.store.attempts.filter(
+      (a) => a.kind === "reconcile",
+    );
+    expect(reconcileAttempts).toHaveLength(1);
+    expect(reconcileAttempts[0]?.status).toBe("failure");
+    expect(reconcileAttempts[0]?.errorMessage).toContain("network");
+  });
+
+  it("throws NotFoundError for an unknown payment id", async () => {
+    const h = buildHarness();
+    await expect(
+      h.service.reconcilePayment("pay_does_not_exist"),
+    ).rejects.toThrow(/not found/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reconcilePendingPayments
+// ---------------------------------------------------------------------------
+
+describe("reconcilePendingPayments", () => {
+  it("aggregates results across multiple stale pending payments", async () => {
+    const h = buildHarness();
+    // Seed three pending rows directly. We bypass `initiate` because
+    // it needs a distinct order per call and the fake order service
+    // only knows about ORDER_ID. Going through the store also lets us
+    // backdate `updatedAt` past the 5-minute threshold without an extra
+    // mutation.
+    const old = new Date(Date.now() - 10 * 60_000);
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const paymentId = `pay_bulk_${String(i)}`;
+      const providerRef = `test_bulk_${String(i)}`;
+      ids.push(paymentId);
+      h.store.payments.set(paymentId, {
+        id: paymentId,
+        orderId: ORDER_ID,
+        provider: "in_memory_test",
+        providerRef,
+        status: "pending",
+        amount: ORDER_TOTAL_AMOUNT,
+        currency: "IDR",
+        idempotencyKey: `key-bulk-${String(i)}`,
+        createdAt: NOW,
+        updatedAt: old,
+      });
+      // Provider knows about all three; we'll settle row 0 below.
+      h.provider.forceState(paymentId, {
+        status: "pending",
+        providerRef,
+        amount: ORDER_TOTAL_AMOUNT,
+      });
+    }
+
+    // Settle row 0 outside the platform; leave 1 and 2 still pending.
+    h.provider.forceState(ids[0]!, {
+      status: "captured",
+      providerRef: `test_bulk_0`,
+      amount: ORDER_TOTAL_AMOUNT,
+    });
+
+    const summary = await h.service.reconcilePendingPayments();
+
+    expect(summary.checked).toBe(3);
+    expect(summary.applied).toBe(1);
+    expect(summary.stillPending).toBe(2);
+    expect(summary.errors).toBe(0);
+  });
+
+  it("respects the olderThanMinutes threshold", async () => {
+    const h = buildHarness();
+    // Seed a fresh pending row directly with `updatedAt` set to wall
+    // clock now — under the default 5-minute threshold, it should not
+    // be picked up. Going through `initiate` would stamp `updatedAt`
+    // from the fake's deterministic clock (NOW = 2026-05-08), which
+    // sits arbitrarily far behind real Date.now() and would always
+    // qualify.
+    h.store.payments.set("pay_fresh", {
+      id: "pay_fresh",
+      orderId: ORDER_ID,
+      provider: "in_memory_test",
+      providerRef: "test_fresh",
+      status: "pending",
+      amount: ORDER_TOTAL_AMOUNT,
+      currency: "IDR",
+      idempotencyKey: "key-fresh",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const summary = await h.service.reconcilePendingPayments();
+    expect(summary.checked).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // reads
 // ---------------------------------------------------------------------------
 
@@ -700,7 +1060,12 @@ describe("reads", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-read",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
     const detail = await h.service.getById(initiated.paymentId);
     expect(detail).not.toBeNull();
@@ -717,7 +1082,12 @@ describe("reads", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-by-order",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
     const found = await h.service.getByOrderId(ORDER_ID);
     expect(found).not.toBeNull();
@@ -730,7 +1100,12 @@ describe("reads", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-list",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
     const captured = await h.service.list({
       status: "captured",
@@ -758,7 +1133,12 @@ describe("audit", () => {
       orderId: ORDER_ID,
       providerCode: "in_memory_test",
       idempotencyKey: "key-audit",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
     });
     await h.service.refund({ paymentId: initiated.paymentId });
 

@@ -30,6 +30,8 @@ import { id } from "@mt-commerce/core/ulid";
 import type {
   CaptureInput,
   CaptureResult,
+  FetchStatusInput,
+  FetchStatusResult,
   InitiateInput,
   InitiateResult,
   PaymentProvider,
@@ -111,7 +113,11 @@ export function createInMemoryTestPaymentProvider(
 
       // Default — synchronous capture.
       state.set(input.payment.id, { status: "captured", providerRef, amount });
-      return { status: "captured", providerRef, rawResponse: { code: code || null } };
+      return {
+        status: "captured",
+        providerRef,
+        rawResponse: { code: code || null },
+      };
     },
 
     async capture(input: CaptureInput): Promise<CaptureResult> {
@@ -124,7 +130,10 @@ export function createInMemoryTestPaymentProvider(
         );
       }
       state.set(input.payment.id, { ...existing, status: "captured" });
-      return { status: "captured", rawResponse: { providerRef: existing.providerRef } };
+      return {
+        status: "captured",
+        rawResponse: { providerRef: existing.providerRef },
+      };
     },
 
     async refund(input: RefundInput): Promise<RefundResult> {
@@ -175,7 +184,11 @@ export function createInMemoryTestPaymentProvider(
           "in-memory test provider: webhook body missing event/providerRef",
         );
       }
-      if (status !== "captured" && status !== "failed" && status !== "refunded") {
+      if (
+        status !== "captured" &&
+        status !== "failed" &&
+        status !== "refunded"
+      ) {
         throw new Error(
           `in-memory test provider: unsupported webhook status "${String(status)}"`,
         );
@@ -185,6 +198,33 @@ export function createInMemoryTestPaymentProvider(
         providerRef,
         status,
         rawPayload: payload,
+      };
+    },
+
+    /**
+     * Reconciliation seam — reads from the in-memory state map. Tests
+     * use `forceState` to simulate the upstream provider settling a
+     * pending payment "out of band" (the equivalent of a buyer
+     * completing a VA transfer outside the platform's flow), then
+     * call `service.reconcilePayment` to drive the catch-up.
+     *
+     * Returns `null` when no state was ever recorded — analogous to
+     * Midtrans's 404 for an expired Snap session.
+     */
+    async fetchStatus(
+      input: FetchStatusInput,
+    ): Promise<FetchStatusResult | null> {
+      const existing = state.get(input.payment.id);
+      if (!existing) return null;
+      return {
+        providerRef: existing.providerRef,
+        status: existing.status,
+        rawPayload: {
+          source: "in_memory_test",
+          providerRef: existing.providerRef,
+          status: existing.status,
+          amount: existing.amount.toString(),
+        },
       };
     },
 

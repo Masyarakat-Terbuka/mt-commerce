@@ -11,7 +11,17 @@
  * initiate-attempt" inside one unit so a partial failure cannot leave a
  * payment row without its corresponding attempt row.
  */
-import { and, asc, desc, eq, isNotNull, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  lt,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { db as defaultDb } from "../../db/client.js";
 import {
@@ -72,7 +82,20 @@ export interface PaymentsRepository {
     providerRef: string,
   ): Promise<PaymentRow | null>;
   listPayments(filters: PaymentListFilters): Promise<PaymentListResult>;
-  updatePayment(id: string, patch: PaymentUpdatePatch): Promise<PaymentRow | null>;
+  /**
+   * Find non-terminal payments older than `olderThan` whose `providerRef`
+   * is non-null — i.e. payments the provider knows about but the
+   * platform has not heard the resolution of. Used by the reconciliation
+   * loop. Newest-first; capped at `limit`.
+   */
+  listPaymentsForReconcile(opts: {
+    olderThan: Date;
+    limit: number;
+  }): Promise<PaymentRow[]>;
+  updatePayment(
+    id: string,
+    patch: PaymentUpdatePatch,
+  ): Promise<PaymentRow | null>;
 
   // Attempts
   insertAttempt(row: NewPaymentAttemptRow): Promise<PaymentAttemptRow>;
@@ -81,11 +104,14 @@ export interface PaymentsRepository {
   withTransaction<T>(fn: (tx: PaymentsRepository) => Promise<T>): Promise<T>;
 }
 
-export function createPaymentsRepository(db: Db = defaultDb): PaymentsRepository {
+export function createPaymentsRepository(
+  db: Db = defaultDb,
+): PaymentsRepository {
   return {
     async insertPayment(row) {
       const [inserted] = await db.insert(payments).values(row).returning();
-      if (!inserted) throw new Error("insertPayment: returning() yielded no rows");
+      if (!inserted)
+        throw new Error("insertPayment: returning() yielded no rows");
       return inserted;
     },
 
@@ -148,9 +174,11 @@ export function createPaymentsRepository(db: Db = defaultDb): PaymentsRepository
 
     async listPayments(filters) {
       const conditions: SQL[] = [];
-      if (filters.orderId) conditions.push(eq(payments.orderId, filters.orderId));
+      if (filters.orderId)
+        conditions.push(eq(payments.orderId, filters.orderId));
       if (filters.status) conditions.push(eq(payments.status, filters.status));
-      if (filters.provider) conditions.push(eq(payments.provider, filters.provider));
+      if (filters.provider)
+        conditions.push(eq(payments.provider, filters.provider));
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       const countRows = await db
@@ -171,6 +199,37 @@ export function createPaymentsRepository(db: Db = defaultDb): PaymentsRepository
       return { rows, total };
     },
 
+    async listPaymentsForReconcile({ olderThan, limit }) {
+      // The candidate set is "non-terminal AND has a providerRef AND
+      // the row hasn't been touched in <olderThan> minutes". We use
+      // `updated_at` rather than `created_at` so a row that was retried
+      // recently doesn't show up before its retry has had a chance to
+      // settle.
+      const NON_TERMINAL: PaymentStatus[] = [
+        "pending",
+        "authorized",
+        "captured",
+      ];
+      // `captured` is non-terminal in the sense that a refund event can
+      // still arrive — but a captured payment doesn't need a status
+      // re-fetch from the provider to recover. We narrow to the truly
+      // open states.
+      const OPEN: PaymentStatus[] = ["pending", "authorized"];
+      void NON_TERMINAL;
+      return db
+        .select()
+        .from(payments)
+        .where(
+          and(
+            inArray(payments.status, OPEN),
+            isNotNull(payments.providerRef),
+            lt(payments.updatedAt, olderThan),
+          ),
+        )
+        .orderBy(desc(payments.createdAt))
+        .limit(limit);
+    },
+
     async updatePayment(id, patch) {
       const [updated] = await db
         .update(payments)
@@ -185,7 +244,8 @@ export function createPaymentsRepository(db: Db = defaultDb): PaymentsRepository
         .insert(paymentAttempts)
         .values(row)
         .returning();
-      if (!inserted) throw new Error("insertAttempt: returning() yielded no rows");
+      if (!inserted)
+        throw new Error("insertAttempt: returning() yielded no rows");
       return inserted;
     },
 

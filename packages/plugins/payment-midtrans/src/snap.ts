@@ -95,6 +95,29 @@ export interface MidtransRefundResponse {
   readonly refund_key?: string;
 }
 
+/**
+ * Subset of Midtrans's `GET /v2/{order_id}/status` response that the
+ * reconciliation path consumes. Midtrans returns more fields (masked
+ * card, payment type, channel response code, etc.) but the platform
+ * only needs the lifecycle ones — `transaction_id` becomes the
+ * canonical `providerRef`, `transaction_status` + `fraud_status` map
+ * to the platform's `(captured|failed|refunded|pending)` enum via
+ * `mapMidtransStatus`.
+ *
+ * Marked `Partial`-ish on purpose: a 404 short-circuits to `null`
+ * before this shape is constructed, but the live shape carries every
+ * field listed below for non-404 responses.
+ */
+export interface MidtransStatusResponse {
+  readonly status_code: string;
+  readonly status_message: string;
+  readonly transaction_id: string;
+  readonly order_id: string;
+  readonly transaction_status: string;
+  readonly fraud_status?: string;
+  readonly gross_amount: string;
+}
+
 // ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
@@ -116,6 +139,15 @@ export type FetchLike = (
   status: number;
   text(): Promise<string>;
 }>;
+
+/**
+ * Sentinel returned by `getTransactionStatus` when Midtrans replies
+ * with 404 (transaction not found). Distinct from `null` on a network
+ * failure — the latter throws — so callers can treat "unknown to the
+ * provider" as a domain outcome rather than an exception.
+ */
+export const TRANSACTION_NOT_FOUND = Symbol("midtrans-transaction-not-found");
+export type TransactionNotFound = typeof TRANSACTION_NOT_FOUND;
 
 export interface SnapClientOptions {
   readonly serverKey: string;
@@ -160,7 +192,10 @@ export class SnapClient {
   ): Promise<SnapTransactionResponse> {
     const endpoint = `${this.snapBase}/transactions`;
     const json = await this.postJson<SnapTransactionResponse>(endpoint, body);
-    if (typeof json.token !== "string" || typeof json.redirect_url !== "string") {
+    if (
+      typeof json.token !== "string" ||
+      typeof json.redirect_url !== "string"
+    ) {
       throw new MidtransApiError({
         message:
           "Snap /transactions response missing token or redirect_url; check Midtrans dashboard configuration",
@@ -170,6 +205,65 @@ export class SnapClient {
       });
     }
     return json;
+  }
+
+  /**
+   * GET `/v2/{orderId}/status` against the Core API to read the
+   * canonical state of a Midtrans transaction. Used by the
+   * reconciliation path to recover from missed webhooks: the platform
+   * asks Midtrans "what's the current status?" and feeds the answer
+   * through the same state machine the webhook handler uses.
+   *
+   * Returns `TRANSACTION_NOT_FOUND` when Midtrans replies 404 — this
+   * is a real outcome (e.g. a Snap token expired before the buyer
+   * paid), not a transport failure. Other non-2xx responses throw a
+   * `MidtransApiError` so the caller can surface a typed failure on
+   * the audit trail.
+   */
+  async getTransactionStatus(
+    orderId: string,
+  ): Promise<MidtransStatusResponse | TransactionNotFound> {
+    const endpoint = `${this.coreBase}/v2/${encodeURIComponent(orderId)}/status`;
+    const response = await this.fetchImpl(endpoint, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: this.authHeader,
+      },
+    });
+    const text = await response.text();
+
+    let parsed: unknown;
+    try {
+      parsed = text === "" ? {} : JSON.parse(text);
+    } catch {
+      throw new MidtransApiError({
+        message: `Midtrans returned non-JSON body (status ${response.status})`,
+        status: response.status,
+        body: text,
+        endpoint,
+      });
+    }
+
+    // Midtrans signals "not found" with HTTP 404 AND a `status_code`
+    // body field of "404" (the transport status alone matches; we
+    // double-check the body so a malformed proxy can't fake one). Any
+    // other non-2xx is a real error.
+    if (response.status === 404) {
+      return TRANSACTION_NOT_FOUND;
+    }
+    if (!response.ok) {
+      const message =
+        extractErrorMessage(parsed) ?? `Midtrans HTTP ${response.status}`;
+      throw new MidtransApiError({
+        message,
+        status: response.status,
+        body: parsed,
+        endpoint,
+      });
+    }
+
+    return parsed as MidtransStatusResponse;
   }
 
   /**
@@ -227,7 +321,8 @@ export class SnapClient {
       });
     }
     if (!response.ok) {
-      const message = extractErrorMessage(parsed) ?? `Midtrans HTTP ${response.status}`;
+      const message =
+        extractErrorMessage(parsed) ?? `Midtrans HTTP ${response.status}`;
       throw new MidtransApiError({
         message,
         status: response.status,

@@ -74,6 +74,8 @@ import type {
 import type {
   CaptureInput,
   CaptureResult,
+  FetchStatusInput,
+  FetchStatusResult,
   InitiateInput,
   InitiateResult,
   PaymentProvider as ModulePaymentProvider,
@@ -91,7 +93,10 @@ import type {
 export function adaptCorePaymentProvider(
   core: CorePaymentProvider,
 ): ModulePaymentProvider {
-  if (typeof core?.initiate !== "function" || typeof core?.refund !== "function") {
+  if (
+    typeof core?.initiate !== "function" ||
+    typeof core?.refund !== "function"
+  ) {
     throw new Error(
       `payments plugin adapter: provider "${core?.code ?? "<unknown>"}" is missing required methods (initiate, refund)`,
     );
@@ -129,16 +134,18 @@ export function adaptCorePaymentProvider(
 
     async refund(input: RefundInput): Promise<RefundResult> {
       const intent = buildRefundIntent(input);
-      const amount = input.amount !== undefined
-        ? ({ amount: input.amount, currency: "IDR" } as Money)
-        : undefined;
+      const amount =
+        input.amount !== undefined
+          ? ({ amount: input.amount, currency: "IDR" } as Money)
+          : undefined;
       // The core contract uses the intent.amount for the full-refund
       // default; we don't carry currency at this seam (it's resolved on
       // the row, not the call), so we omit the explicit amount when
       // unset and let the plugin resolve.
-      const result = amount !== undefined
-        ? await core.refund(intent, amount)
-        : await core.refund(intent);
+      const result =
+        amount !== undefined
+          ? await core.refund(intent, amount)
+          : await core.refund(intent);
       return {
         status: "refunded",
         ...(result.raw !== undefined ? { rawResponse: result.raw } : {}),
@@ -170,6 +177,33 @@ export function adaptCorePaymentProvider(
       // own route handler (see Midtrans's `parseWebhook`-style helpers).
       return projectWebhookPayload(core.code, input.rawBody);
     },
+
+    // The plugin's optional `fetchStatus` is forwarded only when the
+    // plugin actually implements it. The service guards on
+    // `provider.fetchStatus !== undefined` before calling.
+    ...(typeof core.fetchStatus === "function"
+      ? {
+          async fetchStatus(
+            input: FetchStatusInput,
+          ): Promise<FetchStatusResult | null> {
+            const intent = buildStatusIntent(input);
+            // Bind the plugin's `fetchStatus` to its prototype so the
+            // method retains its `this` reference when called through
+            // the destructured handle.
+            const fetchStatus = core.fetchStatus!.bind(core);
+            const snapshot = await fetchStatus(intent);
+            if (snapshot === null) return null;
+            return {
+              providerRef: snapshot.providerRef,
+              status: snapshot.status,
+              rawPayload:
+                snapshot.raw && typeof snapshot.raw === "object"
+                  ? snapshot.raw
+                  : {},
+            };
+          },
+        }
+      : {}),
   };
 }
 
@@ -225,6 +259,20 @@ function buildCaptureIntent(input: CaptureInput): PaymentIntentLike {
   return {
     id: input.payment.id,
     orderId: input.payment.id, // unused by capture; pass id as a stable handle
+    amount,
+    idempotencyKey: input.payment.id,
+  };
+}
+
+function buildStatusIntent(input: FetchStatusInput): PaymentIntentLike {
+  // The plugin reads `intent.id` as the upstream order_id (the Midtrans
+  // plugin sets order_id = paymentId at initiate time). We pass a zero
+  // amount because status lookup is read-only — providers don't price
+  // a query.
+  const amount: Money = { amount: 0n, currency: "IDR" };
+  return {
+    id: input.payment.id,
+    orderId: input.payment.orderId,
     amount,
     idempotencyKey: input.payment.id,
   };

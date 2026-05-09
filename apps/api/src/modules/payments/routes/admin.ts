@@ -210,5 +210,119 @@ export function buildPaymentsAdminRoutes(
     },
   );
 
+  // -------------------------------------------------------------------
+  // Reconciliation
+  // -------------------------------------------------------------------
+
+  const ReconcileResultWire = z
+    .object({
+      kind: z.enum([
+        "applied",
+        "no_change",
+        "still_pending",
+        "unknown_to_provider",
+        "provider_unsupported",
+        "terminal",
+        "error",
+      ]),
+      paymentId: z.string(),
+      from: z.string().optional(),
+      to: z.string().optional(),
+      current: z.string().optional(),
+      provider: z.string().optional(),
+      message: z.string().optional(),
+    })
+    .openapi("PaymentReconcileResult");
+
+  const ReconcilePendingResultWire = z
+    .object({
+      checked: z.number().int().nonnegative(),
+      applied: z.number().int().nonnegative(),
+      noChange: z.number().int().nonnegative(),
+      stillPending: z.number().int().nonnegative(),
+      unknownToProvider: z.number().int().nonnegative(),
+      errors: z.number().int().nonnegative(),
+      unsupported: z.number().int().nonnegative(),
+    })
+    .openapi("PaymentReconcilePendingResult");
+
+  const ReconcilePendingBody = z
+    .object({
+      olderThanMinutes: z
+        .number()
+        .int()
+        .min(1)
+        .max(60 * 24)
+        .optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+    })
+    .openapi("PaymentReconcilePendingInput");
+
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/payments/{id}/reconcile",
+      tags: [TAG],
+      summary: "Reconcile a single payment with the provider",
+      description:
+        "Asks the registered provider for the canonical status of this payment. If the provider reports a terminal status the platform has not yet seen, the row is transitioned and the linked order follows. Used to recover from missed webhooks.",
+      request: { params: IdParam },
+      responses: {
+        200: {
+          content: { "application/json": { schema: ReconcileResultWire } },
+          description: "Reconciliation outcome.",
+        },
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+        404: errorResponse("Payment not found."),
+      },
+    }),
+    async (c) => {
+      const result = await service.reconcilePayment(c.req.param("id"));
+      return c.json(result, 200);
+    },
+  );
+
+  router.openapi(
+    createRoute({
+      method: "post",
+      path: "/payments/reconcile-pending",
+      tags: [TAG],
+      summary: "Reconcile every pending payment older than a threshold",
+      description:
+        "Bulk reconciliation. Loads non-terminal payments whose `updated_at` is older than `olderThanMinutes` (default 5), polls each provider, and applies the canonical status. Designed to run from a host cron (or a job queue) every few minutes.",
+      request: {
+        body: {
+          required: false,
+          content: { "application/json": { schema: ReconcilePendingBody } },
+        },
+      },
+      responses: {
+        200: {
+          content: {
+            "application/json": { schema: ReconcilePendingResultWire },
+          },
+          description: "Aggregate counts across the reconciled candidates.",
+        },
+        400: errorResponse("Invalid body."),
+        401: errorResponse("Authentication required."),
+        403: errorResponse("Forbidden."),
+      },
+    }),
+    async (c) => {
+      // The body is optional — when absent, the service uses defaults.
+      let body: { olderThanMinutes?: number; limit?: number } = {};
+      try {
+        const parsed = c.req.valid("json");
+        if (parsed) body = parsed;
+      } catch {
+        // No body / invalid JSON. Fall back to defaults; the schema is
+        // permissive so this is the friendly path.
+      }
+      const result = await service.reconcilePendingPayments(body);
+      return c.json(result, 200);
+    },
+  );
+
   return router;
 }

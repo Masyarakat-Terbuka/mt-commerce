@@ -45,7 +45,8 @@ function fetchReturning(
     return {
       ok: status >= 200 && status < 300,
       status,
-      text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
+      text: async () =>
+        typeof body === "string" ? body : JSON.stringify(body),
     };
   }) as unknown as FetchLike;
   return { fetch, calls };
@@ -186,7 +187,10 @@ describe("MidtransPaymentProvider.capture", () => {
     );
     const result = await provider.capture(makeIntent());
     expect(calls).toHaveLength(0);
-    expect(result.amountCaptured).toEqual({ amount: 150_000n, currency: "IDR" });
+    expect(result.amountCaptured).toEqual({
+      amount: 150_000n,
+      currency: "IDR",
+    });
   });
 });
 
@@ -291,9 +295,9 @@ describe("MidtransPaymentProvider.verifyWebhookSignature", () => {
       gross_amount: "50000.00",
       transaction_status: "settlement",
     });
-    expect(provider.verifyWebhookSignature({ rawBody: body, headers: {} })).toBe(
-      true,
-    );
+    expect(
+      provider.verifyWebhookSignature({ rawBody: body, headers: {} }),
+    ).toBe(true);
   });
 
   it("returns true for an expire notification with a valid signature", () => {
@@ -307,9 +311,9 @@ describe("MidtransPaymentProvider.verifyWebhookSignature", () => {
       gross_amount: "75000.00",
       transaction_status: "expire",
     });
-    expect(provider.verifyWebhookSignature({ rawBody: body, headers: {} })).toBe(
-      true,
-    );
+    expect(
+      provider.verifyWebhookSignature({ rawBody: body, headers: {} }),
+    ).toBe(true);
   });
 
   it("returns false when the signature does not match", () => {
@@ -337,8 +341,126 @@ describe("MidtransPaymentProvider.verifyWebhookSignature", () => {
     expect(
       provider.verifyWebhookSignature({ rawBody: "not json", headers: {} }),
     ).toBe(false);
-    expect(
-      provider.verifyWebhookSignature({ rawBody: "", headers: {} }),
-    ).toBe(false);
+    expect(provider.verifyWebhookSignature({ rawBody: "", headers: {} })).toBe(
+      false,
+    );
+  });
+});
+
+describe("MidtransPaymentProvider.fetchStatus", () => {
+  it("projects a settlement status into a captured snapshot", async () => {
+    const { fetch } = fetchReturning(200, {
+      status_code: "200",
+      status_message: "Success",
+      transaction_id: "tx_xyz",
+      order_id: "pay_01",
+      transaction_status: "settlement",
+      fraud_status: "accept",
+      gross_amount: "150000.00",
+    });
+    const provider = new MidtransPaymentProvider(
+      { serverKey: SERVER_KEY, clientKey: "ck", fetchImpl: fetch },
+      makeLogger(),
+    );
+    const snapshot = await provider.fetchStatus(makeIntent());
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.status).toBe("captured");
+    expect(snapshot?.providerRef).toBe("tx_xyz");
+    expect(snapshot?.raw).toMatchObject({ transaction_status: "settlement" });
+  });
+
+  it("treats Midtrans 'pending' as a pending snapshot, not a failed one", async () => {
+    const { fetch } = fetchReturning(200, {
+      status_code: "201",
+      status_message: "Pending",
+      transaction_id: "tx_abc",
+      order_id: "pay_01",
+      transaction_status: "pending",
+      gross_amount: "150000.00",
+    });
+    const provider = new MidtransPaymentProvider(
+      { serverKey: SERVER_KEY, clientKey: "ck", fetchImpl: fetch },
+      makeLogger(),
+    );
+    const snapshot = await provider.fetchStatus(makeIntent());
+    expect(snapshot?.status).toBe("pending");
+  });
+
+  it("projects a refund status into a refunded snapshot", async () => {
+    const { fetch } = fetchReturning(200, {
+      status_code: "200",
+      status_message: "ok",
+      transaction_id: "tx_abc",
+      order_id: "pay_01",
+      transaction_status: "refund",
+      gross_amount: "150000.00",
+    });
+    const provider = new MidtransPaymentProvider(
+      { serverKey: SERVER_KEY, clientKey: "ck", fetchImpl: fetch },
+      makeLogger(),
+    );
+    const snapshot = await provider.fetchStatus(makeIntent());
+    expect(snapshot?.status).toBe("refunded");
+  });
+
+  it("projects deny / cancel / expire / failure into a failed snapshot", async () => {
+    for (const transaction_status of ["deny", "cancel", "expire", "failure"]) {
+      const { fetch } = fetchReturning(200, {
+        status_code: "200",
+        status_message: "ok",
+        transaction_id: "tx_abc",
+        order_id: "pay_01",
+        transaction_status,
+        gross_amount: "150000.00",
+      });
+      const provider = new MidtransPaymentProvider(
+        { serverKey: SERVER_KEY, clientKey: "ck", fetchImpl: fetch },
+        makeLogger(),
+      );
+      const snapshot = await provider.fetchStatus(makeIntent());
+      expect(snapshot?.status).toBe("failed");
+    }
+  });
+
+  it("treats card capture under fraud challenge as still pending", async () => {
+    const { fetch } = fetchReturning(200, {
+      status_code: "200",
+      status_message: "ok",
+      transaction_id: "tx_abc",
+      order_id: "pay_01",
+      transaction_status: "capture",
+      fraud_status: "challenge",
+      gross_amount: "150000.00",
+    });
+    const provider = new MidtransPaymentProvider(
+      { serverKey: SERVER_KEY, clientKey: "ck", fetchImpl: fetch },
+      makeLogger(),
+    );
+    const snapshot = await provider.fetchStatus(makeIntent());
+    expect(snapshot?.status).toBe("pending");
+  });
+
+  it("returns null on a 404 from Midtrans", async () => {
+    const { fetch } = fetchReturning(404, {
+      status_code: "404",
+      status_message: "Transaction doesn't exist.",
+    });
+    const provider = new MidtransPaymentProvider(
+      { serverKey: SERVER_KEY, clientKey: "ck", fetchImpl: fetch },
+      makeLogger(),
+    );
+    const snapshot = await provider.fetchStatus(makeIntent());
+    expect(snapshot).toBeNull();
+  });
+
+  it("propagates non-404 errors as MidtransApiError", async () => {
+    const { fetch } = fetchReturning(500, { status_message: "boom" });
+    const provider = new MidtransPaymentProvider(
+      { serverKey: SERVER_KEY, clientKey: "ck", fetchImpl: fetch },
+      makeLogger(),
+    );
+    await expect(provider.fetchStatus(makeIntent())).rejects.toThrow(
+      /boom|500/,
+    );
   });
 });

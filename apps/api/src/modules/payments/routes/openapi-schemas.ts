@@ -22,6 +22,7 @@ const PaymentAttemptKindEnum = z.enum([
   "capture",
   "refund",
   "webhook",
+  "reconcile",
 ]);
 
 const PaymentAttemptStatusEnum = z.enum(["pending", "success", "failure"]);
@@ -68,9 +69,8 @@ export const PaymentWithAttemptsWire = z
   })
   .openapi("PaymentWithAttempts");
 
-export const PaginatedPaymentWire = paginated(PaymentWire).openapi(
-  "PaginatedPayment",
-);
+export const PaginatedPaymentWire =
+  paginated(PaymentWire).openapi("PaginatedPayment");
 
 /**
  * Storefront `initiate` outcome. Discriminated by `status` — the

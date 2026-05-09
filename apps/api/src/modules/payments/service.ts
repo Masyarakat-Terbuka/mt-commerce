@@ -39,9 +39,7 @@
  * plugin has been removed surfaces as a clean
  * `ConflictError {code:"unknown_provider"}` rather than a deep crash.
  */
-import {
-  type Money,
-} from "@mt-commerce/core/money";
+import { type Money } from "@mt-commerce/core/money";
 import { id } from "@mt-commerce/core/ulid";
 import {
   ConflictError,
@@ -76,8 +74,10 @@ import {
   ALL_PAYMENT_STATUSES,
   canTransition,
   isTerminal,
+  type PaymentAttemptKind,
   type PaymentStatus,
 } from "./state.js";
+import type { PaymentRow } from "../../db/schema/index.js";
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
@@ -141,6 +141,93 @@ export interface HandleWebhookResult {
   event: string | null;
 }
 
+/**
+ * Outcome of a reconciliation attempt against a single payment.
+ *
+ * - `applied`: the provider's snapshot drove a transition. `from` →
+ *   `to` mirrors the payment row's actual change.
+ * - `no_change`: the provider's snapshot matches the row's current
+ *   status. The platform records an attempt for the audit trail and
+ *   leaves the row untouched.
+ * - `still_pending`: the provider has not settled the transaction yet.
+ *   Common for VA / cstore (Indomaret/Alfamart) that wait on the
+ *   buyer's offline action.
+ * - `unknown_to_provider`: the provider has no record of the
+ *   `providerRef`. Usually means the Snap session expired before the
+ *   buyer paid. The reconciler stops retrying.
+ * - `provider_unsupported`: the registered provider does not implement
+ *   `fetchStatus`. The platform cannot reconcile this payment.
+ * - `terminal`: the payment has already settled (captured / refunded /
+ *   failed / cancelled). The reconciler returns early without
+ *   contacting the provider.
+ * - `error`: an exception bubbled out of the provider call (transport
+ *   failure, signature drift). The platform records a failure attempt.
+ */
+export type ReconcilePaymentResult =
+  | {
+      kind: "applied";
+      paymentId: string;
+      from: PaymentStatus;
+      to: PaymentStatus;
+    }
+  | {
+      kind: "no_change";
+      paymentId: string;
+      current: PaymentStatus;
+    }
+  | {
+      kind: "still_pending";
+      paymentId: string;
+    }
+  | {
+      kind: "unknown_to_provider";
+      paymentId: string;
+    }
+  | {
+      kind: "provider_unsupported";
+      paymentId: string;
+      provider: string;
+    }
+  | {
+      kind: "terminal";
+      paymentId: string;
+      current: PaymentStatus;
+    }
+  | {
+      kind: "error";
+      paymentId: string;
+      message: string;
+    };
+
+export interface ReconcilePendingOptions {
+  /**
+   * Skip rows whose `updated_at` is newer than this many minutes ago.
+   * Defaults to 5: webhook deliveries usually arrive within seconds, so
+   * a payment still pending after 5 minutes is the right candidate
+   * pool.
+   */
+  olderThanMinutes?: number;
+  /** Cap on the candidate pool. Defaults to 100. */
+  limit?: number;
+}
+
+export interface ReconcilePendingResult {
+  /** Number of candidate rows the reconciler considered. */
+  checked: number;
+  /** Subset of `checked` that transitioned. */
+  applied: number;
+  /** Provider acknowledged but no transition needed. */
+  noChange: number;
+  /** Provider does not yet know the resolution. */
+  stillPending: number;
+  /** Provider has no record of the payment. */
+  unknownToProvider: number;
+  /** Provider call threw. */
+  errors: number;
+  /** Provider does not implement `fetchStatus`. */
+  unsupported: number;
+}
+
 export interface PaymentService {
   initiate(input: InitiatePaymentInput): Promise<PaymentInitiateOutcome>;
   capture(input: CapturePaymentInput): Promise<Payment>;
@@ -150,6 +237,22 @@ export interface PaymentService {
   list(query: ListPaymentsQuery): Promise<Paginated<Payment>>;
   listAttempts(paymentId: string): Promise<PaymentAttempt[]>;
   handleWebhook(input: HandleWebhookInput): Promise<HandleWebhookResult>;
+  /**
+   * Out-of-band reconciliation for a single payment. Asks the
+   * registered provider for the canonical status of the transaction,
+   * applies any pending transition, and records an attempt row so the
+   * audit trail attributes the change to the polling path.
+   */
+  reconcilePayment(paymentId: string): Promise<ReconcilePaymentResult>;
+  /**
+   * Bulk reconciliation entry point. Loads non-terminal payments that
+   * have not been touched in `olderThanMinutes`, resolves each through
+   * `reconcilePayment`, and returns aggregate counts. Operators wire
+   * this to a host cron (or a job queue) for periodic catch-up.
+   */
+  reconcilePendingPayments(
+    opts?: ReconcilePendingOptions,
+  ): Promise<ReconcilePendingResult>;
 }
 
 /**
@@ -364,7 +467,9 @@ export class PaymentServiceImpl implements PaymentService {
   async capture(input: CapturePaymentInput): Promise<Payment> {
     const fresh = await this.repo.getPaymentById(input.paymentId);
     if (!fresh) {
-      throw new NotFoundError("Payment not found.", { paymentId: input.paymentId });
+      throw new NotFoundError("Payment not found.", {
+        paymentId: input.paymentId,
+      });
     }
     if (!fresh.providerRef) {
       throw new ConflictError(
@@ -388,11 +493,14 @@ export class PaymentServiceImpl implements PaymentService {
       return toPayment(fresh);
     }
     if (!canTransition(fromStatus, "captured")) {
-      throw new ConflictError("Payment is not in a state that accepts capture.", {
-        code: "invalid_transition",
-        from: fromStatus,
-        to: "captured",
-      });
+      throw new ConflictError(
+        "Payment is not in a state that accepts capture.",
+        {
+          code: "invalid_transition",
+          from: fromStatus,
+          to: "captured",
+        },
+      );
     }
 
     const provider = this.resolveProvider(fresh.provider);
@@ -428,9 +536,8 @@ export class PaymentServiceImpl implements PaymentService {
         paymentId: fresh.id,
         kind: "capture",
         status: "success",
-        requestPayload: input.amount !== undefined
-          ? { amount: input.amount.toString() }
-          : {},
+        requestPayload:
+          input.amount !== undefined ? { amount: input.amount.toString() } : {},
         responsePayload: null,
         errorMessage: null,
       });
@@ -465,7 +572,9 @@ export class PaymentServiceImpl implements PaymentService {
   async refund(input: RefundPaymentInput): Promise<Payment> {
     const fresh = await this.repo.getPaymentById(input.paymentId);
     if (!fresh) {
-      throw new NotFoundError("Payment not found.", { paymentId: input.paymentId });
+      throw new NotFoundError("Payment not found.", {
+        paymentId: input.paymentId,
+      });
     }
     if (!fresh.providerRef) {
       throw new ConflictError(
@@ -488,11 +597,14 @@ export class PaymentServiceImpl implements PaymentService {
       return toPayment(fresh);
     }
     if (!canTransition(fromStatus, "refunded")) {
-      throw new ConflictError("Payment is not in a state that accepts refund.", {
-        code: "invalid_transition",
-        from: fromStatus,
-        to: "refunded",
-      });
+      throw new ConflictError(
+        "Payment is not in a state that accepts refund.",
+        {
+          code: "invalid_transition",
+          from: fromStatus,
+          to: "refunded",
+        },
+      );
     }
 
     const provider = this.resolveProvider(fresh.provider);
@@ -527,7 +639,9 @@ export class PaymentServiceImpl implements PaymentService {
         kind: "refund",
         status: "success",
         requestPayload: {
-          ...(input.amount !== undefined ? { amount: input.amount.toString() } : {}),
+          ...(input.amount !== undefined
+            ? { amount: input.amount.toString() }
+            : {}),
           ...(input.reason ? { reason: input.reason } : {}),
         },
         responsePayload: null,
@@ -615,14 +729,11 @@ export class PaymentServiceImpl implements PaymentService {
         headers: input.headers,
       });
     } catch (err) {
-      throw new ValidationError(
-        "Webhook signature verification failed.",
-        {
-          code: "webhook_signature_invalid",
-          provider: input.providerCode,
-          reason: err instanceof Error ? err.message : "unknown",
-        },
-      );
+      throw new ValidationError("Webhook signature verification failed.", {
+        code: "webhook_signature_invalid",
+        provider: input.providerCode,
+        reason: err instanceof Error ? err.message : "unknown",
+      });
     }
 
     const payment = await this.repo.getPaymentByProviderRef(
@@ -642,17 +753,48 @@ export class PaymentServiceImpl implements PaymentService {
       return { status: "ignored", paymentId: null, event: verified.event };
     }
 
+    return this.applyVerifiedTransition(payment, verified, {
+      kind: "webhook",
+      auditAction: "payment_webhook",
+      providerCode: input.providerCode,
+    });
+  }
+
+  /**
+   * Apply a provider-confirmed status to a payment row. Used by both
+   * `handleWebhook` (after signature verification) and the reconciler
+   * (after `provider.fetchStatus`). Source-specific concerns
+   * (signature, lookup) live with the caller; this helper owns the
+   * state-machine bookkeeping.
+   *
+   * The `source` carries:
+   *
+   *   - `kind`: which `payment_attempts.kind` value the audit row gets
+   *     written under (`"webhook"` for delivered notifications,
+   *     `"reconcile"` for status polled out-of-band).
+   *   - `auditAction`: the `audit_log.action` string.
+   *   - `providerCode`: stored on the audit `details` for cross-
+   *     referencing.
+   */
+  private async applyVerifiedTransition(
+    payment: PaymentRow,
+    verified: VerifiedWebhook,
+    source: {
+      kind: PaymentAttemptKind;
+      auditAction: string;
+      providerCode: string;
+    },
+  ): Promise<HandleWebhookResult> {
     const fromStatus = payment.status as PaymentStatus;
     const targetStatus = mapWebhookStatusToPaymentStatus(verified.status);
 
     // Idempotent re-delivery: a second `captured` event for an already-
-    // `captured` payment writes a webhook attempt row but does NOT
-    // re-transition. Same for refund / failed.
+    // `captured` payment writes an attempt row but does NOT re-transition.
     if (fromStatus === targetStatus) {
       await this.repo.insertAttempt({
         id: id("pat"),
         paymentId: payment.id,
-        kind: "webhook",
+        kind: source.kind,
         status: "success",
         requestPayload: {
           event: verified.event,
@@ -663,20 +805,23 @@ export class PaymentServiceImpl implements PaymentService {
         responsePayload: verified.rawPayload,
         errorMessage: null,
       });
-      return { status: "accepted", paymentId: payment.id, event: verified.event };
+      return {
+        status: "accepted",
+        paymentId: payment.id,
+        event: verified.event,
+      };
     }
 
     if (isTerminal(fromStatus)) {
       // Already terminal but the new event is different — log it as a
       // failure attempt so the audit trail captures the conflict, but
-      // do not re-transition. A `captured → refunded` flip is a
-      // legitimate forward step (handled by the canTransition path
-      // below); a `refunded → captured` flip is not, and we refuse it.
+      // do not re-transition. A `captured → refunded` flip is legitimate
+      // (canTransition path below); a `refunded → captured` flip is not.
       if (!canTransition(fromStatus, targetStatus)) {
         await this.repo.insertAttempt({
           id: id("pat"),
           paymentId: payment.id,
-          kind: "webhook",
+          kind: source.kind,
           status: "failure",
           requestPayload: {
             event: verified.event,
@@ -698,7 +843,7 @@ export class PaymentServiceImpl implements PaymentService {
       await this.repo.insertAttempt({
         id: id("pat"),
         paymentId: payment.id,
-        kind: "webhook",
+        kind: source.kind,
         status: "failure",
         requestPayload: {
           event: verified.event,
@@ -719,7 +864,9 @@ export class PaymentServiceImpl implements PaymentService {
     await this.repo.withTransaction(async (tx) => {
       const locked = await tx.getPaymentByIdForUpdate(payment.id);
       if (!locked) {
-        throw new NotFoundError("Payment not found.", { paymentId: payment.id });
+        throw new NotFoundError("Payment not found.", {
+          paymentId: payment.id,
+        });
       }
       const lockedStatus = locked.status as PaymentStatus;
       // Re-check after the lock — another webhook could have raced.
@@ -731,7 +878,7 @@ export class PaymentServiceImpl implements PaymentService {
       await tx.insertAttempt({
         id: id("pat"),
         paymentId: payment.id,
-        kind: "webhook",
+        kind: source.kind,
         status: "success",
         requestPayload: {
           event: verified.event,
@@ -777,9 +924,10 @@ export class PaymentServiceImpl implements PaymentService {
             paymentId: payment.id,
             orderId: payment.orderId,
             provider: payment.provider,
-            reason: typeof verified.rawPayload.reason === "string"
-              ? verified.rawPayload.reason
-              : null,
+            reason:
+              typeof verified.rawPayload.reason === "string"
+                ? verified.rawPayload.reason
+                : null,
           },
         });
       }
@@ -792,31 +940,231 @@ export class PaymentServiceImpl implements PaymentService {
       await this.driveOrderToRefunded(payment.orderId, payment.id);
     }
 
-    await this.audit("payment_webhook", payment.id, {
-      provider: input.providerCode,
+    await this.audit(source.auditAction, payment.id, {
+      provider: source.providerCode,
       event: verified.event,
       to: targetStatus,
     });
 
-    return { status: "accepted", paymentId: payment.id, event: verified.event };
+    return {
+      status: "accepted",
+      paymentId: payment.id,
+      event: verified.event,
+    };
+  }
+
+  async reconcilePayment(paymentId: string): Promise<ReconcilePaymentResult> {
+    const payment = await this.repo.getPaymentById(paymentId);
+    if (!payment) {
+      throw new NotFoundError("Payment not found.", { paymentId });
+    }
+
+    const current = payment.status as PaymentStatus;
+    if (current !== "pending" && current !== "authorized") {
+      // Captured/refunded/failed/cancelled rows do not need
+      // reconciliation. The webhook idempotency path covers re-deliveries;
+      // out-of-band polling adds nothing once the payment has settled.
+      return { kind: "terminal", paymentId, current };
+    }
+
+    const provider = this.resolveProvider(payment.provider);
+    if (typeof provider.fetchStatus !== "function") {
+      return {
+        kind: "provider_unsupported",
+        paymentId,
+        provider: payment.provider,
+      };
+    }
+
+    let snapshot: Awaited<ReturnType<NonNullable<typeof provider.fetchStatus>>>;
+    try {
+      snapshot = await provider.fetchStatus({
+        payment: {
+          id: payment.id,
+          orderId: payment.orderId,
+          providerRef: payment.providerRef,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(
+        { err, paymentId, provider: payment.provider },
+        "reconcile: provider.fetchStatus threw",
+      );
+      await this.recordReconcileFailure(paymentId, message);
+      return { kind: "error", paymentId, message };
+    }
+
+    if (snapshot === null) {
+      // Provider has no record of this payment. Common when a Snap
+      // session expired before the buyer paid. Record the diagnostic
+      // attempt so the audit trail has the moment of truth, but do not
+      // re-poll forever.
+      await this.repo.insertAttempt({
+        id: id("pat"),
+        paymentId,
+        kind: "reconcile",
+        status: "failure",
+        requestPayload: { providerRef: payment.providerRef },
+        responsePayload: null,
+        errorMessage: "provider has no record of this payment",
+      });
+      return { kind: "unknown_to_provider", paymentId };
+    }
+
+    if (snapshot.status === "pending") {
+      // Provider acknowledged but has not settled. Drop a positive-but-
+      // unchanged attempt row so an operator can verify the reconciler
+      // is alive without forcing a transition.
+      await this.repo.insertAttempt({
+        id: id("pat"),
+        paymentId,
+        kind: "reconcile",
+        status: "success",
+        requestPayload: {
+          providerRef: snapshot.providerRef,
+          status: snapshot.status,
+        },
+        responsePayload: snapshot.rawPayload,
+        errorMessage: null,
+      });
+      return { kind: "still_pending", paymentId };
+    }
+
+    // Project the provider's snapshot into the canonical webhook shape
+    // so the same transition machinery applies. The synthetic event
+    // name distinguishes a reconcile-driven transition from a webhook
+    // delivery in the attempt row's `requestPayload.event` and in the
+    // audit log.
+    const verified: VerifiedWebhook = {
+      event: "reconcile",
+      providerRef: snapshot.providerRef,
+      status: snapshot.status,
+      rawPayload: snapshot.rawPayload,
+    };
+
+    const result = await this.applyVerifiedTransition(payment, verified, {
+      kind: "reconcile",
+      auditAction: "payment_reconcile",
+      providerCode: payment.provider,
+    });
+
+    if (result.status === "ignored") {
+      // The verified payload would have transitioned, but the lock /
+      // canTransition path declined (terminal-but-different, or already
+      // in target). Treat as no-change from the reconciler's POV.
+      return { kind: "no_change", paymentId, current };
+    }
+
+    // Reload to read the row's actual state; another caller could have
+    // raced inside the transactional update. The reload is a single-row
+    // hit by primary key — cheap enough to keep the reconciler's return
+    // honest.
+    const after = await this.repo.getPaymentById(paymentId);
+    const actual = (after?.status ?? snapshot.status) as PaymentStatus;
+    if (actual === current) {
+      return { kind: "no_change", paymentId, current };
+    }
+    return { kind: "applied", paymentId, from: current, to: actual };
+  }
+
+  async reconcilePendingPayments(
+    opts: ReconcilePendingOptions = {},
+  ): Promise<ReconcilePendingResult> {
+    const olderThanMinutes = opts.olderThanMinutes ?? 5;
+    const limit = opts.limit ?? 100;
+    const olderThan = new Date(Date.now() - olderThanMinutes * 60_000);
+
+    const candidates = await this.repo.listPaymentsForReconcile({
+      olderThan,
+      limit,
+    });
+
+    const summary: ReconcilePendingResult = {
+      checked: candidates.length,
+      applied: 0,
+      noChange: 0,
+      stillPending: 0,
+      unknownToProvider: 0,
+      errors: 0,
+      unsupported: 0,
+    };
+
+    for (const row of candidates) {
+      try {
+        const result = await this.reconcilePayment(row.id);
+        switch (result.kind) {
+          case "applied":
+            summary.applied += 1;
+            break;
+          case "no_change":
+          case "terminal":
+            summary.noChange += 1;
+            break;
+          case "still_pending":
+            summary.stillPending += 1;
+            break;
+          case "unknown_to_provider":
+            summary.unknownToProvider += 1;
+            break;
+          case "provider_unsupported":
+            summary.unsupported += 1;
+            break;
+          case "error":
+            summary.errors += 1;
+            break;
+        }
+      } catch (err) {
+        // `reconcilePayment` already records a failure attempt when the
+        // provider call throws; this catch covers truly unexpected
+        // errors (lookup races, programmer bugs). Increment errors and
+        // keep going so one bad row does not stall the loop.
+        summary.errors += 1;
+        log.error(
+          { err, paymentId: row.id },
+          "reconcile: unexpected error reconciling payment",
+        );
+      }
+    }
+
+    return summary;
   }
 
   // -------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------
 
+  private async recordReconcileFailure(
+    paymentId: string,
+    message: string,
+  ): Promise<void> {
+    try {
+      await this.repo.insertAttempt({
+        id: id("pat"),
+        paymentId,
+        kind: "reconcile",
+        status: "failure",
+        requestPayload: {},
+        responsePayload: null,
+        errorMessage: message,
+      });
+    } catch (writeErr) {
+      log.error(
+        { err: writeErr, paymentId },
+        "failed to record reconcile failure attempt",
+      );
+    }
+  }
+
   private resolveProvider(code: string): PaymentProvider {
     try {
       return this.registry.resolve(code);
     } catch (err) {
-      throw new ConflictError(
-        "Unknown payment provider code.",
-        {
-          code: "unknown_provider",
-          providerCode: code,
-          reason: err instanceof Error ? err.message : "unknown",
-        },
-      );
+      throw new ConflictError("Unknown payment provider code.", {
+        code: "unknown_provider",
+        providerCode: code,
+        reason: err instanceof Error ? err.message : "unknown",
+      });
     }
   }
 

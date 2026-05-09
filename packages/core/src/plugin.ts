@@ -104,6 +104,26 @@ export interface PaymentRefundResult {
 }
 
 /**
+ * Snapshot of a payment's status as the provider currently sees it.
+ * Returned from `PaymentProvider.fetchStatus` for reconciliation —
+ * the platform asks the provider "what's the canonical state of this
+ * payment?" and translates the snapshot through the same transition
+ * logic the webhook handler uses.
+ *
+ * `pending` here mirrors the platform's pre-terminal state: the
+ * provider acknowledges the transaction but has not settled it yet.
+ * The reconciler treats `pending` as "no transition" and skips.
+ */
+export interface PaymentStatusSnapshot {
+  /** Provider's id for this transaction (e.g. Midtrans `transaction_id`). */
+  readonly providerRef: string;
+  /** Current canonical status as the provider sees it. */
+  readonly status: "pending" | "captured" | "failed" | "refunded";
+  /** The provider's verbatim payload, for the audit row. */
+  readonly raw?: Record<string, unknown>;
+}
+
+/**
  * Payment provider plugin interface. Providers register themselves via
  * `ctx.registerPaymentProvider(...)`. The `code` is the operator-facing
  * identifier (e.g. `"midtrans"`, `"xendit"`); the platform stores it on
@@ -129,7 +149,10 @@ export interface PaymentProvider {
    * Refund a captured payment. `amount` defaults to the full captured
    * amount when omitted; partial refunds pass an explicit Money.
    */
-  refund(intent: PaymentIntentLike, amount?: Money): Promise<PaymentRefundResult>;
+  refund(
+    intent: PaymentIntentLike,
+    amount?: Money,
+  ): Promise<PaymentRefundResult>;
 
   /**
    * Verify the signature on an incoming webhook. The platform calls this
@@ -144,6 +167,28 @@ export interface PaymentProvider {
     rawBody: string;
     headers: Record<string, string>;
   }): boolean | Promise<boolean>;
+
+  /**
+   * Optional. Query the upstream provider for the canonical status of
+   * the given payment intent and return a `PaymentStatusSnapshot`.
+   *
+   * Used by the platform's reconciliation path to recover from missed
+   * webhooks (a Midtrans `settlement` notification that never arrived
+   * because of a network blip, a backend restart that lost the
+   * delivery, etc.). The platform calls this on a schedule for
+   * non-terminal payments older than a threshold, and additionally
+   * exposes an admin endpoint that operators can hit on demand.
+   *
+   * Return `null` when the provider has no record of the intent — the
+   * platform will mark the reconciliation result as "unknown" and stop
+   * retrying. Throw on transport errors (the platform records the
+   * failure as an attempt and keeps the payment row pending).
+   *
+   * Idempotent and read-only; safe to call repeatedly.
+   */
+  fetchStatus?(
+    intent: PaymentIntentLike,
+  ): Promise<PaymentStatusSnapshot | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,10 +303,7 @@ export interface ShippingProvider {
   readonly code: string;
   /** Operator-facing display name. */
   readonly displayName: string;
-  quote(
-    method: ShippingMethodLike,
-    ctx: ShippingQuoteContext,
-  ): Promise<Money>;
+  quote(method: ShippingMethodLike, ctx: ShippingQuoteContext): Promise<Money>;
 }
 
 // ---------------------------------------------------------------------------

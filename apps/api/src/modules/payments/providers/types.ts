@@ -150,4 +150,30 @@ export interface PaymentProvider {
   refund(input: RefundInput): Promise<RefundResult>;
   /** Verify a webhook payload's signature. Throws on mismatch. */
   verifyWebhookSignature(input: VerifyWebhookInput): VerifiedWebhook;
+  /**
+   * Optional. Query the upstream provider for the canonical status of
+   * the given payment and return a snapshot. Used by the reconciliation
+   * path to recover from missed webhooks.
+   *
+   * Returns `null` when the provider has no record of this payment.
+   * Throws on transport errors so the service records a failure
+   * attempt and leaves the payment row untouched.
+   */
+  fetchStatus?(input: FetchStatusInput): Promise<FetchStatusResult | null>;
+}
+
+export interface FetchStatusInput {
+  payment: { id: string; orderId: string; providerRef: string | null };
+}
+
+/**
+ * Canonical projection the service expects from `fetchStatus`. The
+ * status enum here mirrors the `PaymentStatus` machine, including
+ * `pending` so the reconciler can recognise "still in flight" without
+ * mapping the absence of a transition as a transition.
+ */
+export interface FetchStatusResult {
+  providerRef: string;
+  status: "pending" | "captured" | "failed" | "refunded";
+  rawPayload: Record<string, unknown>;
 }

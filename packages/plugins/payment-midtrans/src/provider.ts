@@ -36,6 +36,7 @@ import type {
   PaymentIntentLike,
   PaymentProvider,
   PaymentRefundResult,
+  PaymentStatusSnapshot,
   PluginLogger,
 } from "@mt-commerce/core/plugin";
 import type { Money } from "@mt-commerce/core/money";
@@ -43,10 +44,11 @@ import { id } from "@mt-commerce/core/ulid";
 import { verifyMidtransSignature } from "./signature.js";
 import {
   SnapClient,
+  TRANSACTION_NOT_FOUND,
   type FetchLike,
   type MidtransMode,
 } from "./snap.js";
-import { buildSnapTransactionRequest } from "./templates.js";
+import { buildSnapTransactionRequest, mapMidtransStatus } from "./templates.js";
 
 /** Stable provider code stored on the platform's `payments.provider` column. */
 export const MIDTRANS_PROVIDER_CODE = "midtrans";
@@ -116,9 +118,7 @@ export class MidtransPaymentProvider implements PaymentProvider {
   // PaymentProvider
   // -------------------------------------------------------------------
 
-  async initiate(
-    intent: PaymentIntentLike,
-  ): Promise<PaymentInitiateResult> {
+  async initiate(intent: PaymentIntentLike): Promise<PaymentInitiateResult> {
     const customer = readCustomer(intent.metadata);
     const customFields = readCustomFields(intent);
 
@@ -239,6 +239,50 @@ export class MidtransPaymentProvider implements PaymentProvider {
     );
   }
 
+  /**
+   * Reconciliation entry point. Asks Midtrans for the current state of
+   * the transaction whose `order_id` equals the platform's `intent.id`
+   * (the plugin sets the two equal at `initiate` time, so this lookup
+   * is symmetric with the refund flow).
+   *
+   * `mapMidtransStatus` projects Midtrans's `transaction_status` +
+   * optional `fraud_status` onto the platform enum. The
+   * `"ignore"` outcome (Midtrans `pending` / `authorize` / `capture`
+   * with `fraud_status === "challenge"`) is surfaced as `"pending"` —
+   * the platform's reconciler treats it as "no transition yet" and
+   * leaves the row alone.
+   */
+  async fetchStatus(
+    intent: PaymentIntentLike,
+  ): Promise<PaymentStatusSnapshot | null> {
+    this.log?.debug(
+      { paymentId: intent.id },
+      "midtrans: querying transaction status",
+    );
+
+    const response = await this.client.getTransactionStatus(intent.id);
+    if (response === TRANSACTION_NOT_FOUND) {
+      this.log?.info(
+        { paymentId: intent.id },
+        "midtrans: transaction not found (likely never settled)",
+      );
+      return null;
+    }
+
+    const mapped = mapMidtransStatus(
+      response.transaction_status,
+      response.fraud_status,
+    );
+    const status: PaymentStatusSnapshot["status"] =
+      mapped === "ignore" ? "pending" : mapped;
+
+    return {
+      providerRef: response.transaction_id,
+      status,
+      raw: response as unknown as Record<string, unknown>,
+    };
+  }
+
   // -------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------
@@ -265,8 +309,9 @@ function readCustomer(
 ): { name?: string; email?: string; phone?: string } | undefined {
   if (!metadata) return undefined;
   const out: { name?: string; email?: string; phone?: string } = {};
-  const fromTopLevel = (key: "customerName" | "customerEmail" | "customerPhone") =>
-    typeof metadata[key] === "string" ? metadata[key] : undefined;
+  const fromTopLevel = (
+    key: "customerName" | "customerEmail" | "customerPhone",
+  ) => (typeof metadata[key] === "string" ? metadata[key] : undefined);
 
   const name = fromTopLevel("customerName");
   const email = fromTopLevel("customerEmail");
@@ -277,12 +322,18 @@ function readCustomer(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function readCustomFields(intent: PaymentIntentLike): {
-  customField1?: string;
-  customField2?: string;
-  customField3?: string;
-} | undefined {
-  const fields: { customField1?: string; customField2?: string; customField3?: string } = {};
+function readCustomFields(intent: PaymentIntentLike):
+  | {
+      customField1?: string;
+      customField2?: string;
+      customField3?: string;
+    }
+  | undefined {
+  const fields: {
+    customField1?: string;
+    customField2?: string;
+    customField3?: string;
+  } = {};
   // Always stash the platform's intent id in custom_field1 — useful for
   // ops to cross-reference a Snap dashboard transaction with our row.
   fields.customField1 = intent.id;

@@ -20,6 +20,11 @@ Core API for refunds.
   Midtrans documented formula
   (`SHA512(order_id + status_code + gross_amount + serverKey)`) before
   the platform parses or trusts any field of the body.
+- On reconciliation, polls the Midtrans Core API
+  `GET /v2/{orderId}/status` endpoint and returns a `PaymentStatusSnapshot`
+  the platform applies through the same transition machinery as a
+  webhook. Used by the admin "reconcile" action and the bulk
+  `reconcile-pending` job to recover from missed webhooks.
 - `capture` is a structured no-op — Snap auto-captures for the channels
   enabled by default.
 
@@ -50,6 +55,26 @@ export default defineConfig({
 
 Sign up at [dashboard.midtrans.com](https://dashboard.midtrans.com/register),
 then grab the sandbox keys from **Settings → Access Keys** for development.
+
+## Reconciling missed webhooks
+
+Webhook delivery from Midtrans is best-effort. If a callback is dropped
+(network blip, deploy mid-flight, firewall change), the platform's row
+stays `pending` while Midtrans's view says `settlement`. Two surfaces
+catch up out of band:
+
+- `POST /admin/v1/payments/{id}/reconcile` — reconcile a single
+  payment. The admin UI exposes this from the payment detail page.
+- `POST /admin/v1/payments/reconcile-pending` — bulk-poll every
+  non-terminal payment whose `updated_at` is older than
+  `olderThanMinutes` (default 5). Wire this to a host cron or job
+  queue running every few minutes.
+
+Both endpoints look up the payment's canonical state via
+`GET /v2/{orderId}/status` and apply the same transitions a webhook
+would. A reconciliation that drives a state change records a
+`reconcile` row in `payment_attempts` so the audit trail distinguishes
+it from a real callback.
 
 ## Reference
 

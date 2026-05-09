@@ -19,6 +19,11 @@ Midtrans Core API untuk refund.
   formula yang didokumentasikan Midtrans
   (`SHA512(order_id + status_code + gross_amount + serverKey)`)
   sebelum platform mem-parse atau mempercayai field apa pun dari body.
+- Pada rekonsiliasi, memanggil endpoint Midtrans Core API
+  `GET /v2/{orderId}/status` dan mengembalikan `PaymentStatusSnapshot`
+  yang diterapkan platform lewat mesin transisi yang sama dengan
+  webhook. Dipakai oleh aksi "reconcile" di admin dan job bulk
+  `reconcile-pending` untuk memulihkan webhook yang terlewat.
 - `capture` adalah no-op terstruktur — Snap auto-capture untuk kanal
   yang aktif secara default.
 
@@ -50,6 +55,26 @@ export default defineConfig({
 Daftar di [dashboard.midtrans.com](https://dashboard.midtrans.com/register),
 lalu ambil kunci sandbox dari **Settings → Access Keys** untuk
 pengembangan.
+
+## Merekonsiliasi webhook yang terlewat
+
+Pengiriman webhook dari Midtrans bersifat best-effort. Jika callback
+hilang (jaringan terputus, deploy di tengah jalan, perubahan firewall),
+baris di platform tetap `pending` sementara Midtrans melihat
+`settlement`. Dua permukaan menangani penyelarasan di luar jalur:
+
+- `POST /admin/v1/payments/{id}/reconcile` — merekonsiliasi satu
+  payment. UI admin memunculkan tombol ini di halaman detail payment.
+- `POST /admin/v1/payments/reconcile-pending` — bulk-poll setiap
+  payment yang belum terminal yang `updated_at`-nya lebih lama dari
+  `olderThanMinutes` (default 5). Sambungkan ini ke cron host atau
+  antrian job yang berjalan setiap beberapa menit.
+
+Kedua endpoint memeriksa status kanonis payment via
+`GET /v2/{orderId}/status` dan menerapkan transisi yang sama dengan
+webhook. Rekonsiliasi yang menyebabkan perubahan state mencatat baris
+`reconcile` di `payment_attempts` sehingga jejak audit membedakannya
+dari callback asli.
 
 ## Referensi
 

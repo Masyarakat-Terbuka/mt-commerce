@@ -40,9 +40,7 @@ import { PaymentServiceImpl } from "../../../src/modules/payments/service.js";
 import type { PaymentService } from "../../../src/modules/payments/index.js";
 import type { OrderService } from "../../../src/modules/orders/index.js";
 import type { AppBindings } from "../../../src/lib/types.js";
-import type {
-  PaymentsRepository,
-} from "../../../src/modules/payments/repository.js";
+import type { PaymentsRepository } from "../../../src/modules/payments/repository.js";
 import type {
   NewPaymentAttemptRow,
   NewPaymentRow,
@@ -190,13 +188,25 @@ function createInMemoryPaymentsRepo(): PaymentsRepository {
       const rows = [...payments.values()];
       return { rows: rows.slice(0, filters.pageSize), total: rows.length };
     },
+    async listPaymentsForReconcile({ olderThan, limit }) {
+      return [...payments.values()]
+        .filter(
+          (p) =>
+            (p.status === "pending" || p.status === "authorized") &&
+            p.providerRef !== null &&
+            p.updatedAt < olderThan,
+        )
+        .slice(0, limit);
+    },
     async updatePayment(id, patch) {
       const existing = payments.get(id);
       if (!existing) return null;
       const updated: PaymentRow = {
         ...existing,
         ...(patch.status !== undefined ? { status: patch.status } : {}),
-        ...(patch.providerRef !== undefined ? { providerRef: patch.providerRef } : {}),
+        ...(patch.providerRef !== undefined
+          ? { providerRef: patch.providerRef }
+          : {}),
         updatedAt: tick(),
       };
       payments.set(id, updated);
@@ -240,12 +250,13 @@ function createFakeOrderService(
     customerId: "cust_1" as string | null,
     email: "buyer@example.com",
     currency: "IDR",
-    status: (overrides.status as
-      | "pending_payment"
-      | "paid"
-      | "fulfilled"
-      | "cancelled"
-      | "refunded") ?? "pending_payment",
+    status:
+      (overrides.status as
+        | "pending_payment"
+        | "paid"
+        | "fulfilled"
+        | "cancelled"
+        | "refunded") ?? "pending_payment",
     subtotal: { amount: 500_000n, currency: "IDR" },
     tax: { amount: 55_000n, currency: "IDR" },
     taxRateCode: null,
@@ -398,7 +409,9 @@ describe("admin payments — capture", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { details?: { code?: string } } };
+    const body = (await res.json()) as {
+      error: { details?: { code?: string } };
+    };
     expect(body.error.details?.code).toBe("idempotency_key_required");
   });
 
@@ -410,7 +423,12 @@ describe("admin payments — capture", () => {
       orderId: "ord_1",
       providerCode: "in_memory_test",
       idempotencyKey: "init-key",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_route" },
     });
 
@@ -518,7 +536,12 @@ describe("payments webhook", () => {
       orderId: "ord_1",
       providerCode: "in_memory_test",
       idempotencyKey: "init-wh",
-      customer: { id: null, email: "buyer@example.com", phone: null, name: null },
+      customer: {
+        id: null,
+        email: "buyer@example.com",
+        phone: null,
+        name: null,
+      },
       metadata: { code: "TEST_PENDING_wh" },
     });
     const detail = await service.getById(initiated.paymentId);
