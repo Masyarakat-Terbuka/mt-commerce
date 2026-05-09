@@ -36,6 +36,15 @@ export type AddToCartButtonProps = {
   productId: string;
   /** Initial variant id; used as the seed for the shared store. */
   variantId: string;
+  /**
+   * Locale-resolved product title. Cached against the variant id on add
+   * so the cart drawer renders a real label instead of the variant id.
+   */
+  productTitle: string;
+  /** Product image URL or `null` when the product has no image. */
+  productImageUrl: string | null;
+  /** Alt text matching `productImageUrl`; `null` when no image. */
+  productImageAlt: string | null;
   label: string;
   soldOutLabel: string;
   /** Briefly displayed after a successful add — e.g. "Ditambahkan". */
@@ -48,6 +57,9 @@ export type AddToCartButtonProps = {
 function AddToCartButtonInner({
   productId,
   variantId,
+  productTitle,
+  productImageUrl,
+  productImageAlt,
   label,
   soldOutLabel,
   addedLabel,
@@ -79,7 +91,11 @@ function AddToCartButtonInner({
     setPending(true);
     setLocalError(null);
     try {
-      await addItem(activeVariantId, 1);
+      await addItem(activeVariantId, 1, {
+        title: productTitle,
+        imageUrl: productImageUrl,
+        imageAlt: productImageAlt,
+      });
       setJustAdded(true);
       openDrawer();
     } catch {

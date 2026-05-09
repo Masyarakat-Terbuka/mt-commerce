@@ -3,6 +3,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProductDetail from "@/islands/ProductDetail.tsx";
 import {
   getProductBySlug,
+  listCategories,
   listProducts,
   resolveApiUrl,
   toInitialProduct,
@@ -30,6 +31,20 @@ const ogImage = product?.hasImage ? product.imageUrl : undefined;
 
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
+const contactHref = localePath(locale, "/about");
+
+// See the matching block in `pages/products/[slug].astro` for rationale.
+const firstCategorySlug = product?.categorySlug ?? undefined;
+let categoryName: string | undefined;
+let categoryHref: string | undefined;
+if (firstCategorySlug) {
+  const categories = await listCategories(locale);
+  const match = categories.find((c) => c.slug === firstCategorySlug);
+  if (match) {
+    categoryName = match.name[locale];
+    categoryHref = `${detailHrefBase}?category=${encodeURIComponent(match.slug)}`;
+  }
+}
 
 // Mirrors `pages/products/[slug].astro` — see comments there.
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
@@ -116,6 +131,11 @@ const jsonLd = product
     breadcrumbHomeLabel={t("products.detail.breadcrumbs.home")}
     relatedTitle={t("products.detail.related_title")}
     detailHrefBase={detailHrefBase}
+    categoryName={categoryName}
+    categoryHref={categoryHref}
+    contactInlineText={t("products.detail.contact_inline.text")}
+    contactInlineCta={t("products.detail.contact_inline.cta")}
+    contactHref={contactHref}
     initialProduct={initialProduct}
   />
 </BaseLayout>

@@ -7,11 +7,9 @@
  *     the visual state via `global.css`. A backdrop and the panel both
  *     toggle in sync.
  *   - Listens for the `mt:cart-open` window event (dispatched by
- *     AddToCartButton on success) to slide in. Closes on Escape, on
- *     backdrop click, on the in-panel close button, and on an automatic
- *     ~3 s timer set immediately after an add — *unless* the user
- *     hovers, focuses, or interacts with the panel within that window,
- *     in which case the timer is cancelled and the drawer stays open.
+ *     AddToCartButton on success) to slide in. Stays open until the user
+ *     dismisses it via Escape, backdrop click, or the in-panel close
+ *     button — there is no auto-close timer.
  *
  * Accessibility:
  *   - `role="dialog"`, `aria-modal="true"`, `aria-labelledby` pointing at the
@@ -33,7 +31,7 @@
  *     forbids drop shadows; the drawer is the only documented exception
  *     (it must lift off the page so the backdrop reads as a layer).
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format as formatMoney } from "@mt-commerce/core/money";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -44,9 +42,11 @@ import {
   useCart,
   type CartChangedDetail,
 } from "./CartProvider.js";
-
-/** Auto-close window after add-to-cart, in ms. */
-const AUTO_CLOSE_DELAY_MS = 3000;
+import {
+  getProductInfo,
+  PRODUCT_INFO_CHANGED_EVENT,
+  type ProductInfo,
+} from "../lib/cart-product-info.js";
 
 export type CartDrawerProps = {
   /** BCP 47 locale for currency formatting (e.g. "id-ID"). */
@@ -76,6 +76,13 @@ export type CartDrawerProps = {
   checkoutCtaLabel: string;
   removeLabel: string;
   quantityLabel: string;
+  /**
+   * Fallback line label when no product info is cached for a variant
+   * (e.g. a cart restored from a previous session before the cache was
+   * populated). Surfaces "Produk" / "Product" in place of the raw
+   * variant id; the id is still rendered as small caption metadata.
+   */
+  productFallbackLabel: string;
 };
 
 function CartDrawerInner(props: CartDrawerProps) {
@@ -95,8 +102,21 @@ function CartDrawerInner(props: CartDrawerProps) {
     checkoutCtaLabel,
     removeLabel,
     quantityLabel,
+    productFallbackLabel,
   } = props;
   const { cart, loading, updateItem, removeItem } = useCart();
+  // Product info isn't carried on the cart wire shape yet; we resolve
+  // {title, imageUrl} from a localStorage cache populated at add-time
+  // by `cart-product-info`. `infoTick` bumps on `mt:variant-info-changed`
+  // so freshly added lines pick up their entry without remounting.
+  const [infoTick, setInfoTick] = useState(0);
+  useEffect(() => {
+    function onInfo() {
+      setInfoTick((n) => n + 1);
+    }
+    window.addEventListener(PRODUCT_INFO_CHANGED_EVENT, onInfo);
+    return () => window.removeEventListener(PRODUCT_INFO_CHANGED_EVENT, onInfo);
+  }, []);
   const [open, setOpen] = useState(false);
   // The most recently added variant id, used to highlight the matching
   // line item briefly. Cleared whenever the drawer closes.
@@ -105,37 +125,15 @@ function CartDrawerInner(props: CartDrawerProps) {
   >(null);
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const autoCloseTimerRef = useRef<number | null>(null);
-
-  // Helper — cancels a pending auto-close timer. Called on user interaction
-  // so the drawer doesn't slide away from underneath someone who's reading
-  // the just-added line.
-  const cancelAutoClose = useCallback(() => {
-    if (autoCloseTimerRef.current !== null) {
-      window.clearTimeout(autoCloseTimerRef.current);
-      autoCloseTimerRef.current = null;
-    }
-  }, []);
-
-  // Schedules a one-shot close after the auto-close window. Replaces any
-  // existing timer so successive adds reset the countdown.
-  const scheduleAutoClose = useCallback(() => {
-    cancelAutoClose();
-    autoCloseTimerRef.current = window.setTimeout(() => {
-      setOpen(false);
-      autoCloseTimerRef.current = null;
-    }, AUTO_CLOSE_DELAY_MS);
-  }, [cancelAutoClose]);
 
   // Listen for the open signal dispatched by AddToCartButton.
   useEffect(() => {
     function onOpen() {
       setOpen(true);
-      scheduleAutoClose();
     }
     window.addEventListener(CART_OPEN_EVENT_NAME, onOpen);
     return () => window.removeEventListener(CART_OPEN_EVENT_NAME, onOpen);
-  }, [scheduleAutoClose]);
+  }, []);
 
   // Track the most recently added variant for the highlight stripe.
   useEffect(() => {
@@ -198,13 +196,24 @@ function CartDrawerInner(props: CartDrawerProps) {
   // Close the drawer cleanup — also clears the highlight so the next open
   // doesn't flash a stale line.
   const close = useCallback(() => {
-    cancelAutoClose();
     setOpen(false);
     setHighlightedVariantId(null);
-  }, [cancelAutoClose]);
+  }, []);
 
   const items = cart?.items ?? [];
   const isEmpty = items.length === 0;
+
+  // Resolve cached product info for every visible line. The lookup is
+  // synchronous (localStorage) and the cart has at most a handful of
+  // lines, so a per-render map is the right shape.
+  const itemInfo = useMemo(() => {
+    const map = new Map<string, ProductInfo | null>();
+    for (const item of items)
+      map.set(item.variantId, getProductInfo(item.variantId));
+    return map;
+    // `infoTick` invalidates the map when an add writes a new entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, infoTick]);
 
   return (
     <div
@@ -245,9 +254,6 @@ function CartDrawerInner(props: CartDrawerProps) {
         style={{ overscrollBehavior: "contain" }}
         className="border-line bg-cream absolute top-0 right-0 flex h-full w-full flex-col border-l shadow-[-12px_0_24px_-16px_rgba(26,26,26,0.18)] md:w-[480px]"
         onClick={(e) => e.stopPropagation()}
-        onMouseEnter={cancelAutoClose}
-        onFocus={cancelAutoClose}
-        onPointerDown={cancelAutoClose}
       >
         <header className="border-line flex items-center justify-between border-b px-5 py-4 md:px-6">
           <h2 id="cart-drawer-title" className="t-h1 text-fg">
@@ -289,6 +295,9 @@ function CartDrawerInner(props: CartDrawerProps) {
             <ul className="space-y-6">
               {items.map((item) => {
                 const isHighlighted = item.variantId === highlightedVariantId;
+                const info = itemInfo.get(item.variantId) ?? null;
+                const lineTitle = info?.title ?? productFallbackLabel;
+                const lineAlt = info?.imageAlt ?? lineTitle;
                 return (
                   <li
                     key={item.id}
@@ -302,14 +311,31 @@ function CartDrawerInner(props: CartDrawerProps) {
                         : "flex items-start gap-4 transition-colors duration-300"
                     }
                   >
-                    {/* Image placeholder; the cart item DTO doesn't carry the
-                        product image yet. */}
-                    <div
-                      className="bg-line h-16 w-16 shrink-0"
-                      aria-hidden="true"
-                    />
+                    {info?.imageUrl ? (
+                      <img
+                        src={info.imageUrl}
+                        alt={lineAlt}
+                        loading="lazy"
+                        decoding="async"
+                        className="bg-line h-16 w-16 shrink-0 object-cover"
+                      />
+                    ) : (
+                      <div
+                        className="bg-line h-16 w-16 shrink-0"
+                        aria-hidden="true"
+                      />
+                    )}
                     <div className="flex-1 space-y-2">
-                      <p className="t-body text-fg">{item.variantId}</p>
+                      <p className="t-body text-fg line-clamp-2">{lineTitle}</p>
+                      {!info && (
+                        // Fallback row: the cache had no entry for this
+                        // variant (cart restored from before the cache
+                        // was populated). Surface the variant id as
+                        // small caption metadata rather than the title.
+                        <p className="t-caption text-faint break-all">
+                          {item.variantId}
+                        </p>
+                      )}
                       <div className="flex items-center gap-3">
                         <label className="sr-only" htmlFor={`qty-${item.id}`}>
                           {quantityLabel}

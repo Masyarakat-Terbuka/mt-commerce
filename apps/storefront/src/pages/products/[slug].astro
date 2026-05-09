@@ -3,6 +3,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import ProductDetail from "@/islands/ProductDetail.tsx";
 import {
   getProductBySlug,
+  listCategories,
   listProducts,
   resolveApiUrl,
   toInitialProduct,
@@ -50,6 +51,24 @@ const ogImage = product?.hasImage ? product.imageUrl : undefined;
 
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
+const contactHref = localePath(locale, "/about");
+
+// Resolve the localized category name for the PDP overline. The product's
+// `categorySlug` matches `StoreCategory.slug` (Filters.astro relies on the
+// same equivalence). When the lookup fails or the product has no category,
+// `categoryName` stays undefined and the island hides the overline rather
+// than rendering a raw slug/id.
+const firstCategorySlug = product?.categorySlug ?? undefined;
+let categoryName: string | undefined;
+let categoryHref: string | undefined;
+if (firstCategorySlug) {
+  const categories = await listCategories(locale);
+  const match = categories.find((c) => c.slug === firstCategorySlug);
+  if (match) {
+    categoryName = match.name[locale];
+    categoryHref = `${detailHrefBase}?category=${encodeURIComponent(match.slug)}`;
+  }
+}
 
 // Build absolute URLs for the JSON-LD payload. Schema.org consumers
 // (Google's Rich Results Test, Bing) accept relative URLs but penalise
@@ -158,6 +177,11 @@ const jsonLd = product
     breadcrumbHomeLabel={t("products.detail.breadcrumbs.home")}
     relatedTitle={t("products.detail.related_title")}
     detailHrefBase={detailHrefBase}
+    categoryName={categoryName}
+    categoryHref={categoryHref}
+    contactInlineText={t("products.detail.contact_inline.text")}
+    contactInlineCta={t("products.detail.contact_inline.cta")}
+    contactHref={contactHref}
     initialProduct={initialProduct}
   />
 </BaseLayout>

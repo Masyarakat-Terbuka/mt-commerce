@@ -27,14 +27,6 @@ const productsHref = localePath(locale, "/products");
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
 // Site-wide structured data emitted on the home page only.
-//   - `Organization` advertises the brand name, URL, and logo so search
-//     engines can populate the knowledge panel and rich previews.
-//   - `WebSite` with a `SearchAction` exposes the on-site search box;
-//     Google's "sitelinks search box" feature reads this. The query
-//     placeholder uses the standard `{search_term_string}` template.
-//     The search route lives at `/search` (id) and `/en/search` (en);
-//     pointing at the locale-prefixed path keeps query traffic in the
-//     visitor's locale.
 const siteUrl = Astro.site?.toString() ?? Astro.url.origin;
 const homeUrl = new URL(localePath(locale, "/"), siteUrl).toString();
 const searchUrl = new URL(
@@ -57,179 +49,396 @@ const jsonLd = [
     inLanguage: locale === "id" ? "id-ID" : "en-US",
     potentialAction: {
       "@type": "SearchAction",
-      target: {
-        "@type": "EntryPoint",
-        urlTemplate: searchUrl,
-      },
+      target: { "@type": "EntryPoint", urlTemplate: searchUrl },
       "query-input": "required name=search_term_string",
     },
   },
 ];
 
-// Hero image — chosen for the editorial moment. The gerabah (earthenware)
-// photograph reads as warm, low-saturation, and culturally specific without
-// being decorative. The cream wash (`bg-cream/35`) keeps any text on top
-// legible while letting the photo carry the visual weight.
-//
-// Three Unsplash widths so a 360 px mobile doesn't pay for a 2400 px image
-// (Lighthouse mobile flagged ~1.1 MB of unused pixels). The browser picks
-// from `srcset` based on device width; `sizes="100vw"` because the photo
-// fills the viewport. The `src` (full width) stays as the fallback for
-// crawlers and clients that ignore srcset.
-const heroBase = "https://images.unsplash.com/photo-1493106641515-6b5631de4bb9";
-const heroSrcset = [
-  `${heroBase}?w=800&q=70&auto=format&fit=crop 800w`,
-  `${heroBase}?w=1200&q=72&auto=format&fit=crop 1200w`,
-  `${heroBase}?w=1600&q=75&auto=format&fit=crop 1600w`,
-  `${heroBase}?w=2400&q=80&auto=format&fit=crop 2400w`,
-].join(", ");
-const heroSrc1200 = `${heroBase}?w=1200&q=72&auto=format&fit=crop`;
-const heroImageAlt =
-  locale === "id"
-    ? "Foto gerabah tanah liat — pengrajin Kasongan, Yogyakarta"
-    : "Photograph of earthenware pottery — Kasongan artisans, Yogyakarta";
-
-// Multi-strip home.
-//
-// Five build-time fetches plus the category list run in parallel via a
-// single `Promise.all`. The two "sort" strips are 6 cards wide so the 3-up
-// desktop grid renders two clean rows; the three category strips are 4
-// cards (a single 4-up row at desktop, 2x2 on mobile via the island's grid).
-//
-// Resilience: every `listProducts` call returns an empty result on failure
-// (see `lib/api.ts`). A strip with zero items renders nothing — we skip
-// the heading entirely rather than show "no products yet" boilerplate.
-//
-// Hardcoded category slugs (`kopi`, `batik`, `kerajinan`) match the seeded
-// demo catalog and the bilingual i18n keys. Empty-strip skipping is the
-// fallback if any of those slugs is absent at build/request time.
-const HOME_CATEGORY_SLUGS = ["kopi", "batik", "kerajinan"] as const;
-
-const [categories, newest, bestPrice, kopi, batik, kerajinan] =
-  await Promise.all([
-    listCategories(locale),
-    listProducts(locale, { pageSize: 6, sort: "newest" }),
-    listProducts(locale, { pageSize: 6, sort: "price_asc" }),
-    listProducts(locale, {
-      pageSize: 4,
-      sort: "newest",
-      category: HOME_CATEGORY_SLUGS[0],
-    }),
-    listProducts(locale, {
-      pageSize: 4,
-      sort: "newest",
-      category: HOME_CATEGORY_SLUGS[1],
-    }),
-    listProducts(locale, {
-      pageSize: 4,
-      sort: "newest",
-      category: HOME_CATEGORY_SLUGS[2],
-    }),
-  ]);
-
-// Project each result into the slim shape the island consumes. `undefined`
-// when the result is empty so the island falls through to its client fetch
-// (offline-build path) instead of locking onto an empty seed.
-function seedFor(result: typeof newest): StoreProductCardListing | undefined {
-  if (result.items.length === 0) return undefined;
-  return toProductCardListing(result, locale);
+// Editorial Unsplash photos. Each ID below was verified to return 200 from
+// `images.unsplash.com` at build time. The page mirrors Muji's homepage
+// structure (hero carousel → category icons → product strip → pickup grid →
+// stacked feature stories → activity cards → journal cards), so each section
+// carries its own distinct photo to avoid the visual repetition the demo
+// catalogue alone would produce.
+function unsplash(
+  id: string,
+  fallbackWidth = 1200,
+): { src: string; srcset: string } {
+  const at = (w: number, q: number) =>
+    `https://images.unsplash.com/${id}?w=${w}&q=${q}&auto=format&fit=crop`;
+  return {
+    src: at(fallbackWidth, 75),
+    srcset: [
+      `${at(560, 70)} 560w`,
+      `${at(900, 75)} 900w`,
+      `${at(1400, 78)} 1400w`,
+      `${at(1920, 80)} 1920w`,
+    ].join(", "),
+  };
 }
 
-const newestSeed = seedFor(newest);
-const bestPriceSeed = seedFor(bestPrice);
-const kopiSeed = seedFor(kopi);
-const batikSeed = seedFor(batik);
-const kerajinanSeed = seedFor(kerajinan);
+// Hero rail — 2 wide banners with overlaid title + CTA. Horizontal CSS
+// scroll-snap rail (no JS), matching Muji's `MainCarousel` shape. Reduced
+// from 4 to 2 to remove redundant `/products` funnels (banner #4 duplicated
+// the standing PromoBanner) and trim Hick's Law overhead.
+const banners = [
+  {
+    img: unsplash("photo-1493106641515-6b5631de4bb9"),
+    title: t("home.banner.1.title"),
+    cta: t("home.banner.1.cta"),
+    alt: t("home.banner.1.alt"),
+    href: `${productsHref}?sort=newest`,
+  },
+  {
+    img: unsplash("photo-1606760227091-3dd870d97f1d"),
+    title: t("home.banner.3.title"),
+    cta: t("home.banner.3.cta"),
+    alt: t("home.banner.3.alt"),
+    href: `${productsHref}?category=batik`,
+  },
+] as const;
 
-// Strip skip rule: render only when the build-time fetch returned at least
-// one product. The two sort strips can never be "empty" in a healthy build
-// (they hit the global catalog) but we still gate them so a fully-empty
-// catalog or an offline build degrades to "hero + categories" gracefully.
+// Category circles — 5 round tiles, the most distinctive Muji visual element.
+const categoryTiles = [
+  {
+    slug: "kopi",
+    label: t("home.tiles.kopi"),
+    alt: t("home.tiles.alt.kopi"),
+    img: unsplash("photo-1495474472287-4d71bcdd2085", 600),
+  },
+  {
+    slug: "batik",
+    label: t("home.tiles.batik"),
+    alt: t("home.tiles.alt.batik"),
+    img: unsplash("photo-1530092285049-1c42085fd395", 600),
+  },
+  {
+    slug: "kerajinan",
+    label: t("home.tiles.kerajinan"),
+    alt: t("home.tiles.alt.kerajinan"),
+    img: unsplash("photo-1565193566173-7a0ee3dbe261", 600),
+  },
+  {
+    slug: "kuliner",
+    label: t("home.tiles.kuliner"),
+    alt: t("home.tiles.alt.kuliner"),
+    img: unsplash("photo-1565299624946-b28f40a0ae38", 600),
+  },
+  {
+    slug: "fashion",
+    label: t("home.tiles.fashion"),
+    alt: t("home.tiles.alt.fashion"),
+    img: unsplash("photo-1490481651871-ab68de25d43d", 600),
+  },
+] as const;
+
+// Pickup grid — 8 small image+label tiles, mirrors Muji's ピックアップ. Each
+// tile points at a /products filter; in production these would be curated
+// landing pages.
+const pickupTiles = [
+  {
+    label: t("home.pickup.1.label"),
+    alt: t("home.pickup.1.alt"),
+    img: unsplash("photo-1559056199-641a0ac8b55e", 600),
+    href: `${productsHref}?category=kopi`,
+  },
+  {
+    label: t("home.pickup.2.label"),
+    alt: t("home.pickup.2.alt"),
+    img: unsplash("photo-1583846783214-7229a91b20ed", 600),
+    href: `${productsHref}?category=batik`,
+  },
+  {
+    label: t("home.pickup.3.label"),
+    alt: t("home.pickup.3.alt"),
+    img: unsplash("photo-1493225457124-a3eb161ffa5f", 600),
+    href: `${productsHref}?category=kerajinan`,
+  },
+  {
+    label: t("home.pickup.4.label"),
+    alt: t("home.pickup.4.alt"),
+    img: unsplash("photo-1583394838336-acd977736f90", 600),
+    href: `${productsHref}?sort=newest`,
+  },
+  {
+    label: t("home.pickup.5.label"),
+    alt: t("home.pickup.5.alt"),
+    img: unsplash("photo-1556228720-195a672e8a03", 600),
+    href: `${productsHref}?category=fashion`,
+  },
+  {
+    label: t("home.pickup.6.label"),
+    alt: t("home.pickup.6.alt"),
+    img: unsplash("photo-1556909114-f6e7ad7d3136", 600),
+    href: productsHref,
+  },
+  {
+    label: t("home.pickup.7.label"),
+    alt: t("home.pickup.7.alt"),
+    img: unsplash("photo-1545239351-1141bd82e8a6", 600),
+    href: `${productsHref}?category=kuliner`,
+  },
+  {
+    label: t("home.pickup.8.label"),
+    alt: t("home.pickup.8.alt"),
+    img: unsplash("photo-1551782450-a2132b4ba21d", 600),
+    href: `${productsHref}?category=kuliner`,
+  },
+] as const;
+
+// Features — Muji's tabbed 特集 area. Rendered as 3 stacked subsections (no
+// JS tab switcher) for clarity; each subsection has 2 article cards plus a
+// "see all" link. Stacked > tabs in our context: less interactive surface,
+// works without JS, and reads cleanly.
+const featureGroups = [
+  {
+    title: t("home.features.tab1.title"),
+    href: `${productsHref}?category=kerajinan`,
+    items: [
+      {
+        title: t("home.features.tab1.1.title"),
+        alt: t("home.features.tab1.1.alt"),
+        img: unsplash("photo-1556760544-74068565f05c"),
+      },
+      {
+        title: t("home.features.tab1.2.title"),
+        alt: t("home.features.tab1.2.alt"),
+        img: unsplash("photo-1517248135467-4c7edcad34c4"),
+      },
+    ],
+  },
+  {
+    title: t("home.features.tab2.title"),
+    href: `${productsHref}?sort=newest`,
+    items: [
+      {
+        title: t("home.features.tab2.1.title"),
+        alt: t("home.features.tab2.1.alt"),
+        img: unsplash("photo-1601412436009-d964bd02edbc"),
+      },
+      {
+        title: t("home.features.tab2.2.title"),
+        alt: t("home.features.tab2.2.alt"),
+        img: unsplash("photo-1607082348824-0a96f2a4b9da"),
+      },
+    ],
+  },
+  {
+    title: t("home.features.tab3.title"),
+    href: `${productsHref}?category=kuliner`,
+    items: [
+      {
+        title: t("home.features.tab3.1.title"),
+        alt: t("home.features.tab3.1.alt"),
+        img: unsplash("photo-1542838132-92c53300491e"),
+      },
+      {
+        title: t("home.features.tab3.2.title"),
+        alt: t("home.features.tab3.2.alt"),
+        img: unsplash("photo-1568901346375-23c9450c58cd"),
+      },
+    ],
+  },
+] as const;
+
+// Activities row — Muji's "いろいろな無印良品". For mt-commerce this is the
+// natural place to surface non-shopping links: help, about, community,
+// newsletter. All four destinations exist in the storefront today.
+const activities = [
+  {
+    title: t("home.activities.1.title"),
+    alt: t("home.activities.1.alt"),
+    img: unsplash("photo-1517760444937-f6397edcbbcd", 800),
+    href: localePath(locale, "/help"),
+  },
+  {
+    title: t("home.activities.2.title"),
+    alt: t("home.activities.2.alt"),
+    img: unsplash("photo-1503602642458-232111445657", 800),
+    href: localePath(locale, "/about"),
+  },
+  {
+    title: t("home.activities.3.title"),
+    alt: t("home.activities.3.alt"),
+    img: unsplash("photo-1473093295043-cdd812d0e601", 800),
+    href: "https://github.com/masyarakat-terbuka/mt-commerce/discussions",
+  },
+  {
+    title: t("home.activities.4.title"),
+    alt: t("home.activities.4.alt"),
+    img: unsplash("photo-1542838686-37da4a9fd1b3", 800),
+    href: "https://github.com/masyarakat-terbuka/mt-commerce",
+  },
+] as const;
+
+// Journal — Muji's 読みもの, 4 square article teasers.
+const journalCards = [
+  {
+    tag: t("home.journal.brewing.tag"),
+    title: t("home.journal.brewing.title"),
+    alt: t("home.journal.brewing.alt"),
+    img: unsplash("photo-1506372023823-741c83b836fe", 600),
+    href: `${productsHref}?category=kopi`,
+  },
+  {
+    tag: t("home.journal.batik.tag"),
+    title: t("home.journal.batik.title"),
+    alt: t("home.journal.batik.alt"),
+    img: unsplash("photo-1567620905732-2d1ec7ab7445", 600),
+    href: `${productsHref}?category=batik`,
+  },
+  {
+    tag: t("home.journal.craft.tag"),
+    title: t("home.journal.craft.title"),
+    alt: t("home.journal.craft.alt"),
+    img: unsplash("photo-1550583724-b2692b85b150", 600),
+    href: `${productsHref}?category=kerajinan`,
+  },
+  {
+    tag: t("home.journal.kuliner.tag"),
+    title: t("home.journal.kuliner.title"),
+    alt: t("home.journal.kuliner.alt"),
+    img: unsplash("photo-1551717743-49959800b1f6", 600),
+    href: `${productsHref}?category=kuliner`,
+  },
+] as const;
+
+// Build-time fetches: the categories text row at the bottom + the single
+// product strip ("Pilihan terbaru" / 新商品). Both fail soft to empty arrays
+// in `lib/api.ts`, so an offline build degrades to "everything except those
+// two sections" rather than a broken page.
+const [categories, newest] = await Promise.all([
+  listCategories(locale),
+  listProducts(locale, { pageSize: 6, sort: "newest" }),
+]);
+
+const newestSeed: StoreProductCardListing | undefined =
+  newest.items.length === 0 ? undefined : toProductCardListing(newest, locale);
 const showNewest = newest.items.length > 0;
-const showBestPrice = bestPrice.items.length > 0;
-const showKopi = kopi.items.length > 0;
-const showBatik = batik.items.length > 0;
-const showKerajinan = kerajinan.items.length > 0;
 ---
 
 <BaseLayout title={title} description={description} jsonLd={jsonLd}>
-  {
-    /*
-    Hero — editorial image moment.
-
-    A full-bleed photograph (70vh desktop / 50vh mobile) with a thin warm
-    overlay so the headline reads cleanly. Title sits in the bottom-left
-    third — Saturdays NYC's wide-image landing rhythm — with a single
-    quiet "Lihat koleksi →" text link below. No buttons, no CTAs, no
-    layered cards. The photo IS the hero.
-  */
-  }
-  <section class="relative" aria-labelledby="home-hero">
-    <div
-      class="relative h-[50vh] min-h-[420px] w-full overflow-hidden md:h-[70vh] md:min-h-[560px]"
+  {/* 1. Hero rail — 2 banners in a horizontal scroll-snap rail. */}
+  <section
+    class="relative pt-0 md:pt-2"
+    aria-label={t("home.banner.region_label")}
+  >
+    <ul
+      class="hide-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-4 md:gap-5 md:px-8 md:pb-6"
     >
-      <img
-        src={heroSrc1200}
-        srcset={heroSrcset}
-        sizes="100vw"
-        alt={heroImageAlt}
-        loading="eager"
-        decoding="async"
-        fetchpriority="high"
-        class="absolute inset-0 h-full w-full object-cover"
-      />
       {
-        /*
-        Warm cream wash. Subtle (35%) — enough to lift fg legibility without
-        muddying the photo. Sits as a separate layer so the image stays a
-        clean asset for OG/social if we ever lift it.
-      */
+        banners.map((b, i) => (
+          <li class="shrink-0 basis-[88%] snap-start md:basis-[58%] lg:basis-[48%]">
+            <a href={b.href} class="group block">
+              <div class="img-frame bg-cream relative aspect-[3/2] w-full overflow-hidden md:aspect-[16/9]">
+                <img
+                  src={b.img.src}
+                  srcset={b.img.srcset}
+                  sizes="(min-width: 1024px) 48vw, (min-width: 768px) 58vw, 88vw"
+                  alt={b.alt}
+                  loading={i === 0 ? "eager" : "lazy"}
+                  decoding="async"
+                  fetchpriority={i === 0 ? "high" : "auto"}
+                  width="1400"
+                  height="788"
+                  onerror="this.parentElement.dataset.broken='true'"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+                <span
+                  class="img-fallback absolute inset-0 items-center justify-center px-6 text-center"
+                  aria-hidden="true"
+                >
+                  <span class="t-body text-fg line-clamp-2">{b.title}</span>
+                </span>
+              </div>
+              <div class="mt-4">
+                <p class="t-h1 text-fg group-hover:text-accent max-w-[28ch] transition-colors duration-200">
+                  {b.title}
+                </p>
+                <span class="t-body text-fg mt-2 inline-flex items-center gap-2 underline-offset-[6px] group-hover:underline">
+                  {b.cta}
+                  <span aria-hidden="true">&rarr;</span>
+                </span>
+              </div>
+            </a>
+          </li>
+        ))
       }
-      <div class="bg-cream/35 absolute inset-0" aria-hidden="true"></div>
-
-      {/* Title overlay — bottom-third, left-aligned, generous gutter. */}
-      <div class="absolute inset-0 flex items-end">
-        <div class="mx-auto w-full max-w-[1280px] px-5 pb-12 md:px-8 md:pb-20">
-          <h1 id="home-hero" class="t-display text-fg max-w-[20ch]">
-            {t("home.hero.headline")}
-          </h1>
-          <p class="t-body text-fg/85 mt-4 max-w-[44ch]">
-            {t("home.hero.subhead")}
-          </p>
-          <a
-            href={localePath(locale, "/products")}
-            class="t-body text-fg hover:text-accent mt-8 inline-flex items-center gap-2 underline-offset-[6px] transition-colors duration-200 hover:underline"
-          >
-            {t("home.hero.cta")}
-            <span aria-hidden="true">&rarr;</span>
-          </a>
-        </div>
-      </div>
-    </div>
+    </ul>
   </section>
 
-  {
-    /*
-    Multi-strip browse area.
+  {/* 2. Trust strip — three factual lines, hairline rules above and below. */}
+  <section
+    class="border-line mx-auto max-w-[1280px] border-y px-5 py-5 md:px-8 md:py-6"
+    aria-labelledby="home-trust"
+  >
+    <h2 id="home-trust" class="sr-only">{t("home.trust.title")}</h2>
+    <ul class="grid grid-cols-1 gap-y-3 md:grid-cols-3 md:gap-x-6 md:gap-y-0">
+      <li class="t-caption text-fg md:text-center">
+        {t("home.trust.shipping")}
+      </li>
+      <li class="t-caption text-fg md:text-center">
+        {t("home.trust.payment")}
+      </li>
+      <li class="t-caption text-fg md:text-center">
+        {t("home.trust.artisans")}
+      </li>
+    </ul>
+  </section>
 
-    Each strip is a section with:
-      - a left-aligned overline title (h2),
-      - a quiet "see all →" text link on the right pointing at the
-        listing page with the matching `?sort=` or `?category=` filter,
-      - the existing `ProductGrid` island, seeded with `initialData` so
-        first paint shows photographs, not skeletons.
+  {/* 3. Category circles — Muji's signature top-of-page row. */}
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-tiles"
+  >
+    <h2 id="home-tiles" class="t-overline text-muted">
+      {t("home.tiles.title")}
+    </h2>
+    <ul class="mt-5 grid grid-cols-5 gap-x-2 gap-y-5 md:mt-8 md:gap-x-6">
+      {
+        categoryTiles.map((tile) => (
+          <li>
+            <a
+              href={`${productsHref}?category=${tile.slug}`}
+              class="group flex flex-col items-center"
+            >
+              <div class="img-frame bg-cream relative aspect-square w-full overflow-hidden rounded-full">
+                <img
+                  src={tile.img.src}
+                  srcset={tile.img.srcset}
+                  sizes="(min-width: 768px) 18vw, 18vw"
+                  alt={tile.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="600"
+                  height="600"
+                  onerror="this.parentElement.dataset.broken='true'"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+                <span
+                  class="img-fallback absolute inset-0 items-center justify-center px-3 text-center"
+                  aria-hidden="true"
+                >
+                  <span class="t-caption text-fg line-clamp-2">
+                    {tile.label}
+                  </span>
+                </span>
+              </div>
+              <span class="t-caption text-fg group-hover:text-accent mt-3 text-center transition-colors duration-200 md:mt-4">
+                {tile.label}
+              </span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
 
-    Spacing rhythm matches the rest of the storefront: pt-24/pb-24 mobile,
-    pt-32/pb-32 desktop. A hairline `border-line border-t` divider opens
-    each strip — it gives the eye an orientation cue between sections,
-    Muji-style, without adding any visual weight.
-
-    Strips skip themselves entirely when their fetch returned zero items.
-  */
-  }
+  {/* 4. New arrivals product strip. */}
   {
     showNewest && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
+      <section class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12">
         <div class="flex items-baseline justify-between gap-4">
           <h2 class="t-overline text-muted">{t("home.strips.newest")}</h2>
           <a
@@ -239,7 +448,7 @@ const showKerajinan = kerajinan.items.length > 0;
             {t("home.strips.newest_link")}
           </a>
         </div>
-        <div class="mt-10 md:mt-14">
+        <div class="mt-5 md:mt-8">
           <ProductGrid
             client:load
             apiUrl={apiUrl}
@@ -260,155 +469,205 @@ const showKerajinan = kerajinan.items.length > 0;
     )
   }
 
-  {
-    showBestPrice && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">{t("home.strips.best_price")}</h2>
-          <a
-            href={`${productsHref}?sort=price_asc`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.best_price_link")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale={intlLocale}
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 6, sort: "price_asc" }}
-            limit={6}
-            skeletonCount={6}
-            initialData={bestPriceSeed}
-          />
-        </div>
-      </section>
-    )
-  }
+  {/* 5. Pickup grid — 8 small image+label tiles. */}
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-pickup"
+  >
+    <h2 id="home-pickup" class="t-overline text-muted">
+      {t("home.pickup.title")}
+    </h2>
+    <ul
+      class="mt-5 grid grid-cols-2 gap-x-3 gap-y-7 md:mt-8 md:grid-cols-4 md:gap-x-4 md:gap-y-8"
+    >
+      {
+        pickupTiles.map((tile) => (
+          <li>
+            <a href={tile.href} class="group block">
+              <div class="bg-cream relative aspect-[4/5] w-full overflow-hidden">
+                <img
+                  src={tile.img.src}
+                  srcset={tile.img.srcset}
+                  sizes="(min-width: 768px) 22vw, 50vw"
+                  alt={tile.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="600"
+                  height="750"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+              </div>
+              <p class="t-body text-fg group-hover:text-accent mt-3 transition-colors duration-200">
+                {tile.label}
+              </p>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  {/* 6. Features — 3 stacked story groups (Muji's 特集 area without tabs). */}
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-features"
+  >
+    <h2 id="home-features" class="t-overline text-muted">
+      {t("home.features.title")}
+    </h2>
+
+    <div class="mt-6 space-y-10 md:mt-8 md:space-y-14">
+      {
+        featureGroups.map((group) => (
+          <div>
+            <div class="flex items-baseline justify-between gap-4">
+              <h3 class="t-h1 text-fg">{group.title}</h3>
+              <a
+                href={group.href}
+                class="t-body text-muted hover:text-accent transition-colors duration-150"
+              >
+                {t("home.features.see_all")}
+              </a>
+            </div>
+            <ul class="mt-5 grid grid-cols-1 gap-x-6 gap-y-7 md:mt-6 md:grid-cols-2">
+              {group.items.map((item) => (
+                <li>
+                  <a href={group.href} class="group block">
+                    <div class="bg-cream relative aspect-[3/2] w-full overflow-hidden">
+                      <img
+                        src={item.img.src}
+                        srcset={item.img.srcset}
+                        sizes="(min-width: 768px) 50vw, 100vw"
+                        alt={item.alt}
+                        loading="lazy"
+                        decoding="async"
+                        width="1200"
+                        height="800"
+                        class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                      />
+                    </div>
+                    <p class="t-body text-fg group-hover:text-accent mt-4 max-w-[44ch] transition-colors duration-200">
+                      {item.title}
+                    </p>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  {/* 7. Activities — 4 image+label cards (Muji's "いろいろな無印良品"). */}
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-activities"
+  >
+    <h2 id="home-activities" class="t-overline text-muted">
+      {t("home.activities.title")}
+    </h2>
+    <ul
+      class="mt-5 grid grid-cols-2 gap-x-4 gap-y-7 md:mt-8 md:grid-cols-4 md:gap-x-6"
+    >
+      {
+        activities.map((item) => (
+          <li>
+            <a href={item.href} class="group block">
+              <div class="bg-cream relative aspect-[3/2] w-full overflow-hidden">
+                <img
+                  src={item.img.src}
+                  srcset={item.img.srcset}
+                  sizes="(min-width: 768px) 22vw, 50vw"
+                  alt={item.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="800"
+                  height="533"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+              </div>
+              <p class="t-body text-fg group-hover:text-accent mt-3 transition-colors duration-200">
+                {item.title}
+              </p>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  {/* 8. Journal — 4 square cards (Muji's 読みもの). */}
+  <section
+    class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-12"
+    aria-labelledby="home-journal"
+  >
+    <div class="flex items-baseline justify-between gap-4">
+      <h2 id="home-journal" class="t-overline text-muted">
+        {t("home.journal.title")}
+      </h2>
+      <a
+        href={localePath(locale, "/products")}
+        class="t-body text-muted hover:text-accent transition-colors duration-150"
+      >
+        {t("home.journal.see_all")}
+      </a>
+    </div>
+    <ul
+      class="mt-5 grid grid-cols-2 gap-x-4 gap-y-7 md:mt-8 md:grid-cols-4 md:gap-x-6"
+    >
+      {
+        journalCards.map((card) => (
+          <li>
+            <a href={card.href} class="group block">
+              <div class="bg-cream relative aspect-square w-full overflow-hidden">
+                <img
+                  src={card.img.src}
+                  srcset={card.img.srcset}
+                  sizes="(min-width: 768px) 22vw, 50vw"
+                  alt={card.alt}
+                  loading="lazy"
+                  decoding="async"
+                  width="600"
+                  height="600"
+                  class="absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover:opacity-90"
+                />
+              </div>
+              <p class="t-overline text-muted mt-4">{card.tag}</p>
+              <p class="t-body text-fg group-hover:text-accent mt-2 transition-colors duration-200">
+                {card.title}
+              </p>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
 
   {
-    showKopi && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">
-            {t("home.strips.by_category.kopi")}
-          </h2>
-          <a
-            href={`${productsHref}?category=kopi`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.by_category.see_all")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale={intlLocale}
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 4, sort: "newest", categorySlug: "kopi" }}
-            limit={4}
-            skeletonCount={4}
-            initialData={kopiSeed}
-          />
-        </div>
-      </section>
-    )
+    /* 9. Browse-all CTA + categories text row (replaces Muji's shop search,
+       since mt-commerce has no physical shops). */
   }
-
-  {
-    showBatik && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">
-            {t("home.strips.by_category.batik")}
-          </h2>
-          <a
-            href={`${productsHref}?category=batik`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.by_category.see_all")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale={intlLocale}
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 4, sort: "newest", categorySlug: "batik" }}
-            limit={4}
-            skeletonCount={4}
-            initialData={batikSeed}
-          />
-        </div>
-      </section>
-    )
-  }
-
-  {
-    showKerajinan && (
-      <section class="border-line mx-auto max-w-[1280px] border-t px-5 pt-24 pb-24 md:px-8 md:pt-32 md:pb-32">
-        <div class="flex items-baseline justify-between gap-4">
-          <h2 class="t-overline text-muted">
-            {t("home.strips.by_category.kerajinan")}
-          </h2>
-          <a
-            href={`${productsHref}?category=kerajinan`}
-            class="t-body text-muted hover:text-accent transition-colors duration-150"
-          >
-            {t("home.strips.by_category.see_all")}
-          </a>
-        </div>
-        <div class="mt-10 md:mt-14">
-          <ProductGrid
-            client:load
-            apiUrl={apiUrl}
-            locale={intlLocale}
-            apiLocale={locale}
-            detailHrefBase={detailHrefBase}
-            emptyLabel={t("products.list.empty")}
-            errorLabel={t("products.list.error")}
-            skeletonLabel={t("products.list.skeleton_aria")}
-            photoComingSoonLabel={t("products.card.photo_coming_soon")}
-            query={{ pageSize: 4, sort: "newest", categorySlug: "kerajinan" }}
-            limit={4}
-            skeletonCount={4}
-            initialData={kerajinanSeed}
-          />
-        </div>
-      </section>
-    )
-  }
-
-  {/* Category strip — calm, middot-separated. Single horizontal line. */}
-  {
-    categories.length > 0 && (
-      <section class="border-line border-t">
-        <div class="mx-auto max-w-[1280px] px-5 py-12 md:px-8 md:py-16">
-          <p class="t-overline text-muted">{t("home.categories.title")}</p>
+  <section aria-labelledby="home-browse">
+    <div class="mx-auto max-w-[1280px] px-5 py-8 md:px-8 md:py-10">
+      <div class="flex items-baseline justify-between gap-4">
+        <h2 id="home-browse" class="t-overline text-muted">
+          {t("home.browse.title")}
+        </h2>
+        <a
+          href={productsHref}
+          class="t-body text-fg hover:text-accent transition-colors duration-150"
+        >
+          {t("home.browse.cta")}
+        </a>
+      </div>
+      {
+        categories.length > 0 && (
           <ul class="t-body mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
             {categories.map((c, idx) => (
               <li class="flex items-center gap-x-3">
                 <a
-                  href={`${localePath(locale, "/products")}?category=${c.slug}`}
+                  href={`${productsHref}?category=${c.slug}`}
                   class="text-fg hover:text-accent transition-colors duration-150"
                 >
                   {c.name[locale]}
@@ -421,8 +680,33 @@ const showKerajinan = kerajinan.items.length > 0;
               </li>
             ))}
           </ul>
-        </div>
-      </section>
-    )
-  }
+        )
+      }
+    </div>
+  </section>
 </BaseLayout>
+
+<style>
+  /* Hide the scrollbar on the hero rail; horizontal scrolling still works
+     (scroll-snap + overflow-x-auto). */
+  .hide-scrollbar {
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Image fallback: when a homepage hero or category-tile <img> fires
+     `onerror`, it sets `data-broken` on its `.img-frame` parent. The img
+     hides; the cream tile underneath shows a centered text caption.
+     Mirrors the broken-image swap pattern in `ProductGrid.tsx`. */
+  .img-fallback {
+    display: none;
+  }
+  .img-frame[data-broken="true"] > img {
+    display: none;
+  }
+  .img-frame[data-broken="true"] > .img-fallback {
+    display: flex;
+  }
+</style>

@@ -144,6 +144,23 @@ export type ProductGridProps = {
    * the original progressive-hydration behavior.
    */
   initialData?: ProductGridInitialData;
+  /**
+   * When true, the island reads `category`, `q`, `min`, `max`, `sort`,
+   * and `page` from `window.location.search` on mount and on `popstate`,
+   * and uses that as the source of truth for the query.
+   *
+   * Why: under `output: "static"` the page's frontmatter cannot observe
+   * `Astro.url.searchParams` at build time, so the SSG'd HTML for a URL
+   * like `/products?category=batik` is the unfiltered listing. Without
+   * this flag, that HTML would flash before the client-side fetch lands.
+   * With this flag, the listing page's `query` prop becomes a fallback
+   * (used when the URL has no params — the canonical SEO landing case)
+   * and the URL drives every other case.
+   *
+   * Off by default — the homepage and collection pages pass server-known
+   * queries that have nothing to do with `window.location.search`.
+   */
+  urlDriven?: boolean;
 };
 
 type LoadState =
@@ -190,6 +207,42 @@ function querySignature(
 const GRID_CLASSES =
   "grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-3 md:gap-x-8 md:gap-y-16 lg:grid-cols-4 lg:gap-x-8 lg:gap-y-20";
 
+/**
+ * Parse `category`, `q`, `min`, `max`, `sort`, and `page` from
+ * `window.location.search` into a `ProductGridQuery`. Mirrors the
+ * frontmatter parsing in `pages/[en/]products/index.astro` so the island
+ * sees the same query shape the listing page would have computed if
+ * params had been observable at build time.
+ */
+function readQueryFromUrl(): ProductGridQuery {
+  if (typeof window === "undefined") return {};
+  const params = new URLSearchParams(window.location.search);
+  const category = params.get("category") || undefined;
+  const search = params.get("q") || undefined;
+  const minRaw = params.get("min");
+  const maxRaw = params.get("max");
+  const sortRaw = params.get("sort");
+  const pageRaw = params.get("page");
+  const minPriceAmount = minRaw && /^\d+$/.test(minRaw) ? minRaw : undefined;
+  const maxPriceAmount = maxRaw && /^\d+$/.test(maxRaw) ? maxRaw : undefined;
+  const sort: ProductGridQuery["sort"] =
+    sortRaw === "price_asc" ||
+    sortRaw === "price_desc" ||
+    sortRaw === "newest" ||
+    sortRaw === "oldest"
+      ? sortRaw
+      : "newest";
+  const page = pageRaw ? Math.max(1, Number.parseInt(pageRaw, 10) || 1) : 1;
+  return {
+    ...(category ? { categorySlug: category } : {}),
+    ...(search ? { search } : {}),
+    ...(minPriceAmount ? { minPriceAmount } : {}),
+    ...(maxPriceAmount ? { maxPriceAmount } : {}),
+    page,
+    sort,
+  };
+}
+
 export default function ProductGrid({
   apiUrl,
   locale,
@@ -204,9 +257,40 @@ export default function ProductGrid({
   showCount = false,
   showingCountTemplate,
   initialData,
+  urlDriven = false,
 }: ProductGridProps) {
-  // The signature of the query that produced the seeded snapshot. While the
-  // current query still matches it, the seed is fresh and we skip the fetch.
+  // When `urlDriven` is on, the URL is the source of truth for the query.
+  // We seed `urlQuery` from `window.location.search` on mount and refresh
+  // it on `popstate` so back/forward navigation works without a full reload.
+  // When off, this stays `undefined` and the prop `query` is used directly —
+  // every existing caller (homepage, collection pages) lands in this branch.
+  const [urlQuery, setUrlQuery] = useState<ProductGridQuery | undefined>(() =>
+    urlDriven ? readQueryFromUrl() : undefined,
+  );
+
+  // Effective query: URL-driven mode prefers the URL state; otherwise the
+  // prop the page passed wins. The page's `query` prop still acts as a
+  // fallback inside the URL branch when the URL has no params at all
+  // (e.g. the canonical SEO landing /products with no search string),
+  // because `readQueryFromUrl()` returns `{ page: 1, sort: "newest" }`
+  // even for an empty search — which matches `initialData`'s seed query.
+  const effectiveQuery = urlDriven ? urlQuery : query;
+
+  useEffect(() => {
+    if (!urlDriven) return;
+    function onPopState() {
+      setUrlQuery(readQueryFromUrl());
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [urlDriven]);
+
+  // The signature of the query that produced the seeded snapshot. The
+  // page-level `query` prop is what `initialData` was fetched with at
+  // build/request time — even in URL-driven mode, where the in-component
+  // `effectiveQuery` may already reflect a filter the URL applied. We pin
+  // to the prop here so the skip-fetch check correctly invalidates the
+  // seed when the URL adds a filter (preventing a stale-data flash).
   const seededSignature = useMemo(
     () => (initialData ? querySignature(query, limit) : null),
     // initialData is a request-time prop and stays stable across re-renders
@@ -246,7 +330,7 @@ export default function ProductGrid({
   // on subsequent runs so user-driven query changes still refetch.
   const skipNextFetchRef = useRef<boolean>(initialData != null);
 
-  const currentSignature = querySignature(query, limit);
+  const currentSignature = querySignature(effectiveQuery, limit);
 
   useEffect(() => {
     // Honour the "we just seeded this" hint, but only when the query
@@ -272,25 +356,30 @@ export default function ProductGrid({
     //   2. The user changed a filter/sort/page after a seeded render —
     //      flipping back to loading is the correct UX (the previous
     //      result no longer matches the current URL).
+     
     setState({ status: "loading" });
 
     async function load() {
       try {
         const result = await client.storefront.products.list(
           {
-            ...(query?.categorySlug
-              ? { categorySlug: query.categorySlug }
+            ...(effectiveQuery?.categorySlug
+              ? { categorySlug: effectiveQuery.categorySlug }
               : {}),
-            ...(query?.search ? { search: query.search } : {}),
-            ...(query?.minPriceAmount
-              ? { minPriceAmount: query.minPriceAmount }
+            ...(effectiveQuery?.search
+              ? { search: effectiveQuery.search }
               : {}),
-            ...(query?.maxPriceAmount
-              ? { maxPriceAmount: query.maxPriceAmount }
+            ...(effectiveQuery?.minPriceAmount
+              ? { minPriceAmount: effectiveQuery.minPriceAmount }
               : {}),
-            ...(query?.page ? { page: query.page } : {}),
-            ...(query?.pageSize ? { pageSize: query.pageSize } : {}),
-            ...(query?.sort ? { sort: query.sort } : {}),
+            ...(effectiveQuery?.maxPriceAmount
+              ? { maxPriceAmount: effectiveQuery.maxPriceAmount }
+              : {}),
+            ...(effectiveQuery?.page ? { page: effectiveQuery.page } : {}),
+            ...(effectiveQuery?.pageSize
+              ? { pageSize: effectiveQuery.pageSize }
+              : {}),
+            ...(effectiveQuery?.sort ? { sort: effectiveQuery.sort } : {}),
           },
           { signal: controller.signal },
         );
@@ -324,7 +413,10 @@ export default function ProductGrid({
   }, [apiUrl, apiLocale, currentSignature]);
 
   if (state.status === "loading") {
-    const cells = Math.max(2, skeletonCount ?? limit ?? query?.pageSize ?? 9);
+    const cells = Math.max(
+      2,
+      skeletonCount ?? limit ?? effectiveQuery?.pageSize ?? 9,
+    );
     return (
       <div
         role="status"

@@ -13,51 +13,39 @@ import {
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
 
-const url = Astro.url;
-const search = url.searchParams.get("q") ?? undefined;
-const category = url.searchParams.get("category") || undefined;
-const minRaw = url.searchParams.get("min");
-const maxRaw = url.searchParams.get("max");
-const sortRaw = url.searchParams.get("sort");
-const pageRaw = url.searchParams.get("page");
-
-type SortKey = "newest" | "price_asc" | "price_desc";
-const sort: SortKey =
-  sortRaw === "price_asc" || sortRaw === "price_desc" || sortRaw === "newest"
-    ? sortRaw
-    : "newest";
-const page = pageRaw ? Math.max(1, Number.parseInt(pageRaw, 10) || 1) : 1;
-const minPrice = minRaw && /^\d+$/.test(minRaw) ? minRaw : undefined;
-const maxPrice = maxRaw && /^\d+$/.test(maxRaw) ? maxRaw : undefined;
-
+// Under `output: "static"` the `Astro.url.searchParams` are always empty at
+// build time, so the SSG'd HTML for `/products?category=batik` was the
+// unfiltered listing — flashing in before the client-side fetch landed.
+// The island now reads URL params on mount + `popstate` (`urlDriven`), so
+// the page no longer needs to parse them. The build-time fetch below
+// produces the canonical, unfiltered first page that doubles as SEO seed
+// data and the island's `initialData` (matching the "no params" branch
+// that `readQueryFromUrl()` returns).
 const title = `${t("products.list.title")} — mt-commerce`;
 const apiUrl = resolveApiUrl();
 const detailHrefBase = localePath(locale, "/products");
 const intlLocale = locale === "id" ? "id-ID" : "en-US";
 
 const activeFilters = {
-  category,
-  search,
-  minPrice: minRaw ?? undefined,
-  maxPrice: maxRaw ?? undefined,
-  sort: sortRaw ?? undefined,
+  category: undefined,
+  search: undefined,
+  minPrice: undefined,
+  maxPrice: undefined,
+  sort: undefined,
 };
 
-// Single request-time fetch — drives both the SEO `ItemList` JSON-LD and
-// the island's `initialData`. Using the same query args the island would
-// have requested means visitors hit zero "Memuat produk…" flash on first
-// paint while search engines still see a real product list in the source.
+// Build-time fetch of the unfiltered first page — drives both the SEO
+// `ItemList` JSON-LD and the island's `initialData`. The query mirrors the
+// "no URL params" defaults the island uses on mount (page 1, sort newest)
+// so the seeded signature matches and the first paint never flashes a
+// skeleton on the canonical /products landing.
 //
 // Resilience: on API failure `listProducts` returns an empty result; we
 // omit the `ItemList` payload AND pass nothing as `initialData` so the
 // island falls back to a client-side fetch (offline-build behaviour).
 const seoListing = await listProducts(locale, {
-  ...(category ? { category } : {}),
-  ...(search ? { search } : {}),
-  ...(minPrice ? { minPrice: BigInt(minPrice) } : {}),
-  ...(maxPrice ? { maxPrice: BigInt(maxPrice) } : {}),
-  page,
-  sort,
+  page: 1,
+  sort: "newest",
 });
 const seoCards = toProductCardListing(seoListing, locale);
 const initialGridData = seoCards.items.length > 0 ? seoCards : undefined;
@@ -147,14 +135,8 @@ if (seoListing.items.length > 0) {
       errorLabel={t("products.list.error")}
       skeletonLabel={t("products.list.skeleton_aria")}
       photoComingSoonLabel={t("products.card.photo_coming_soon")}
-      query={{
-        ...(category ? { categorySlug: category } : {}),
-        ...(search ? { search } : {}),
-        ...(minPrice ? { minPriceAmount: minPrice } : {}),
-        ...(maxPrice ? { maxPriceAmount: maxPrice } : {}),
-        page,
-        sort,
-      }}
+      query={{ page: 1, sort: "newest" }}
+      urlDriven
       skeletonCount={9}
       showCount
       showingCountTemplate={t("products.list.showing_count")}
