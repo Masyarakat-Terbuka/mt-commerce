@@ -28,6 +28,7 @@
  * exactly one place that knows how to mutate the guest cart.
  */
 import { createClient, type Cart } from "@mt-commerce/sdk";
+import { rememberProductInfo, type ProductInfo } from "./cart-product-info.js";
 
 const STORAGE_KEY = "mt.cartId";
 const CART_CHANGED_EVENT = "mt:cart-changed";
@@ -96,6 +97,14 @@ export interface AddLineItemInput {
   variantId: string;
   quantity: number;
   currency?: string;
+  /**
+   * Locale-resolved product info for the line. The cart wire shape does
+   * not carry title or image yet, so the call site (PDP, quick-add)
+   * passes what it already has on hand and we cache it under `variantId`
+   * via `cart-product-info`. Renderers (drawer, /cart) read the cached
+   * entry to show a real title instead of the raw variant id.
+   */
+  productInfo?: ProductInfo;
 }
 
 export interface AddLineItemResult {
@@ -121,9 +130,13 @@ export interface AddLineItemResult {
 export async function addLineItem(
   input: AddLineItemInput,
 ): Promise<AddLineItemResult> {
-  const { apiUrl, variantId, quantity } = input;
+  const { apiUrl, variantId, quantity, productInfo } = input;
   const currency = input.currency ?? DEFAULT_CURRENCY;
   const client = createClient({ baseUrl: apiUrl });
+
+  // Cache product info ahead of the network call so the drawer has a
+  // real title to render even if the add hops through a slow connection.
+  if (productInfo) rememberProductInfo(variantId, productInfo);
 
   // Resolve cart id: prefer the caller's hint, fall back to localStorage.
   // The double-check keeps behavior consistent whether the caller has its

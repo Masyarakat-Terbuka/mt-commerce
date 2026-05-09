@@ -11,25 +11,18 @@
  *   - The breadcrumb reads "Beranda → Pencarian" rather than the catalog
  *     trail, which only makes sense on category pages.
  *
- * Empty `q` decision — render a calm "start typing" state in place rather
- * than redirecting to `/products`. The header search lands here on submit;
- * if a visitor submits an empty query (or visits `/search` directly), a
- * redirect would feel abrupt and would also break back-navigation when
- * users delete their query character by character. Leaving them on the
- * page with a one-line prompt and a link to the catalog is gentler.
- *
- * Static-build note — the storefront builds with `output: "static"`, which
- * means `Astro.url.searchParams` is empty at build time. The pre-rendered
- * HTML is therefore the empty-state. In dev (and behind an SSR adapter),
- * search params resolve per request and `listProducts` runs server-side.
- * Hosting that requires runtime query handling will need either an SSR
- * deploy target or a follow-up React island; the current scope is SSR with
- * the existing `ProductCard.astro`, mirroring `pages/products/index.astro`.
+ * Static-build note — the storefront builds with `output: "static"`, so
+ * `Astro.url.searchParams` is empty at build time and `?q=...` cannot be
+ * observed on the server. The dynamic body of the page (heading echo,
+ * count, results, no-results state, pagination) is delegated to the
+ * `SearchResults` island, which reads `q` and `page` from
+ * `window.location` on the visitor's machine and queries the SDK live.
+ * The breadcrumb stays server-rendered because it does not depend on the
+ * query.
  */
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import ProductCard from "@/components/ProductCard.astro";
-import Pagination from "@/components/Pagination.astro";
-import { listProducts } from "@/lib/api";
+import SearchResults from "@/islands/SearchResults.tsx";
+import { resolveApiUrl, toIntlLocale } from "@/lib/api";
 import {
   createTranslator,
   resolveLocale,
@@ -40,53 +33,37 @@ import {
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
 
-const url = Astro.url;
-const rawQ = url.searchParams.get("q") ?? "";
-// Trim and clamp the query — a user who pastes a long block of text should
-// not turn into a 5KB request. Anything longer than this is almost
-// certainly an accident; a short ceiling also protects the API.
-const MAX_QUERY_LENGTH = 200;
-const q = rawQ.trim().slice(0, MAX_QUERY_LENGTH);
-const hasQuery = q.length > 0;
-
-const pageRaw = url.searchParams.get("page");
-const page = pageRaw ? Math.max(1, Number.parseInt(pageRaw, 10) || 1) : 1;
-
-// Only call the API when we actually have a query. An empty query would
-// load every product, which is what `/products` already does.
-const result = hasQuery
-  ? await listProducts(locale, { search: q, page })
-  : null;
-
 const productsHref = localePath(locale, "/products");
 const homeHref = localePath(locale, "/");
 const searchHref = localePath(locale, "/search");
+const detailHrefBase = localePath(locale, "/products");
+const apiUrl = resolveApiUrl();
 
-// Title — embed the query when present, mirroring how social link previews
-// surface the user's intent. The query is HTML-escaped automatically by
-// Astro when interpolated.
-const title = hasQuery
-  ? `${t("search.title")} — '${q}' — mt-commerce`
-  : `${t("search.title")} — mt-commerce`;
+// Title and description fall back to the empty-state copy because the page
+// is statically prerendered without access to `?q=...`. The island updates
+// the visible H1 once it reads the URL on the client; the document <title>
+// stays generic, which is the correct behaviour for a `noindex` page.
+const title = `${t("search.title")} — mt-commerce`;
+const description = t("search.empty.headline");
 
-const heading = hasQuery
-  ? t("search.title_with_query").replace("{query}", q)
-  : t("search.title");
-
-const description = hasQuery ? heading : t("search.empty.headline");
-
-// Build the pagination base URL with the query preserved. Pagination.astro
-// appends `?page=N` (or `&page=N`) so we hand it a URL that already carries
-// `q` but no `page` segment.
-const paginationBaseUrl = `${searchHref}?q=${encodeURIComponent(q)}`;
-
-const showCount = hasQuery && result !== null;
-const countLabel = showCount
-  ? t("search.count").replace("{count}", String(result.total))
-  : "";
+// Search result pages should not be indexed regardless of query — the URL
+// space is unbounded. Always emit `noindex,follow`.
+const labels = {
+  emptyHeading: t("search.empty.headline"),
+  emptyBody: t("search.empty.body"),
+  resultsHeadingTemplate: t("search.title_with_query"),
+  countTemplate: t("search.count"),
+  noResultsHeadingTemplate: t("search.no_results.headline"),
+  noResultsBody: t("search.no_results.body"),
+  loading: t("search.loading"),
+  error: t("search.error"),
+  browseAll: t("search.browse_all"),
+  prevLabel: t("products.list.pagination.prev"),
+  nextLabel: t("products.list.pagination.next"),
+};
 ---
 
-<BaseLayout title={title} description={description} noindex={hasQuery}>
+<BaseLayout title={title} description={description} noindex={true}>
   <div
     class="mx-auto max-w-[1280px] px-5 pt-12 pb-24 md:px-8 md:pt-16 md:pb-32"
   >
@@ -111,99 +88,15 @@ const countLabel = showCount
       </ol>
     </nav>
 
-    {/* Page header — single h1, optional count line below it. */}
-    <header class="mb-10 md:mb-14">
-      <h1 class="t-h1 text-fg">{heading}</h1>
-      {
-        showCount && (
-          <p
-            class="t-body text-muted mt-3"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            {countLabel}
-          </p>
-        )
-      }
-    </header>
-
-    {
-      /*
-      Three states under the header:
-        1. No query — calm prompt + link to /products.
-        2. Query + no results — copy with the query echoed back + link.
-        3. Query + results — grid + pagination.
-      The "loading" copy is included as ARIA-only text on the no-results
-      state so a transient build-time empty (API down at build) still
-      communicates the in-flight nature instead of reading as a hard
-      "nothing matched". See README's resilience section.
-    */
-    }
-    {
-      !hasQuery && (
-        <section class="max-w-[480px]">
-          <p class="t-body text-fg">{t("search.empty.headline")}</p>
-          <p class="t-body text-muted mt-3">{t("search.empty.body")}</p>
-          <a
-            href={productsHref}
-            class="t-body text-fg hover:text-accent mt-8 inline-flex items-center gap-2 underline-offset-[6px] transition-colors duration-200 hover:underline"
-          >
-            {t("search.browse_all")} &rarr;
-          </a>
-        </section>
-      )
-    }
-
-    {
-      hasQuery && result !== null && result.items.length === 0 && (
-        <section class="max-w-[480px]">
-          {/*
-            Single combined region for screen readers: the headline gets
-            announced when results land. Polite, not assertive — the user
-            is reading the page, not waiting on an action.
-          */}
-          <div aria-live="polite" aria-atomic="true">
-            <p class="t-body text-fg">
-              {t("search.no_results.headline").replace("{query}", q)}
-            </p>
-            <p class="t-body text-muted mt-3">{t("search.no_results.body")}</p>
-          </div>
-          <a
-            href={productsHref}
-            class="t-body text-fg hover:text-accent mt-8 inline-flex items-center gap-2 underline-offset-[6px] transition-colors duration-200 hover:underline"
-          >
-            {t("search.browse_all")} &rarr;
-          </a>
-        </section>
-      )
-    }
-
-    {
-      hasQuery && result !== null && result.items.length > 0 && (
-        <>
-          {/*
-            Grid — class set mirrors `ProductGrid` island so server-rendered
-            and island-rendered listings align visually.
-          */}
-          <div
-            class="grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-3 md:gap-x-8 md:gap-y-16 lg:grid-cols-4 lg:gap-x-8 lg:gap-y-20"
-            aria-label={t("search.skeleton_aria")}
-          >
-            {result.items.map((product, index) => (
-              <ProductCard
-                product={product}
-                loading={index < 4 ? "eager" : "lazy"}
-              />
-            ))}
-          </div>
-
-          <Pagination
-            page={result.page}
-            totalPages={result.totalPages}
-            baseUrl={paginationBaseUrl}
-          />
-        </>
-      )
-    }
+    <SearchResults
+      client:load
+      apiUrl={apiUrl}
+      locale={toIntlLocale(locale)}
+      apiLocale={locale}
+      detailHrefBase={detailHrefBase}
+      productsHref={productsHref}
+      searchHref={searchHref}
+      labels={labels}
+    />
   </div>
 </BaseLayout>

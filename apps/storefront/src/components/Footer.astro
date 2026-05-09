@@ -1,9 +1,9 @@
 ---
 /**
- * Footer — sitemap-style, calm typography, with a newsletter capture column.
+ * Footer — sitemap-style, calm typography.
  *
  * Five columns on desktop (Shop / Help / About / Legal / Newsletter), three
- * on tablet with the newsletter spanning the full row, and stacked
+ * on tablet with the newsletter column spanning the full row, and stacked
  * collapsible <details> sections on mobile. The collapsibles are the Muji
  * mobile pattern — five columns of links one-on-top-of-another would be a
  * wall of text on a phone, but a sitemap also doesn't want to disappear
@@ -15,9 +15,9 @@
  * the API helper returns `[]` on failure, in which case the column quietly
  * collapses to just "All products". No empty heading, no error text.
  *
- * Newsletter signup is the only React island here. It is a v0.1 STUB
- * (no real endpoint yet) — see `islands/NewsletterSignup.tsx` for the
- * full caveat.
+ * The Newsletter column is a heading + a single "not yet available" line.
+ * No list-management service is wired up yet; we surface the absence
+ * factually rather than ship a form that drops the address on the floor.
  *
  * Below the columns sits the calm bottom edge: brand wordmark, copyright,
  * locale toggle, and a small "Made in Indonesia" line. No emoji
@@ -31,7 +31,6 @@ import {
   type Locale,
 } from "@/lib/i18n";
 import { listCategories } from "@/lib/api";
-import NewsletterSignup from "@/islands/NewsletterSignup.tsx";
 
 const locale: Locale = resolveLocale(Astro.currentLocale);
 const t = createTranslator(locale);
@@ -119,26 +118,16 @@ const legalColumn = {
 // renderings in lockstep — adding a column means one entry here.
 const linkColumns = [shopColumn, helpColumn, aboutColumn, legalColumn];
 
-// Translation strings handed to the React island. Pre-resolving on the
-// server keeps the island locale-agnostic and avoids shipping the
-// dictionary client-side.
-const newsletterLabels = {
-  heading: t("footer.newsletter.heading"),
-  description: t("footer.newsletter.description"),
-  emailLabel: t("footer.newsletter.email_label"),
-  emailPlaceholder: t("footer.newsletter.email_placeholder"),
-  submit: t("footer.newsletter.submit"),
-  success: t("footer.newsletter.success"),
-  errorInvalid: t("footer.newsletter.error_invalid"),
-};
+const newsletterHeading = t("footer.newsletter.heading");
+const newsletterUnavailable = t("footer.newsletter.unavailable");
 
 // Copyright line — t() returns a string template with `{year}`, replaced
 // at render time so the year stays current without re-translating.
 const copyrightLine = t("footer.copyright").replace("{year}", String(year));
 ---
 
-<footer class="border-line bg-cream mt-32 border-t">
-  <div class="mx-auto max-w-[1280px] px-5 py-16 md:px-8 md:py-24">
+<footer class="border-line bg-cream mt-16 border-t">
+  <div class="mx-auto max-w-[1280px] px-5 py-10 md:px-8 md:py-14">
     {
       /*
       Desktop / tablet grid. 5 columns at md+ via the explicit `md:grid-cols-5`,
@@ -147,7 +136,7 @@ const copyrightLine = t("footer.copyright").replace("{year}", String(year));
       doesn't crush. On large screens the newsletter takes a single column.
     */
     }
-    <div class="hidden gap-x-12 gap-y-12 md:grid md:grid-cols-3 lg:grid-cols-5">
+    <div class="hidden gap-x-12 gap-y-10 md:grid md:grid-cols-3 lg:grid-cols-5">
       {
         linkColumns.map((column) => (
           <nav aria-label={column.heading}>
@@ -171,10 +160,13 @@ const copyrightLine = t("footer.copyright").replace("{year}", String(year));
         /*
         Newsletter cell. Spans the full row at the md breakpoint (3 columns
         wide so it sits below the link columns), single column at lg+.
+        No list-management service is wired up yet — we surface the absence
+        as a single calm line rather than ship a form with no backend.
       */
       }
       <div class="md:col-span-3 lg:col-span-1">
-        <NewsletterSignup client:idle labels={newsletterLabels} />
+        <h2 class="t-overline text-muted">{newsletterHeading}</h2>
+        <p class="t-body text-faint mt-5">{newsletterUnavailable}</p>
       </div>
     </div>
 
@@ -183,8 +175,8 @@ const copyrightLine = t("footer.copyright").replace("{year}", String(year));
       Mobile: collapsible <details> per column. <summary> uses the same
       t-overline label as the desktop heading so the visual rhythm matches.
       A thin chevron via ::after avoids shipping an icon for one button.
-      Newsletter is NOT collapsed — it's the action we want a phone visitor
-      to actually do, so it stays expanded below the collapsibles.
+      Newsletter sits below as an expanded heading + single line; no form,
+      mirroring the desktop column.
     */
     }
     <div class="flex flex-col md:hidden">
@@ -216,7 +208,8 @@ const copyrightLine = t("footer.copyright").replace("{year}", String(year));
         ))
       }
       <div class="pt-8">
-        <NewsletterSignup client:idle labels={newsletterLabels} />
+        <h2 class="t-overline text-muted">{newsletterHeading}</h2>
+        <p class="t-body text-faint mt-3">{newsletterUnavailable}</p>
       </div>
     </div>
 
@@ -228,7 +221,7 @@ const copyrightLine = t("footer.copyright").replace("{year}", String(year));
     */
     }
     <div
-      class="border-line t-caption mt-16 flex flex-col items-start gap-4 border-t pt-8 md:flex-row md:items-center md:justify-between md:gap-6"
+      class="border-line t-caption mt-10 flex flex-col items-start gap-4 border-t pt-6 md:flex-row md:items-center md:justify-between md:gap-6"
     >
       <div
         class="text-faint flex flex-col items-start gap-1 md:flex-row md:items-center md:gap-3"
@@ -243,7 +236,7 @@ const copyrightLine = t("footer.copyright").replace("{year}", String(year));
         <div class="flex items-center gap-1">
           <a
             href={idHref}
-            aria-current={locale === "id" ? "true" : undefined}
+            aria-current={locale === "id" ? "page" : undefined}
             class:list={[
               "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
               locale === "id" ? "text-fg" : "text-faint hover:text-fg",
@@ -254,7 +247,7 @@ const copyrightLine = t("footer.copyright").replace("{year}", String(year));
           <span class="text-faint" aria-hidden="true">·</span>
           <a
             href={enHref}
-            aria-current={locale === "en" ? "true" : undefined}
+            aria-current={locale === "en" ? "page" : undefined}
             class:list={[
               "px-1 tracking-[0.05em] lowercase transition-colors duration-150",
               locale === "en" ? "text-fg" : "text-faint hover:text-fg",

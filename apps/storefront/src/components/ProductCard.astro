@@ -141,6 +141,9 @@ const cardImg = product.hasImage ? unsplashSrcset(product.imageUrl) : null;
       client:visible
       variantId={quickAddVariantId}
       variantCount={variantCount}
+      productTitle={title}
+      productImageUrl={product.hasImage ? product.imageUrl : null}
+      productImageAlt={alt}
       label={t("quick_add.label")}
       successLabel={t("quick_add.success")}
       errorLabel={t("quick_add.error")}

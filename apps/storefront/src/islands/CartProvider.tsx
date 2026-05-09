@@ -39,6 +39,7 @@ import {
 import { ApiError, createClient, type Cart } from "@mt-commerce/sdk";
 import { resolveApiUrl } from "../lib/api.js";
 import { addLineItem } from "../lib/cart-actions.js";
+import type { ProductInfo } from "../lib/cart-product-info.js";
 
 const STORAGE_KEY = "mt.cartId";
 const CART_CHANGED_EVENT = "mt:cart-changed";
@@ -65,7 +66,11 @@ export interface CartContextValue {
   error: string | null;
   /** Sum of item quantities — what the header badge displays. */
   itemCount: number;
-  addItem: (variantId: string, quantity?: number) => Promise<void>;
+  addItem: (
+    variantId: string,
+    quantity?: number,
+    productInfo?: ProductInfo,
+  ) => Promise<void>;
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   clear: () => Promise<void>;
@@ -231,7 +236,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
   }, []);
 
   const addItem = useCallback(
-    async (variantId: string, quantity = 1) => {
+    async (variantId: string, quantity = 1, productInfo?: ProductInfo) => {
       setError(null);
       setLoading(true);
       try {
@@ -248,6 +253,7 @@ export function CartProvider({ children, apiUrl }: CartProviderProps) {
           variantId,
           quantity,
           currency: DEFAULT_CURRENCY,
+          ...(productInfo ? { productInfo } : {}),
         });
         cartIdRef.current = result.cartId;
         updateCart(result.cart);

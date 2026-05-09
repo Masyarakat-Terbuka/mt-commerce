@@ -55,6 +55,15 @@ export type QuickAddButtonProps = {
    * than risk a confusing add-to-cart on an unconfigured product.
    */
   variantCount: number;
+  /**
+   * Locale-resolved product title; cached against `variantId` on add so
+   * the cart drawer can render a real label instead of the variant id.
+   */
+  productTitle: string;
+  /** Product image URL or `null` when the product has no image yet. */
+  productImageUrl: string | null;
+  /** Alt text matching `productImageUrl`; `null` when no image. */
+  productImageAlt: string | null;
   /** "Tambah ke keranjang" / "Add to cart" — also used as `aria-label`. */
   label: string;
   /** "Ditambahkan" / "Added" — sr-only announcement after a successful add. */
@@ -71,6 +80,9 @@ const ERROR_LINGER_MS = 3500;
 export default function QuickAddButton({
   variantId,
   variantCount,
+  productTitle,
+  productImageUrl,
+  productImageAlt,
   label,
   successLabel,
   errorLabel,
@@ -129,6 +141,11 @@ export default function QuickAddButton({
         cartId: null,
         variantId,
         quantity: 1,
+        productInfo: {
+          title: productTitle,
+          imageUrl: productImageUrl,
+          imageAlt: productImageAlt,
+        },
       });
       setJustAdded(true);
       openCartDrawer();
